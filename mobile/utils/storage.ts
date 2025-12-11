@@ -9,7 +9,7 @@ export const STORAGE_KEYS = {
   ACCESS_TOKEN: 'access_token',
   REFRESH_TOKEN: 'refresh_token',
   USER_DATA: 'user_data',
-  FAMILY_ID: 'family_id',
+  FAMILY_ID: 'selected_family_id',
 } as const;
 
 /**

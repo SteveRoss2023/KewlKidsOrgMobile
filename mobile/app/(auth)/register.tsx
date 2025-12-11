@@ -5,14 +5,15 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { FontAwesome } from '@expo/vector-icons';
 import AuthService, { RegisterData } from '../../services/authService';
+import AlertModal from '../../components/AlertModal';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -22,7 +23,21 @@ export default function RegisterScreen() {
     password2: '',
     display_name: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'error' | 'info' | 'warning';
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+  });
 
   const updateField = (field: keyof typeof formData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -30,32 +45,68 @@ export default function RegisterScreen() {
 
   const validateForm = (): boolean => {
     if (!formData.email.trim()) {
-      Alert.alert('Error', 'Email is required');
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: 'Email is required',
+        type: 'error',
+      });
       return false;
     }
     if (!formData.email.includes('@')) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: 'Please enter a valid email address',
+        type: 'error',
+      });
       return false;
     }
     if (!formData.password) {
-      Alert.alert('Error', 'Password is required');
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: 'Password is required',
+        type: 'error',
+      });
       return false;
     }
     if (formData.password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters');
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: 'Password must be at least 8 characters',
+        type: 'error',
+      });
       return false;
     }
     if (formData.password !== formData.password2) {
-      Alert.alert('Error', 'Passwords do not match');
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: 'Passwords do not match',
+        type: 'error',
+      });
       return false;
     }
     return true;
   };
 
   const handleRegister = async () => {
+    console.log('Register button clicked');
+    
     if (!validateForm()) {
+      console.log('Form validation failed');
       return;
     }
+
+    console.log('Starting registration with data:', {
+      email: formData.email.trim().toLowerCase(),
+      hasPassword: !!formData.password,
+      hasPassword2: !!formData.password2,
+      display_name: formData.display_name.trim() || undefined,
+    });
+    console.log('API URL:', process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8900/api (web) or http://10.0.0.25:8900/api (native)');
 
     setLoading(true);
     try {
@@ -66,19 +117,39 @@ export default function RegisterScreen() {
         display_name: formData.display_name.trim() || undefined,
       };
 
-      await AuthService.register(registerData);
+      console.log('Calling AuthService.register...');
+      const response = await AuthService.register(registerData);
+      console.log('Registration successful:', response);
       
-      Alert.alert('Success', 'Account created successfully!', [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/(tabs)'),
+      // Show success modal
+      setAlertModal({
+        visible: true,
+        title: 'Success',
+        message: 'Account created successfully!',
+        type: 'success',
+        onConfirm: () => {
+          setAlertModal({ ...alertModal, visible: false });
+          router.replace('/(tabs)');
         },
-      ]);
+      });
     } catch (error: any) {
-      Alert.alert(
-        'Registration Failed',
-        error.message || 'Unable to create account. Please try again.'
-      );
+      console.error('Registration error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        status: error.status,
+        data: error.data,
+        stack: error.stack,
+      });
+      
+      const errorMessage = error.message || error.data?.detail || error.data?.message || 'Unable to create account. Please try again.';
+      
+      // Show error modal
+      setAlertModal({
+        visible: true,
+        title: 'Registration Failed',
+        message: errorMessage,
+        type: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -118,28 +189,54 @@ export default function RegisterScreen() {
               editable={!loading}
             />
 
-            <TextInput
-              style={styles.input}
-              placeholder="Password *"
-              value={formData.password}
-              onChangeText={(value) => updateField('password', value)}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
-            />
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Password *"
+                value={formData.password}
+                onChangeText={(value) => updateField('password', value)}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword(!showPassword)}
+                disabled={loading}
+              >
+                <FontAwesome
+                  name={showPassword ? 'eye-slash' : 'eye'}
+                  size={20}
+                  color="#666"
+                />
+              </TouchableOpacity>
+            </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Confirm Password *"
-              value={formData.password2}
-              onChangeText={(value) => updateField('password2', value)}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
-              onSubmitEditing={handleRegister}
-            />
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Confirm Password *"
+                value={formData.password2}
+                onChangeText={(value) => updateField('password2', value)}
+                secureTextEntry={!showPassword2}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+                onSubmitEditing={handleRegister}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword2(!showPassword2)}
+                disabled={loading}
+              >
+                <FontAwesome
+                  name={showPassword2 ? 'eye-slash' : 'eye'}
+                  size={20}
+                  color="#666"
+                />
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
@@ -165,6 +262,15 @@ export default function RegisterScreen() {
           </View>
         </View>
       </ScrollView>
+      
+      <AlertModal
+        visible={alertModal.visible}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ ...alertModal, visible: false })}
+        onConfirm={alertModal.onConfirm}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -206,6 +312,26 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+  },
+  passwordContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  passwordInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 16,
+    paddingRight: 50,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    padding: 4,
+    zIndex: 1,
   },
   button: {
     backgroundColor: '#007AFF',

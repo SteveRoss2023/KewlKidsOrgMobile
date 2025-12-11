@@ -221,6 +221,40 @@ class FamilyService {
       throw handleAPIError(error as any);
     }
   }
+
+  /**
+   * Cancel an invitation
+   */
+  async cancelInvitation(invitationId: number): Promise<void> {
+    try {
+      await apiClient.post(`/invitations/${invitationId}/cancel/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Remove a member from a family
+   */
+  async removeMember(familyId: number, memberId: number): Promise<void> {
+    try {
+      await apiClient.delete(`/families/${familyId}/members/${memberId}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Update a member's role
+   */
+  async updateMemberRole(familyId: number, memberId: number, role: 'admin' | 'member' | 'child'): Promise<Member> {
+    try {
+      const response = await apiClient.patch<Member>(`/families/${familyId}/members/${memberId}/`, { role });
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
 }
 
 export default new FamilyService();

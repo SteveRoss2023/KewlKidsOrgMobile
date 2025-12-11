@@ -126,8 +126,16 @@ class RegisterView(CreateAPIView):
         # Generate tokens for auto-login
         refresh = RefreshToken.for_user(user)
 
+        # Build user data response
+        user_data = {
+            'id': user.id,
+            'email': user.email,
+        }
+        if hasattr(user, 'profile') and user.profile and user.profile.display_name:
+            user_data['display_name'] = user.profile.display_name
+
         response_data = {
-            'user': RegisterSerializer(user).data,
+            'user': user_data,
             'access': str(refresh.access_token),
             'refresh': str(refresh),
             'email': user.email,

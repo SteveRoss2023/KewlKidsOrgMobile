@@ -3,6 +3,8 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AuthService from '../../services/authService';
 import { FontAwesome } from '@expo/vector-icons';
+import GlobalNavBar from '../../components/GlobalNavBar';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface FeatureCard {
   id: string;
@@ -15,6 +17,7 @@ interface FeatureCard {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
@@ -145,29 +148,19 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <GlobalNavBar />
+      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.headerTop}>
           <View style={styles.titleContainer}>
-            <Text style={styles.title} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
           </View>
-          <TouchableOpacity 
-            onPress={() => {
-              console.log('Logout button clicked');
-              handleLogout();
-            }} 
-            style={styles.logoutButton}
-            activeOpacity={0.7}
-            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-          >
-            <FontAwesome name="sign-out" size={20} color="#FF3B30" />
-          </TouchableOpacity>
         </View>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Manage your family's activities, events, and communication in one place
         </Text>
         {userEmail && (
-          <Text style={styles.userEmail}>{userEmail}</Text>
+          <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{userEmail}</Text>
         )}
       </View>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
@@ -176,7 +169,7 @@ export default function HomeScreen() {
         {cards.filter(card => !card.hidden).map(card => (
           <TouchableOpacity
             key={card.id}
-            style={styles.card}
+            style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => handleCardPress(card.id)}
             activeOpacity={0.7}
           >
@@ -184,10 +177,10 @@ export default function HomeScreen() {
               <Text style={styles.iconEmoji}>{card.icon}</Text>
             </View>
             <View style={styles.cardContent}>
-              <Text style={styles.cardTitle}>{card.title}</Text>
-              <Text style={styles.cardDescription}>{card.description}</Text>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>{card.title}</Text>
+              <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>{card.description}</Text>
             </View>
-            <FontAwesome name="chevron-right" size={16} color="#999" style={styles.cardArrow} />
+            <FontAwesome name="chevron-right" size={16} color={colors.textSecondary} style={styles.cardArrow} />
           </TouchableOpacity>
         ))}
       </View>
@@ -199,7 +192,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   scrollView: {
     flex: 1,
@@ -211,44 +203,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'web' ? 20 : 50,
-    backgroundColor: '#fff',
+    paddingTop: Platform.OS === 'web' ? 20 : 16,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   headerTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
     width: '100%',
     marginBottom: 8,
     paddingHorizontal: 4,
   },
   titleContainer: {
-    flex: 1,
-    paddingRight: 12,
-    marginRight: 8,
+    width: '100%',
   },
   title: {
     fontSize: Platform.OS === 'web' ? 24 : 20,
     fontWeight: 'bold',
-    color: '#333',
     textAlign: 'left',
     lineHeight: Platform.OS === 'web' ? 28 : 24,
   },
-  logoutButton: {
-    padding: 8,
-    minWidth: 40,
-    minHeight: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    flexShrink: 0,
-  },
   subtitle: {
     fontSize: 14,
-    color: '#666',
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 20,
@@ -256,27 +230,28 @@ const styles = StyleSheet.create({
   },
   userEmail: {
     fontSize: 12,
-    color: '#999',
     textAlign: 'center',
     marginTop: 4,
   },
   cardsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
     gap: 12,
   },
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
+    width: '48%',
+    minHeight: 140,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   cardIcon: {
     width: 48,
@@ -284,27 +259,28 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginBottom: 12,
   },
   iconEmoji: {
     fontSize: 24,
   },
   cardContent: {
     flex: 1,
+    width: '100%',
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 4,
   },
   cardDescription: {
     fontSize: 12,
-    color: '#666',
     lineHeight: 16,
+    flex: 1,
   },
   cardArrow: {
-    marginLeft: 8,
+    alignSelf: 'flex-end',
+    marginTop: 8,
   },
 });
 
