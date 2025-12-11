@@ -47,7 +47,10 @@ export default function FamilySelector() {
         activeOpacity={0.7}
       >
         <View style={[styles.colorIndicator, { backgroundColor: selectedFamily?.color || colors.primary }]} />
-        <Text style={[styles.familyName, { color: colors.text }]} numberOfLines={1}>
+        <Text 
+          style={[styles.familyName, { color: colors.text }]} 
+          numberOfLines={Platform.OS === 'web' ? 1 : undefined}
+        >
           {selectedFamily?.name || 'Select Family'}
         </Text>
         <FontAwesome name="chevron-down" size={14} color={colors.textSecondary} style={styles.chevron} />
@@ -116,10 +119,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minWidth: 120,
-    maxWidth: 200,
+    ...Platform.select({
+      web: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        minWidth: 120,
+        maxWidth: 200,
+      },
+      default: {
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        flex: 1,
+        minWidth: 0,
+      },
+    }),
     borderWidth: 1,
   },
   colorIndicator: {

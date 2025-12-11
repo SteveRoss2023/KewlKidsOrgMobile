@@ -270,51 +270,145 @@ const styles = StyleSheet.create({
   },
   memberCard: {
     borderRadius: 12,
-    padding: 16,
-    margin: 16,
-    marginBottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    ...Platform.select({
+      web: {
+        padding: 16,
+        margin: 16,
+        marginBottom: 0,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+      },
+      default: {
+        padding: 20,
+        marginHorizontal: 16,
+        marginVertical: 8,
+        flexDirection: 'column',
+        gap: 16,
+      },
+    }),
   },
   memberInfo: {
-    flex: 1,
+    ...Platform.select({
+      web: {
+        flex: 1,
+      },
+      default: {
+        width: '100%',
+      },
+    }),
   },
   memberName: {
-    fontSize: 16,
+    ...Platform.select({
+      web: {
+        fontSize: 16,
+      },
+      default: {
+        fontSize: 18,
+      },
+    }),
     fontWeight: '600',
     marginBottom: 4,
   },
   memberEmail: {
-    fontSize: 14,
+    ...Platform.select({
+      web: {
+        fontSize: 14,
+      },
+      default: {
+        fontSize: 15,
+      },
+    }),
     marginBottom: 4,
   },
   memberJoined: {
-    fontSize: 12,
+    ...Platform.select({
+      web: {
+        fontSize: 12,
+      },
+      default: {
+        fontSize: 13,
+      },
+    }),
   },
   memberActions: {
-    alignItems: 'flex-end',
-    gap: 8,
+    ...Platform.select({
+      web: {
+        alignItems: 'flex-end',
+        gap: 8,
+      },
+      default: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '100%',
+        gap: 8,
+      },
+    }),
   },
   roleBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    ...Platform.select({
+      web: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+      },
+      default: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+      },
+    }),
     borderRadius: 12,
   },
   roleText: {
     color: '#fff',
-    fontSize: 12,
+    ...Platform.select({
+      web: {
+        fontSize: 12,
+      },
+      default: {
+        fontSize: 13,
+      },
+    }),
     fontWeight: '600',
   },
   actionButtons: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 8,
+    ...Platform.select({
+      web: {
+        marginTop: 8,
+      },
+      default: {
+        marginTop: 0,
+      },
+    }),
   },
   roleButton: {
-    padding: 8,
+    ...Platform.select({
+      web: {
+        padding: 8,
+      },
+      default: {
+        padding: 12,
+        minWidth: 44,
+        minHeight: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+      },
+    }),
   },
   removeButton: {
-    padding: 8,
+    ...Platform.select({
+      web: {
+        padding: 8,
+      },
+      default: {
+        padding: 12,
+        minWidth: 44,
+        minHeight: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+      },
+    }),
   },
   modalOverlay: {
     flex: 1,

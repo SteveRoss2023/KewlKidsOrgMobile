@@ -178,7 +178,7 @@ export default function FamilyDetailScreen() {
           >
             <FontAwesome
               name={tab.icon as any}
-              size={16}
+              size={Platform.OS === 'web' ? 16 : 16}
               color={activeTab === tab.id ? colors.primary : colors.textSecondary}
             />
             <Text
@@ -299,8 +299,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 6,
+    ...Platform.select({
+      web: {
+        paddingVertical: 12,
+        gap: 6,
+      },
+      default: {
+        paddingVertical: 16,
+        gap: 8,
+        paddingHorizontal: 8,
+      },
+    }),
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
@@ -308,7 +317,14 @@ const styles = StyleSheet.create({
     // Applied inline
   },
   tabLabel: {
-    fontSize: 12,
+    ...Platform.select({
+      web: {
+        fontSize: 12,
+      },
+      default: {
+        fontSize: 11,
+      },
+    }),
     fontWeight: '500',
   },
   tabLabelActive: {

@@ -8,7 +8,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import FamilySelector from './FamilySelector';
 import { useTheme } from '../contexts/ThemeContext';
 import AuthService from '../services/authService';
@@ -38,7 +38,11 @@ export default function GlobalNavBar() {
           style={styles.darkModeButton}
           activeOpacity={0.7}
         >
-          <FontAwesome name={theme === 'dark' ? 'sun-o' : 'moon-o'} size={18} color={colors.text} />
+          <Ionicons 
+            name={theme === 'dark' ? 'sunny' : 'moon'} 
+            size={22} 
+            color={theme === 'dark' ? '#FFB800' : '#6366F1'} 
+          />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={handleProfilePress}
@@ -87,6 +91,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
+    ...Platform.select({
+      default: {
+        minWidth: 0,
+      },
+    }),
   },
   rightSection: {
     flexDirection: 'row',
