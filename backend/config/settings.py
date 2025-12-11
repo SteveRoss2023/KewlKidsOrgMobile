@@ -30,8 +30,10 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-)91^p69=om&v!egvdrva49$c@i
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,10.0.0.25,kewlkidsorganizermobile.ngrok.app,*.ngrok.app,*.ngrok-free.app').split(',')
 
+# Custom User Model
+AUTH_USER_MODEL = 'api.User'
 
 # Application definition
 
@@ -44,6 +46,7 @@ INSTALLED_APPS = [
     
     # Local apps (must come before staticfiles to override runserver)
     'api',
+    'families',
     
     'django.contrib.staticfiles',
     
@@ -52,6 +55,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'channels',
+    'encrypted_model_fields',
 ]
 
 MIDDLEWARE = [
@@ -173,12 +177,17 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:8081,http://localhost:19000,http://localhost:19006'
-).split(',')
-
-CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'True') == 'True'
+# In development, allow all origins for mobile testing
+# In production, use specific allowed origins
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
+else:
+    CORS_ALLOWED_ORIGINS = os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:8081,http://localhost:19000,http://localhost:19006'
+    ).split(',')
+    CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'True') == 'True'
 
 # Channels Configuration (for WebSockets)
 ASGI_APPLICATION = 'config.asgi.application'
@@ -192,6 +201,16 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+# Encryption Settings (for encrypted_model_fields)
+# Generate a key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# If FERNET_KEY is not set, generate a default one (for development only - use proper key in production)
+FERNET_KEY = os.getenv('FERNET_KEY', '')
+if not FERNET_KEY:
+    # Generate a default key for development (this should be in .env for production)
+    from cryptography.fernet import Fernet
+    FERNET_KEY = Fernet.generate_key().decode()
+FIELD_ENCRYPTION_KEY = FERNET_KEY
 
 # For development without Redis, use in-memory channel layer:
 # CHANNEL_LAYERS = {
