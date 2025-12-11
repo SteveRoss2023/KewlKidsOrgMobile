@@ -8,3 +8,4 @@ echo Virtual environment activated!
 python --version
 cd /d "%~dp0"
 
+

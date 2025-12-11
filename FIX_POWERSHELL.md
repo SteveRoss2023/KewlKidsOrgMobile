@@ -39,3 +39,4 @@ cd "C:\Users\steve_80f2z1j\OneDrive\Documents\Development\Projects\Cursor Projec
 powershell -ExecutionPolicy Bypass -File setup_powershell_profile.ps1
 ```
 
+
