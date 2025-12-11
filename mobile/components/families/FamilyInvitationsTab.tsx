@@ -14,6 +14,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { Invitation } from '../../services/familyService';
 import FamilyService from '../../services/familyService';
 import { APIError } from '../../services/api';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface FamilyInvitationsTabProps {
   familyId: number;
@@ -26,6 +27,7 @@ export default function FamilyInvitationsTab({
   currentUserRole,
   onInvitationsUpdate,
 }: FamilyInvitationsTabProps) {
+  const { colors } = useTheme();
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -109,21 +111,21 @@ export default function FamilyInvitationsTab({
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       {canInvite && (
         <View style={styles.inviteSection}>
           <TouchableOpacity
-            style={styles.inviteButton}
+            style={[styles.inviteButton, { backgroundColor: colors.primary }]}
             onPress={() => setShowInviteModal(true)}
           >
-            <FontAwesome name="user-plus" size={18} color="#007AFF" />
+            <FontAwesome name="user-plus" size={18} color="#fff" />
             <Text style={styles.inviteButtonText}>Send Invitation</Text>
           </TouchableOpacity>
         </View>
@@ -131,17 +133,17 @@ export default function FamilyInvitationsTab({
 
       {invitations.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No invitations</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No invitations</Text>
         </View>
       ) : (
         invitations.map((invitation) => (
-          <View key={invitation.id} style={styles.invitationCard}>
+          <View key={invitation.id} style={[styles.invitationCard, { backgroundColor: colors.surface }]}>
             <View style={styles.invitationInfo}>
-              <Text style={styles.invitationEmail}>{invitation.email}</Text>
-              <Text style={styles.invitationDetails}>
+              <Text style={[styles.invitationEmail, { color: colors.text }]}>{invitation.email}</Text>
+              <Text style={[styles.invitationDetails, { color: colors.textSecondary }]}>
                 Role: {invitation.role.toUpperCase()} • Invited by: {invitation.invited_by_email}
               </Text>
-              <Text style={styles.invitationDate}>
+              <Text style={[styles.invitationDate, { color: colors.textSecondary }]}>
                 Sent: {new Date(invitation.created_at).toLocaleDateString()}
                 {invitation.expires_at && (
                   <> • Expires: {new Date(invitation.expires_at).toLocaleDateString()}</>
@@ -164,11 +166,11 @@ export default function FamilyInvitationsTab({
                     style={styles.cancelButton}
                     onPress={() => handleCancelInvite(invitation.id)}
                   >
-                    <FontAwesome name="times" size={14} color="#FF3B30" />
+                    <FontAwesome name="times" size={14} color={colors.error} />
                   </TouchableOpacity>
                 )}
               {cancellingId === invitation.id && (
-                <ActivityIndicator size="small" color="#FF3B30" />
+                <ActivityIndicator size="small" color={colors.error} />
               )}
             </View>
           </View>
@@ -183,11 +185,12 @@ export default function FamilyInvitationsTab({
         onRequestClose={() => setShowInviteModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Send Invitation</Text>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Send Invitation</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Email address"
+              placeholderTextColor={colors.textSecondary}
               value={inviteEmail}
               onChangeText={setInviteEmail}
               keyboardType="email-address"
@@ -195,34 +198,35 @@ export default function FamilyInvitationsTab({
               autoCorrect={false}
               editable={!sendingInvite}
             />
-            <Text style={styles.label}>Role</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Role</Text>
             <View style={styles.roleOptions}>
               {(['admin', 'member', 'child'] as const).map((role) => (
                 <TouchableOpacity
                   key={role}
                   style={[
                     styles.roleOption,
-                    inviteRole === role && styles.roleOptionSelected,
+                    { backgroundColor: colors.background, borderColor: colors.border },
+                    inviteRole === role && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
                   ]}
                   onPress={() => setInviteRole(role)}
                 >
-                  <Text style={styles.roleOptionText}>{role.toUpperCase()}</Text>
+                  <Text style={[styles.roleOptionText, { color: colors.text }]}>{role.toUpperCase()}</Text>
                   {inviteRole === role && (
-                    <FontAwesome name="check" size={16} color="#007AFF" />
+                    <FontAwesome name="check" size={16} color={colors.primary} />
                   )}
                 </TouchableOpacity>
               ))}
             </View>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
+                style={[styles.modalButton, { backgroundColor: colors.border }]}
                 onPress={() => setShowInviteModal(false)}
                 disabled={sendingInvite}
               >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                <Text style={[styles.modalButtonCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonConfirm]}
+                style={[styles.modalButton, { backgroundColor: colors.primary }]}
                 onPress={handleSendInvite}
                 disabled={sendingInvite || !inviteEmail.trim()}
               >
@@ -243,7 +247,6 @@ export default function FamilyInvitationsTab({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   inviteSection: {
     padding: 16,
@@ -252,7 +255,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#007AFF',
     borderRadius: 12,
     padding: 16,
     gap: 8,
@@ -268,10 +270,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#999',
   },
   invitationCard: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     margin: 16,
@@ -285,17 +285,14 @@ const styles = StyleSheet.create({
   invitationEmail: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 4,
   },
   invitationDetails: {
     fontSize: 14,
-    color: '#666',
     marginBottom: 4,
   },
   invitationDate: {
     fontSize: 12,
-    color: '#999',
   },
   invitationActions: {
     alignItems: 'flex-end',
@@ -322,7 +319,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     width: '100%',
@@ -343,22 +339,18 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 20,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
     marginBottom: 20,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 12,
   },
   roleOptions: {
@@ -371,18 +363,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
-    backgroundColor: '#f9f9f9',
   },
   roleOptionSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: '#f0f7ff',
+    // Applied inline
   },
   roleOptionText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -397,15 +385,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalButtonCancel: {
-    backgroundColor: '#f0f0f0',
+    // Applied inline
   },
   modalButtonCancelText: {
-    color: '#333',
     fontSize: 16,
     fontWeight: '600',
   },
   modalButtonConfirm: {
-    backgroundColor: '#007AFF',
+    // Applied inline
   },
   modalButtonConfirmText: {
     color: '#fff',

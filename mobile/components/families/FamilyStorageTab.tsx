@@ -1,12 +1,14 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Family } from '../../services/familyService';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface FamilyStorageTabProps {
   family: Family;
 }
 
 export default function FamilyStorageTab({ family }: FamilyStorageTabProps) {
+  const { colors } = useTheme();
   // TODO: Implement storage usage tracking when backend endpoints are available
   // For now, show placeholder
 
@@ -21,28 +23,28 @@ export default function FamilyStorageTab({ family }: FamilyStorageTabProps) {
   const totalCount = 0;
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>Storage Summary</Text>
-        <Text style={styles.summaryTotal}>{totalSize}</Text>
-        <Text style={styles.summaryCount}>{totalCount} files</Text>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.summaryTitle, { color: colors.textSecondary }]}>Storage Summary</Text>
+        <Text style={[styles.summaryTotal, { color: colors.text }]}>{totalSize}</Text>
+        <Text style={[styles.summaryCount, { color: colors.textSecondary }]}>{totalCount} files</Text>
       </View>
 
-      <View style={styles.breakdownSection}>
-        <Text style={styles.sectionTitle}>Storage Breakdown</Text>
+      <View style={[styles.breakdownSection, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Storage Breakdown</Text>
         {storageData.map((item, index) => (
-          <View key={index} style={styles.storageItem}>
+          <View key={index} style={[styles.storageItem, { borderBottomColor: colors.border }]}>
             <View style={styles.storageItemInfo}>
-              <Text style={styles.storageItemType}>{item.type}</Text>
-              <Text style={styles.storageItemCount}>{item.count} files</Text>
+              <Text style={[styles.storageItemType, { color: colors.text }]}>{item.type}</Text>
+              <Text style={[styles.storageItemCount, { color: colors.textSecondary }]}>{item.count} files</Text>
             </View>
-            <Text style={styles.storageItemSize}>{item.size}</Text>
+            <Text style={[styles.storageItemSize, { color: colors.primary }]}>{item.size}</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.placeholder}>
-        <Text style={styles.placeholderText}>
+        <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
           Storage tracking will be available once document management is implemented.
         </Text>
       </View>
@@ -53,10 +55,8 @@ export default function FamilyStorageTab({ family }: FamilyStorageTabProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   summaryCard: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     margin: 16,
@@ -64,21 +64,17 @@ const styles = StyleSheet.create({
   },
   summaryTitle: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 8,
   },
   summaryTotal: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 4,
   },
   summaryCount: {
     fontSize: 14,
-    color: '#999',
   },
   breakdownSection: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     margin: 16,
@@ -87,7 +83,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 16,
   },
   storageItem: {
@@ -96,7 +91,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   storageItemInfo: {
     flex: 1,
@@ -104,17 +98,14 @@ const styles = StyleSheet.create({
   storageItemType: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 4,
   },
   storageItemCount: {
     fontSize: 14,
-    color: '#666',
   },
   storageItemSize: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#007AFF',
   },
   placeholder: {
     padding: 40,
@@ -122,7 +113,6 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     fontSize: 14,
-    color: '#999',
     textAlign: 'center',
     lineHeight: 20,
   },

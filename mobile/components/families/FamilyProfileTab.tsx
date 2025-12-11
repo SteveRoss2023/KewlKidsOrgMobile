@@ -13,6 +13,7 @@ import { Family } from '../../services/familyService';
 import FamilyService from '../../services/familyService';
 import { APIError } from '../../services/api';
 import ColorPicker from '../ColorPicker';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface FamilyProfileTabProps {
   family: Family;
@@ -36,6 +37,7 @@ export default function FamilyProfileTab({
   currentUserRole,
   onFamilyUpdate,
 }: FamilyProfileTabProps) {
+  const { colors } = useTheme();
   const [editFamilyName, setEditFamilyName] = useState(family.name);
   const [editFamilyColor, setEditFamilyColor] = useState(family.color);
   const [updating, setUpdating] = useState(false);
@@ -69,30 +71,31 @@ export default function FamilyProfileTab({
 
   if (canEdit) {
     return (
-      <ScrollView style={styles.container}>
-        <View style={styles.form}>
-          <Text style={styles.label}>Family Name</Text>
+      <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.form, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.label, { color: colors.text }]}>Family Name</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
             value={editFamilyName}
             onChangeText={setEditFamilyName}
             placeholder="Family name"
+            placeholderTextColor={colors.textSecondary}
             editable={!updating}
           />
 
-          <Text style={styles.label}>Color</Text>
+          <Text style={[styles.label, { color: colors.text }]}>Color</Text>
           <TouchableOpacity
-            style={styles.colorPickerButton}
+            style={[styles.colorPickerButton, { borderColor: colors.border }]}
             onPress={() => setColorPickerOpen(!colorPickerOpen)}
             disabled={updating}
           >
             <View style={styles.colorPickerHeader}>
-              <View style={[styles.colorSwatch, { backgroundColor: editFamilyColor }]} />
-              <Text style={styles.colorPickerText}>Select Color</Text>
+              <View style={[styles.colorSwatch, { backgroundColor: editFamilyColor, borderColor: colors.border }]} />
+              <Text style={[styles.colorPickerText, { color: colors.text }]}>Select Color</Text>
               <FontAwesome
                 name={colorPickerOpen ? 'chevron-up' : 'chevron-down'}
                 size={14}
-                color="#666"
+                color={colors.textSecondary}
               />
             </View>
           </TouchableOpacity>
@@ -108,7 +111,7 @@ export default function FamilyProfileTab({
           )}
 
           <TouchableOpacity
-            style={[styles.saveButton, updating && styles.saveButtonDisabled]}
+            style={[styles.saveButton, { backgroundColor: colors.primary }, updating && styles.saveButtonDisabled]}
             onPress={handleUpdate}
             disabled={updating || !editFamilyName.trim()}
           >
@@ -124,28 +127,28 @@ export default function FamilyProfileTab({
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.viewOnly}>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Name:</Text>
-          <Text style={styles.infoValue}>{family.name}</Text>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.viewOnly, { backgroundColor: colors.surface }]}>
+        <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Name:</Text>
+          <Text style={[styles.infoValue, { color: colors.text }]}>{family.name}</Text>
         </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Color:</Text>
+        <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Color:</Text>
           <View style={styles.colorInfo}>
-            <View style={[styles.colorSwatch, { backgroundColor: family.color }]} />
-            <Text style={styles.infoValue}>{family.color}</Text>
+            <View style={[styles.colorSwatch, { backgroundColor: family.color, borderColor: colors.border }]} />
+            <Text style={[styles.infoValue, { color: colors.text }]}>{family.color}</Text>
           </View>
         </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Created:</Text>
-          <Text style={styles.infoValue}>
+        <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Created:</Text>
+          <Text style={[styles.infoValue, { color: colors.text }]}>
             {new Date(family.created_at).toLocaleDateString()}
           </Text>
         </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Updated:</Text>
-          <Text style={styles.infoValue}>
+        <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Updated:</Text>
+          <Text style={[styles.infoValue, { color: colors.text }]}>
             {new Date(family.updated_at).toLocaleDateString()}
           </Text>
         </View>
@@ -157,10 +160,8 @@ export default function FamilyProfileTab({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   form: {
-    backgroundColor: '#fff',
     padding: 20,
     margin: 16,
     borderRadius: 12,
@@ -168,21 +169,17 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 8,
     marginTop: 16,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
   },
   colorPickerButton: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
   },
@@ -196,18 +193,15 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ddd',
   },
   colorPickerText: {
     flex: 1,
     fontSize: 16,
-    color: '#333',
   },
   colorPickerContainer: {
     marginTop: 12,
   },
   saveButton: {
-    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -222,7 +216,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   viewOnly: {
-    backgroundColor: '#fff',
     padding: 20,
     margin: 16,
     borderRadius: 12,
@@ -231,17 +224,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   infoLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
     width: 100,
   },
   infoValue: {
     fontSize: 16,
-    color: '#333',
     flex: 1,
   },
   colorInfo: {

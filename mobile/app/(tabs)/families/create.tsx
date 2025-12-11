@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import FamilyService from '../../../services/familyService';
 import { APIError } from '../../../../services/api';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const COLORS = [
   '#3b82f6', // blue
@@ -17,6 +18,7 @@ const COLORS = [
 
 export default function CreateFamilyScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [name, setName] = useState('');
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
   const [loading, setLoading] = useState(false);
@@ -43,18 +45,19 @@ export default function CreateFamilyScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.form}>
-        <Text style={styles.label}>Family Name</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.form, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.label, { color: colors.text }]}>Family Name</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
           placeholder="Enter family name"
+          placeholderTextColor={colors.textSecondary}
           value={name}
           onChangeText={setName}
           autoCapitalize="words"
         />
 
-        <Text style={styles.label}>Color</Text>
+        <Text style={[styles.label, { color: colors.text }]}>Color</Text>
         <View style={styles.colorPicker}>
           {COLORS.map((color) => (
             <TouchableOpacity
@@ -62,7 +65,7 @@ export default function CreateFamilyScreen() {
               style={[
                 styles.colorOption,
                 { backgroundColor: color },
-                selectedColor === color && styles.colorOptionSelected,
+                selectedColor === color && { borderColor: colors.text },
               ]}
               onPress={() => setSelectedColor(color)}
             >
@@ -74,7 +77,7 @@ export default function CreateFamilyScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.createButton, loading && styles.createButtonDisabled]}
+          style={[styles.createButton, { backgroundColor: colors.primary }, loading && styles.createButtonDisabled]}
           onPress={handleCreate}
           disabled={loading}
         >
@@ -92,28 +95,23 @@ export default function CreateFamilyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
     padding: 20,
   },
   form: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 20,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 8,
     marginTop: 16,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
   },
   colorPicker: {
     flexDirection: 'row',
@@ -132,7 +130,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   colorOptionSelected: {
-    borderColor: '#333',
+    // Applied inline
   },
   checkmark: {
     color: '#fff',
@@ -140,7 +138,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   createButton: {
-    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',

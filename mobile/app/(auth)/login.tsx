@@ -14,9 +14,11 @@ import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthService, { LoginCredentials } from '../../services/authService';
 import AlertModal from '../../components/AlertModal';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -72,7 +74,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -80,13 +82,14 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.content}>
-          <Text style={styles.title}>KewlKids Organizer</Text>
-          <Text style={styles.subtitle}>Sign in to your account</Text>
+          <Text style={[styles.title, { color: colors.text }]}>KewlKids Organizer</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in to your account</Text>
 
           <View style={styles.form}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Email"
+              placeholderTextColor={colors.textSecondary}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -97,8 +100,9 @@ export default function LoginScreen() {
 
             <View style={styles.passwordContainer}>
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                 placeholder="Password"
+                placeholderTextColor={colors.textSecondary}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -115,13 +119,13 @@ export default function LoginScreen() {
                 <FontAwesome
                   name={showPassword ? 'eye-slash' : 'eye'}
                   size={20}
-                  color="#666"
+                  color={colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
+              style={[styles.button, { backgroundColor: colors.primary }, loading && styles.buttonDisabled]}
               onPress={handleLogin}
               disabled={loading}
             >
@@ -137,8 +141,8 @@ export default function LoginScreen() {
               onPress={() => router.push('/(auth)/register')}
               disabled={loading}
             >
-              <Text style={styles.linkText}>
-                Don't have an account? <Text style={styles.linkTextBold}>Sign up</Text>
+              <Text style={[styles.linkText, { color: colors.textSecondary }]}>
+                Don't have an account? <Text style={[styles.linkTextBold, { color: colors.primary }]}>Sign up</Text>
               </Text>
             </TouchableOpacity>
           </View>
@@ -159,7 +163,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   scrollContent: {
     flexGrow: 1,
@@ -173,38 +176,32 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#333',
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 40,
-    color: '#666',
   },
   form: {
     width: '100%',
   },
   input: {
-    backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 16,
     fontSize: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   passwordContainer: {
     position: 'relative',
     marginBottom: 16,
   },
   passwordInput: {
-    backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 16,
     paddingRight: 50,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   eyeButton: {
     position: 'absolute',
@@ -214,7 +211,6 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   button: {
-    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -233,11 +229,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   linkText: {
-    color: '#666',
     fontSize: 14,
   },
   linkTextBold: {
-    color: '#007AFF',
     fontWeight: '600',
   },
 });

@@ -13,6 +13,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { Member } from '../../services/familyService';
 import FamilyService from '../../services/familyService';
 import { APIError } from '../../services/api';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface FamilyMembersTabProps {
   familyId: number;
@@ -29,6 +30,7 @@ export default function FamilyMembersTab({
   currentUserId,
   onMembersUpdate,
 }: FamilyMembersTabProps) {
+  const { colors } = useTheme();
   const [removingMemberId, setRemovingMemberId] = useState<number | null>(null);
   const [changingRoleId, setChangingRoleId] = useState<number | null>(null);
   const [showRemoveModal, setShowRemoveModal] = useState(false);
@@ -104,10 +106,10 @@ export default function FamilyMembersTab({
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       {members.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No members found</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No members found</Text>
         </View>
       ) : (
         members.map((member) => {
@@ -116,13 +118,13 @@ export default function FamilyMembersTab({
             canManageMembers && !isCurrentUser && member.role !== 'owner';
 
           return (
-            <View key={member.id} style={styles.memberCard}>
+            <View key={member.id} style={[styles.memberCard, { backgroundColor: colors.surface }]}>
               <View style={styles.memberInfo}>
-                <Text style={styles.memberName}>
+                <Text style={[styles.memberName, { color: colors.text }]}>
                   {member.user_display_name || member.user_email}
                 </Text>
-                <Text style={styles.memberEmail}>{member.user_email}</Text>
-                <Text style={styles.memberJoined}>
+                <Text style={[styles.memberEmail, { color: colors.textSecondary }]}>{member.user_email}</Text>
+                <Text style={[styles.memberJoined, { color: colors.textSecondary }]}>
                   Joined: {new Date(member.joined_at).toLocaleDateString()}
                 </Text>
               </View>
@@ -138,9 +140,9 @@ export default function FamilyMembersTab({
                       disabled={changingRoleId === member.id}
                     >
                       {changingRoleId === member.id ? (
-                        <ActivityIndicator size="small" color="#007AFF" />
+                        <ActivityIndicator size="small" color={colors.primary} />
                       ) : (
-                        <FontAwesome name="edit" size={16} color="#007AFF" />
+                        <FontAwesome name="edit" size={16} color={colors.primary} />
                       )}
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -149,9 +151,9 @@ export default function FamilyMembersTab({
                       disabled={removingMemberId === member.id}
                     >
                       {removingMemberId === member.id ? (
-                        <ActivityIndicator size="small" color="#FF3B30" />
+                        <ActivityIndicator size="small" color={colors.error} />
                       ) : (
-                        <FontAwesome name="trash" size={16} color="#FF3B30" />
+                        <FontAwesome name="trash" size={16} color={colors.error} />
                       )}
                     </TouchableOpacity>
                   </View>
@@ -170,20 +172,20 @@ export default function FamilyMembersTab({
         onRequestClose={() => setShowRemoveModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Remove Member</Text>
-            <Text style={styles.modalMessage}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Remove Member</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>
               Are you sure you want to remove {memberToRemove?.user_display_name || memberToRemove?.user_email} from this family?
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
+                style={[styles.modalButton, { backgroundColor: colors.border }]}
                 onPress={() => setShowRemoveModal(false)}
               >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                <Text style={[styles.modalButtonCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonDelete]}
+                style={[styles.modalButton, { backgroundColor: colors.error }]}
                 onPress={confirmRemoveMember}
                 disabled={removingMemberId !== null}
               >
@@ -206,9 +208,9 @@ export default function FamilyMembersTab({
         onRequestClose={() => setShowRoleModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Change Role</Text>
-            <Text style={styles.modalMessage}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Change Role</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>
               Select a new role for {memberToChangeRole?.user_display_name || memberToChangeRole?.user_email}:
             </Text>
             <View style={styles.roleOptions}>
@@ -217,26 +219,27 @@ export default function FamilyMembersTab({
                   key={role}
                   style={[
                     styles.roleOption,
-                    newRole === role && styles.roleOptionSelected,
+                    { backgroundColor: colors.background, borderColor: colors.border },
+                    newRole === role && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
                   ]}
                   onPress={() => setNewRole(role)}
                 >
-                  <Text style={styles.roleOptionText}>{role.toUpperCase()}</Text>
+                  <Text style={[styles.roleOptionText, { color: colors.text }]}>{role.toUpperCase()}</Text>
                   {newRole === role && (
-                    <FontAwesome name="check" size={16} color="#007AFF" />
+                    <FontAwesome name="check" size={16} color={colors.primary} />
                   )}
                 </TouchableOpacity>
               ))}
             </View>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
+                style={[styles.modalButton, { backgroundColor: colors.border }]}
                 onPress={() => setShowRoleModal(false)}
               >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                <Text style={[styles.modalButtonCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonConfirm]}
+                style={[styles.modalButton, { backgroundColor: colors.primary }]}
                 onPress={confirmChangeRole}
                 disabled={changingRoleId !== null}
               >
@@ -257,7 +260,6 @@ export default function FamilyMembersTab({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   emptyState: {
     padding: 40,
@@ -265,10 +267,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#999',
   },
   memberCard: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     margin: 16,
@@ -282,17 +282,14 @@ const styles = StyleSheet.create({
   memberName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 4,
   },
   memberEmail: {
     fontSize: 14,
-    color: '#666',
     marginBottom: 4,
   },
   memberJoined: {
     fontSize: 12,
-    color: '#999',
   },
   memberActions: {
     alignItems: 'flex-end',
@@ -327,7 +324,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     width: '100%',
@@ -348,12 +344,10 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 12,
   },
   modalMessage: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 24,
     lineHeight: 22,
   },
@@ -367,18 +361,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
-    backgroundColor: '#f9f9f9',
   },
   roleOptionSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: '#f0f7ff',
+    // Applied inline
   },
   roleOptionText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -393,15 +383,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalButtonCancel: {
-    backgroundColor: '#f0f0f0',
+    // Applied inline
   },
   modalButtonCancelText: {
-    color: '#333',
     fontSize: 16,
     fontWeight: '600',
   },
   modalButtonDelete: {
-    backgroundColor: '#FF3B30',
+    // Applied inline
   },
   modalButtonDeleteText: {
     color: '#fff',
@@ -409,7 +398,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   modalButtonConfirm: {
-    backgroundColor: '#007AFF',
+    // Applied inline
   },
   modalButtonConfirmText: {
     color: '#fff',

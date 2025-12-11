@@ -10,12 +10,14 @@ import FamilyMembersTab from '../../../components/families/FamilyMembersTab';
 import FamilyInvitationsTab from '../../../components/families/FamilyInvitationsTab';
 import FamilyStorageTab from '../../../components/families/FamilyStorageTab';
 import AlertModal from '../../../components/AlertModal';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 type TabType = 'profile' | 'members' | 'invitations' | 'storage';
 
 export default function FamilyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { colors } = useTheme();
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,16 +145,16 @@ export default function FamilyDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   if (!family) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>Family not found</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.errorText, { color: colors.textSecondary }]}>Family not found</Text>
       </View>
     );
   }
@@ -160,7 +162,7 @@ export default function FamilyDetailScreen() {
   const isOwner = currentUserId && family.owner === currentUserId;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: family.color }]}>
         <View style={styles.headerTop}>
           <TouchableOpacity 
@@ -200,21 +202,22 @@ export default function FamilyDetailScreen() {
         </Text>
       </View>
 
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab.id}
-            style={[styles.tab, activeTab === tab.id && styles.tabActive]}
+            style={[styles.tab, activeTab === tab.id && { borderBottomColor: colors.primary }]}
             onPress={() => setActiveTab(tab.id)}
           >
             <FontAwesome
               name={tab.icon as any}
               size={16}
-              color={activeTab === tab.id ? '#007AFF' : '#666'}
+              color={activeTab === tab.id ? colors.primary : colors.textSecondary}
             />
             <Text
               style={[
                 styles.tabLabel,
+                { color: activeTab === tab.id ? colors.primary : colors.textSecondary },
                 activeTab === tab.id && styles.tabLabelActive,
               ]}
             >
@@ -259,20 +262,20 @@ export default function FamilyDetailScreen() {
         onRequestClose={() => setShowDeleteModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Delete Family</Text>
-            <Text style={styles.modalMessage}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Delete Family</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>
               Are you sure you want to delete "{family?.name}"? This action cannot be undone and will remove all family data.
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
+                style={[styles.modalButton, { backgroundColor: colors.border }]}
                 onPress={() => setShowDeleteModal(false)}
               >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                <Text style={[styles.modalButtonCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonDelete]}
+                style={[styles.modalButton, { backgroundColor: colors.error }]}
                 onPress={confirmDelete}
                 disabled={deleting}
               >
@@ -302,7 +305,6 @@ export default function FamilyDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   header: {
     padding: 20,
@@ -345,9 +347,7 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   tab: {
     flex: 1,
@@ -360,15 +360,13 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabActive: {
-    borderBottomColor: '#007AFF',
+    // Applied inline
   },
   tabLabel: {
     fontSize: 12,
-    color: '#666',
     fontWeight: '500',
   },
   tabLabelActive: {
-    color: '#007AFF',
     fontWeight: '600',
   },
   tabContent: {
@@ -376,7 +374,6 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#999',
     textAlign: 'center',
     marginTop: 40,
   },
@@ -388,7 +385,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     width: '100%',
@@ -409,12 +405,10 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 12,
   },
   modalMessage: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 24,
     lineHeight: 22,
   },
@@ -431,15 +425,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalButtonCancel: {
-    backgroundColor: '#f0f0f0',
+    // Applied inline
   },
   modalButtonCancelText: {
-    color: '#333',
     fontSize: 16,
     fontWeight: '600',
   },
   modalButtonDelete: {
-    backgroundColor: '#FF3B30',
+    // Applied inline
   },
   modalButtonDeleteText: {
     color: '#fff',

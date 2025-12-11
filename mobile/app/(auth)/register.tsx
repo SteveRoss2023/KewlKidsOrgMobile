@@ -14,9 +14,11 @@ import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthService, { RegisterData } from '../../services/authService';
 import AlertModal from '../../components/AlertModal';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -157,7 +159,7 @@ export default function RegisterScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -165,13 +167,14 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.content}>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Sign up to get started</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign up to get started</Text>
 
           <View style={styles.form}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Email *"
+              placeholderTextColor={colors.textSecondary}
               value={formData.email}
               onChangeText={(value) => updateField('email', value)}
               keyboardType="email-address"
@@ -181,8 +184,9 @@ export default function RegisterScreen() {
             />
 
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Display Name (optional)"
+              placeholderTextColor={colors.textSecondary}
               value={formData.display_name}
               onChangeText={(value) => updateField('display_name', value)}
               autoCapitalize="words"
@@ -191,8 +195,9 @@ export default function RegisterScreen() {
 
             <View style={styles.passwordContainer}>
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                 placeholder="Password *"
+                placeholderTextColor={colors.textSecondary}
                 value={formData.password}
                 onChangeText={(value) => updateField('password', value)}
                 secureTextEntry={!showPassword}
@@ -208,15 +213,16 @@ export default function RegisterScreen() {
                 <FontAwesome
                   name={showPassword ? 'eye-slash' : 'eye'}
                   size={20}
-                  color="#666"
+                  color={colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
 
             <View style={styles.passwordContainer}>
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                 placeholder="Confirm Password *"
+                placeholderTextColor={colors.textSecondary}
                 value={formData.password2}
                 onChangeText={(value) => updateField('password2', value)}
                 secureTextEntry={!showPassword2}
@@ -233,13 +239,13 @@ export default function RegisterScreen() {
                 <FontAwesome
                   name={showPassword2 ? 'eye-slash' : 'eye'}
                   size={20}
-                  color="#666"
+                  color={colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
+              style={[styles.button, { backgroundColor: colors.primary }, loading && styles.buttonDisabled]}
               onPress={handleRegister}
               disabled={loading}
             >
@@ -255,8 +261,8 @@ export default function RegisterScreen() {
               onPress={() => router.back()}
               disabled={loading}
             >
-              <Text style={styles.linkText}>
-                Already have an account? <Text style={styles.linkTextBold}>Sign in</Text>
+              <Text style={[styles.linkText, { color: colors.textSecondary }]}>
+                Already have an account? <Text style={[styles.linkTextBold, { color: colors.primary }]}>Sign in</Text>
               </Text>
             </TouchableOpacity>
           </View>
@@ -278,7 +284,6 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   scrollContent: {
     flexGrow: 1,
@@ -293,38 +298,32 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#333',
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 40,
-    color: '#666',
   },
   form: {
     width: '100%',
   },
   input: {
-    backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 16,
     fontSize: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   passwordContainer: {
     position: 'relative',
     marginBottom: 16,
   },
   passwordInput: {
-    backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 16,
     paddingRight: 50,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   eyeButton: {
     position: 'absolute',
@@ -334,7 +333,6 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   button: {
-    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -353,11 +351,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   linkText: {
-    color: '#666',
     fontSize: 14,
   },
   linkTextBold: {
-    color: '#007AFF',
     fontWeight: '600',
   },
 });
