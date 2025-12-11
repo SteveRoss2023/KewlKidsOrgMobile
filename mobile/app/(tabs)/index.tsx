@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AuthService from '../../services/authService';
@@ -97,7 +97,7 @@ export default function HomeScreen() {
   const handleCardPress = (cardId: string) => {
     switch (cardId) {
       case 'families':
-        router.push('/families');
+        router.push('/(tabs)/families');
         break;
       case 'calendar':
         // TODO: Navigate to calendar when implemented
@@ -125,6 +125,17 @@ export default function HomeScreen() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await AuthService.logout();
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Still navigate to login even if there's an error
+      router.replace('/(auth)/login');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -134,13 +145,30 @@ export default function HomeScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Welcome to KewlKidsOrganizer</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>Welcome to KewlKidsOrganizer</Text>
+          <TouchableOpacity 
+            onPress={() => {
+              console.log('Logout button clicked');
+              handleLogout();
+            }} 
+            style={styles.logoutButton}
+            activeOpacity={0.7}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+          >
+            <FontAwesome name="sign-out" size={22} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.subtitle}>
           Manage your family's activities, events, and communication in one place
         </Text>
+        {userEmail && (
+          <Text style={styles.userEmail}>{userEmail}</Text>
+        )}
       </View>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
 
       <View style={styles.cardsContainer}>
         {cards.filter(card => !card.hidden).map(card => (
@@ -161,7 +189,8 @@ export default function HomeScreen() {
           </TouchableOpacity>
         ))}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -169,6 +198,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollView: {
+    flex: 1,
   },
   contentContainer: {
     padding: 16,
@@ -178,12 +210,30 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingTop: 20,
   },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    position: 'relative',
+    marginBottom: 8,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 8,
     textAlign: 'center',
+  },
+  logoutButton: {
+    position: 'absolute',
+    right: 0,
+    padding: 12,
+    zIndex: 1000,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   subtitle: {
     fontSize: 14,
@@ -191,6 +241,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 20,
+    marginBottom: 4,
+  },
+  userEmail: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 4,
   },
   cardsContainer: {
     gap: 12,

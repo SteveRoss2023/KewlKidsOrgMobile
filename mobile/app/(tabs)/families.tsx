@@ -1,8 +1,8 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import FamilyService, { Family } from '../services/familyService';
-import { APIError } from '../services/api';
+import FamilyService, { Family } from '../../services/familyService';
+import { APIError } from '../../services/api';
 import { FontAwesome } from '@expo/vector-icons';
 
 export default function FamiliesScreen() {
@@ -47,9 +47,6 @@ export default function FamiliesScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.homeButton}>
-          <FontAwesome name="home" size={20} color="#007AFF" />
-        </TouchableOpacity>
         <Text style={styles.title}>My Families</Text>
         <TouchableOpacity onPress={handleCreateFamily} style={styles.createButton}>
           <FontAwesome name="plus" size={16} color="#fff" />
@@ -100,21 +97,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    paddingTop: 60,
+    paddingTop: 20,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  homeButton: {
-    padding: 8,
-    marginRight: 8,
-  },
   title: {
-    flex: 1,
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
-    textAlign: 'center',
   },
   createButton: {
     flexDirection: 'row',

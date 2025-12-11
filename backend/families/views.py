@@ -42,6 +42,14 @@ class FamilyViewSet(viewsets.ModelViewSet):
             role='owner'
         )
 
+    def perform_destroy(self, instance):
+        """Only allow family owner to delete the family."""
+        member = get_object_or_404(Member, family=instance, user=self.request.user, is_active=True)
+        if not member.is_owner():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Only the family owner can delete the family.')
+        instance.delete()
+
     @action(detail=True, methods=['post'])
     def invite_member(self, request, pk=None):
         """Invite a user to join the family."""

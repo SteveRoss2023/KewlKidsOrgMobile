@@ -29,20 +29,15 @@ export default function CreateFamilyScreen() {
 
     try {
       setLoading(true);
-      const family = await FamilyService.createFamily({
+      await FamilyService.createFamily({
         name: name.trim(),
         color: selectedColor,
       });
-      Alert.alert('Success', 'Family created successfully!', [
-        {
-          text: 'OK',
-          onPress: () => router.replace(`/families/${family.id}`),
-        },
-      ]);
+      // Navigate to families list page after successful creation
+      router.replace('/families');
     } catch (error) {
       const apiError = error as APIError;
       Alert.alert('Error', apiError.message || 'Failed to create family');
-    } finally {
       setLoading(false);
     }
   };

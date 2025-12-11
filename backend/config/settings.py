@@ -25,7 +25,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-)91^p69=om&v!egvdrva49$c@iuypw18ld0ddrfi3x%&z*3wn@')
+# SECRET_KEY must be set in .env file
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY:
+    raise ValueError(
+        'SECRET_KEY must be set in .env file. '
+        'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -204,12 +210,14 @@ CHANNEL_LAYERS = {
 
 # Encryption Settings (for encrypted_model_fields)
 # Generate a key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# If FERNET_KEY is not set, generate a default one (for development only - use proper key in production)
+# IMPORTANT: FERNET_KEY must be set in .env file and must NEVER change after data is encrypted
+# Changing this key will make all encrypted data unreadable
 FERNET_KEY = os.getenv('FERNET_KEY', '')
 if not FERNET_KEY:
-    # Generate a default key for development (this should be in .env for production)
-    from cryptography.fernet import Fernet
-    FERNET_KEY = Fernet.generate_key().decode()
+    raise ValueError(
+        'FERNET_KEY must be set in .env file. '
+        'Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+    )
 FIELD_ENCRYPTION_KEY = FERNET_KEY
 
 # For development without Redis, use in-memory channel layer:

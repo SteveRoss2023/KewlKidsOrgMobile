@@ -12,12 +12,25 @@ class MemberSerializer(serializers.ModelSerializer):
     """Serializer for Member model."""
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_display_name = serializers.SerializerMethodField()
-    family_name = serializers.CharField(source='family.name', read_only=True)
+    family_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
         fields = ['id', 'family', 'family_name', 'user', 'user_email', 'user_display_name', 'role', 'joined_at', 'is_active']
         read_only_fields = ['id', 'joined_at']
+
+    def get_family_name(self, obj):
+        """Get decrypted family name - accessing obj.family.name triggers automatic decryption."""
+        try:
+            if obj.family:
+                # Accessing the field triggers automatic decryption by django-encrypted-model-fields
+                return obj.family.name
+            return ''
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error decrypting family name for member {obj.id}: {str(e)}', exc_info=True)
+            return '[Error decrypting name]'
 
     def get_user_display_name(self, obj):
         """Get user's display name from profile."""
@@ -44,6 +57,8 @@ class FamilySerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Override to handle potential decryption errors gracefully."""
         try:
+            # Force access to name field to trigger decryption
+            _ = instance.name  # This triggers the decryption
             return super().to_representation(instance)
         except Exception as e:
             import logging
@@ -75,11 +90,24 @@ class FamilyCreateSerializer(serializers.ModelSerializer):
 
 class InvitationSerializer(serializers.ModelSerializer):
     """Serializer for Invitation model."""
-    family_name = serializers.CharField(source='family.name', read_only=True)
+    family_name = serializers.SerializerMethodField()
     invited_by_email = serializers.EmailField(source='invited_by.email', read_only=True)
 
     class Meta:
         model = Invitation
         fields = ['id', 'family', 'family_name', 'email', 'token', 'status', 'role', 'invited_by', 'invited_by_email', 'created_at', 'expires_at', 'accepted_at']
         read_only_fields = ['id', 'token', 'created_at', 'expires_at', 'accepted_at']
+
+    def get_family_name(self, obj):
+        """Get decrypted family name - accessing obj.family.name triggers automatic decryption."""
+        try:
+            if obj.family:
+                # Accessing the field triggers automatic decryption by django-encrypted-model-fields
+                return obj.family.name
+            return ''
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error decrypting family name for invitation {obj.id}: {str(e)}', exc_info=True)
+            return '[Error decrypting name]'
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import FamilyService, { Family, Member } from '../../services/familyService';
 import { APIError } from '../../../services/api';
 import { FontAwesome } from '@expo/vector-icons';
+import AuthService from '../../services/authService';
 
 export default function FamilyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -11,12 +12,25 @@ export default function FamilyDetailScreen() {
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
     if (id) {
       loadFamilyData();
+      loadCurrentUser();
     }
   }, [id]);
+
+  const loadCurrentUser = async () => {
+    try {
+      const userData = await AuthService.getUserData();
+      if (userData) {
+        setCurrentUserId(userData.id);
+      }
+    } catch (error) {
+      console.error('Error loading current user:', error);
+    }
+  };
 
   const loadFamilyData = async () => {
     try {
@@ -33,6 +47,39 @@ export default function FamilyDetailScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDeleteFamily = () => {
+    if (!family) return;
+
+    Alert.alert(
+      'Delete Family',
+      `Are you sure you want to delete "${family.name}"? This action cannot be undone and will remove all family data.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await FamilyService.deleteFamily(family.id);
+              Alert.alert('Success', 'Family deleted successfully', [
+                {
+                  text: 'OK',
+                  onPress: () => router.back(),
+                },
+              ]);
+            } catch (error) {
+              const apiError = error as APIError;
+              Alert.alert('Error', apiError.message || 'Failed to delete family');
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -83,6 +130,16 @@ export default function FamilyDetailScreen() {
           <FontAwesome name="user-plus" size={20} color="#007AFF" />
           <Text style={styles.actionButtonText}>Invite Member</Text>
         </TouchableOpacity>
+        
+        {currentUserId && family.owner === currentUserId && (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={handleDeleteFamily}
+          >
+            <FontAwesome name="trash" size={20} color="#FF3B30" />
+            <Text style={styles.deleteButtonText}>Delete Family</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );
@@ -189,6 +246,23 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
     marginTop: 40,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#FF3B30',
+    marginTop: 12,
+  },
+  deleteButtonText: {
+    marginLeft: 10,
+    color: '#FF3B30',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
