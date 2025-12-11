@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useEffect, useState, useCallback } from 'react';
 import FamilyService, { Family } from '../../services/familyService';
 import { APIError } from '../../services/api';
 import { FontAwesome } from '@expo/vector-icons';
@@ -11,9 +11,17 @@ export default function FamiliesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Load families on mount
   useEffect(() => {
     loadFamilies();
   }, []);
+
+  // Refresh families when screen comes into focus (e.g., after deleting a family)
+  useFocusEffect(
+    useCallback(() => {
+      loadFamilies();
+    }, [])
+  );
 
   const loadFamilies = async () => {
     try {
@@ -29,11 +37,11 @@ export default function FamiliesScreen() {
   };
 
   const handleFamilyPress = (familyId: number) => {
-    router.push(`/families/${familyId}`);
+    router.push(`/(tabs)/families/${familyId}`);
   };
 
   const handleCreateFamily = () => {
-    router.push('/families/create');
+    router.push('/(tabs)/families/create');
   };
 
   if (loading) {

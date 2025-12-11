@@ -1,10 +1,10 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, Modal, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import FamilyService, { Family, Member } from '../../services/familyService';
-import { APIError } from '../../../services/api';
+import FamilyService, { Family, Member } from '../../../services/familyService';
+import { APIError } from '../../../../services/api';
 import { FontAwesome } from '@expo/vector-icons';
-import AuthService from '../../services/authService';
+import AuthService from '../../../services/authService';
 
 export default function FamilyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -149,7 +149,7 @@ export default function FamilyDetailScreen() {
       <View style={styles.actions}>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => router.push(`/families/${id}/invite`)}
+          onPress={() => router.push(`/(tabs)/families/${id}/invite`)}
         >
           <FontAwesome name="user-plus" size={20} color="#007AFF" />
           <Text style={styles.actionButtonText}>Invite Member</Text>

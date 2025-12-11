@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AuthService from '../../services/authService';
@@ -148,7 +148,9 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.title}>Welcome to KewlKidsOrganizer</Text>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
+          </View>
           <TouchableOpacity 
             onPress={() => {
               console.log('Logout button clicked');
@@ -158,7 +160,7 @@ export default function HomeScreen() {
             activeOpacity={0.7}
             hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
           >
-            <FontAwesome name="sign-out" size={22} color="#FF3B30" />
+            <FontAwesome name="sign-out" size={20} color="#FF3B30" />
           </TouchableOpacity>
         </View>
         <Text style={styles.subtitle}>
@@ -208,32 +210,41 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 24,
-    paddingTop: 20,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'web' ? 20 : 50,
+    backgroundColor: '#fff',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
   headerTop: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     width: '100%',
-    position: 'relative',
     marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  titleContainer: {
+    flex: 1,
+    paddingRight: 12,
+    marginRight: 8,
   },
   title: {
-    fontSize: 24,
+    fontSize: Platform.OS === 'web' ? 24 : 20,
     fontWeight: 'bold',
     color: '#333',
-    textAlign: 'center',
+    textAlign: 'left',
+    lineHeight: Platform.OS === 'web' ? 28 : 24,
   },
   logoutButton: {
-    position: 'absolute',
-    right: 0,
-    padding: 12,
-    zIndex: 1000,
-    minWidth: 44,
-    minHeight: 44,
+    padding: 8,
+    minWidth: 40,
+    minHeight: 40,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'transparent',
+    flexShrink: 0,
   },
   subtitle: {
     fontSize: 14,
