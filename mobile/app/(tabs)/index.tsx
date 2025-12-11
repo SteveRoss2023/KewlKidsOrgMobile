@@ -23,10 +23,10 @@ export default function HomeScreen() {
 
   const cards: FeatureCard[] = [
     {
-      id: 'families',
-      title: 'Families',
-      description: 'Manage your families and members',
-      icon: '👨‍👩‍👧‍👦',
+      id: 'activity',
+      title: 'Activity',
+      description: 'View today\'s activities and events',
+      icon: '⏰',
       color: '#3b82f6',
     },
     {
@@ -99,8 +99,8 @@ export default function HomeScreen() {
 
   const handleCardPress = (cardId: string) => {
     switch (cardId) {
-      case 'families':
-        router.push('/(tabs)/families');
+      case 'activity':
+        router.push('/(tabs)/today');
         break;
       case 'calendar':
         // TODO: Navigate to calendar when implemented
@@ -180,7 +180,6 @@ export default function HomeScreen() {
               <Text style={[styles.cardTitle, { color: colors.text }]}>{card.title}</Text>
               <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>{card.description}</Text>
             </View>
-            <FontAwesome name="chevron-right" size={16} color={colors.textSecondary} style={styles.cardArrow} />
           </TouchableOpacity>
         ))}
       </View>
@@ -277,10 +276,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     flex: 1,
-  },
-  cardArrow: {
-    alignSelf: 'flex-end',
-    marginTop: 8,
   },
 });
 

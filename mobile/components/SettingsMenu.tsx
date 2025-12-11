@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -15,202 +15,236 @@ import { useTheme } from '../contexts/ThemeContext';
 
 interface SettingsMenuProps {
   onClose?: () => void;
+  showButton?: boolean;
+  autoOpen?: boolean;
 }
 
-export default function SettingsMenu({ onClose }: SettingsMenuProps) {
-  const router = useRouter();
-  const { colors } = useTheme();
-  const [modalVisible, setModalVisible] = useState(false);
-  const [servicesSubmenuOpen, setServicesSubmenuOpen] = useState(false);
-  const [onedriveConnected, setOnedriveConnected] = useState(false);
-  const [googledriveConnected, setGoogledriveConnected] = useState(false);
-  const [outlookConnected, setOutlookConnected] = useState(false);
+export interface SettingsMenuRef {
+  openModal: () => void;
+}
 
-  useEffect(() => {
-    if (modalVisible) {
-      checkOAuthConnections();
-    }
-  }, [modalVisible]);
+const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
+  ({ onClose, showButton = true, autoOpen = false }, ref) => {
+    const router = useRouter();
+    const { colors } = useTheme();
+    const [modalVisible, setModalVisible] = useState(false);
+    const [servicesSubmenuOpen, setServicesSubmenuOpen] = useState(false);
+    const [onedriveConnected, setOnedriveConnected] = useState(false);
+    const [googledriveConnected, setGoogledriveConnected] = useState(false);
+    const [outlookConnected, setOutlookConnected] = useState(false);
 
-  const checkOAuthConnections = async () => {
-    // TODO: Implement OAuth connection checks when backend endpoints are available
-    // For now, set to false
-    setOnedriveConnected(false);
-    setGoogledriveConnected(false);
-    setOutlookConnected(false);
-  };
+    useImperativeHandle(ref, () => ({
+      openModal: () => {
+        setModalVisible(true);
+      },
+    }));
 
-  const handleNavigate = (route: string) => {
-    setModalVisible(false);
-    setServicesSubmenuOpen(false);
-    if (onClose) onClose();
-    router.push(route as any);
-  };
+    useEffect(() => {
+      if (autoOpen) {
+        setModalVisible(true);
+      }
+    }, [autoOpen]);
 
-  const handleLogout = async () => {
-    try {
-      await AuthService.logout();
+    useEffect(() => {
+      if (modalVisible) {
+        checkOAuthConnections();
+      }
+    }, [modalVisible]);
+
+    const checkOAuthConnections = async () => {
+      // TODO: Implement OAuth connection checks when backend endpoints are available
+      // For now, set to false
+      setOnedriveConnected(false);
+      setGoogledriveConnected(false);
+      setOutlookConnected(false);
+    };
+
+    const handleClose = () => {
       setModalVisible(false);
+      setServicesSubmenuOpen(false);
       if (onClose) onClose();
-      router.replace('/(auth)/login');
-    } catch (error) {
-      console.error('Error during logout:', error);
+    };
+
+    const handleNavigate = (route: string) => {
       setModalVisible(false);
+      setServicesSubmenuOpen(false);
       if (onClose) onClose();
-      router.replace('/(auth)/login');
-    }
-  };
+      router.push(route as any);
+    };
 
-  const menuItems = [
-    {
-      id: 'profile',
-      label: 'Profile',
-      icon: 'user',
-      route: '/(tabs)/profile',
-    },
-    {
-      id: 'voice-settings',
-      label: 'Voice Settings',
-      icon: 'microphone',
-      route: '/(tabs)/settings',
-    },
-    {
-      id: 'grocery-categories',
-      label: 'Grocery Categories',
-      icon: 'list',
-      route: '/(tabs)/grocery-categories',
-    },
-  ];
+    const handleLogout = async () => {
+      try {
+        await AuthService.logout();
+        setModalVisible(false);
+        if (onClose) onClose();
+        router.replace('/(auth)/login');
+      } catch (error) {
+        console.error('Error during logout:', error);
+        setModalVisible(false);
+        if (onClose) onClose();
+        router.replace('/(auth)/login');
+      }
+    };
 
-  const serviceItems = [
-    {
-      id: 'outlook-sync',
-      label: 'Outlook Sync',
-      icon: 'calendar',
-      route: '/(tabs)/outlook-sync',
-      connected: outlookConnected,
-    },
-    {
-      id: 'onedrive',
-      label: 'Microsoft OneDrive Connect',
-      icon: 'cloud',
-      route: '/(tabs)/onedrive-connect',
-      connected: onedriveConnected,
-    },
-    {
-      id: 'googledrive',
-      label: 'Google Drive Connect',
-      icon: 'google',
-      route: '/(tabs)/googledrive-connect',
-      connected: googledriveConnected,
-    },
-    {
-      id: 'googlephotos',
-      label: 'Google Photos Connect',
-      icon: 'photo',
-      route: '/(tabs)/googlephotos-connect',
-      connected: false,
-    },
-  ];
+    const menuItems = [
+      {
+        id: 'families',
+        label: 'Families',
+        icon: 'users',
+        route: '/(tabs)/families',
+      },
+      {
+        id: 'profile',
+        label: 'Profile',
+        icon: 'user',
+        route: '/(tabs)/profile',
+      },
+      {
+        id: 'voice-settings',
+        label: 'Voice Settings',
+        icon: 'microphone',
+        route: '/(tabs)/settings',
+      },
+      {
+        id: 'grocery-categories',
+        label: 'Grocery Categories',
+        icon: 'list',
+        route: '/(tabs)/grocery-categories',
+      },
+    ];
 
-  return (
-    <>
-      <TouchableOpacity
-        onPress={() => setModalVisible(true)}
-        style={styles.settingsButton}
-        activeOpacity={0.7}
-      >
-        <FontAwesome name="cog" size={20} color={colors.text} />
-      </TouchableOpacity>
+    const serviceItems = [
+      {
+        id: 'outlook-sync',
+        label: 'Outlook Sync',
+        icon: 'calendar',
+        route: '/(tabs)/outlook-sync',
+        connected: outlookConnected,
+      },
+      {
+        id: 'onedrive',
+        label: 'Microsoft OneDrive Connect',
+        icon: 'cloud',
+        route: '/(tabs)/onedrive-connect',
+        connected: onedriveConnected,
+      },
+      {
+        id: 'googledrive',
+        label: 'Google Drive Connect',
+        icon: 'google',
+        route: '/(tabs)/googledrive-connect',
+        connected: googledriveConnected,
+      },
+      {
+        id: 'googlephotos',
+        label: 'Google Photos Connect',
+        icon: 'photo',
+        route: '/(tabs)/googlephotos-connect',
+        connected: false,
+      },
+    ];
 
-      <Modal
-        visible={modalVisible}
-        transparent={true}
-        animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Settings</Text>
-              <TouchableOpacity
-                onPress={() => setModalVisible(false)}
-                style={styles.closeButton}
-              >
-                <FontAwesome name="times" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
+    return (
+      <>
+        {showButton && (
+          <TouchableOpacity
+            onPress={() => setModalVisible(true)}
+            style={styles.settingsButton}
+            activeOpacity={0.7}
+          >
+            <FontAwesome name="cog" size={20} color={colors.text} />
+          </TouchableOpacity>
+        )}
 
-            <ScrollView 
-              style={styles.menuList}
-              contentContainerStyle={styles.menuListContent}
-              showsVerticalScrollIndicator={true}
-            >
-              {menuItems.map((item) => (
+        <Modal
+          visible={modalVisible}
+          transparent={true}
+          animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+          onRequestClose={handleClose}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+              <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Settings</Text>
                 <TouchableOpacity
-                  key={item.id}
-                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                  onPress={() => handleNavigate(item.route)}
+                  onPress={handleClose}
+                  style={styles.closeButton}
                 >
-                  <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
-                  <Text style={[styles.menuItemText, { color: colors.text }]}>{item.label}</Text>
-                  <FontAwesome name="chevron-right" size={12} color={colors.textSecondary} />
+                  <FontAwesome name="times" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
-              ))}
-
-              <View style={[styles.menuSection, { borderTopColor: colors.border }]}>
-                <TouchableOpacity
-                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                  onPress={() => setServicesSubmenuOpen(!servicesSubmenuOpen)}
-                >
-                  <FontAwesome name="plug" size={16} color={colors.text} style={styles.menuIcon} />
-                  <Text style={[styles.menuItemText, { color: colors.text }]}>Services</Text>
-                  <FontAwesome
-                    name={servicesSubmenuOpen ? 'chevron-up' : 'chevron-down'}
-                    size={12}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-
-                {servicesSubmenuOpen && (
-                  <View style={[styles.submenu, { backgroundColor: colors.background }]}>
-                    {serviceItems.map((item) => (
-                      <TouchableOpacity
-                        key={item.id}
-                        style={[styles.submenuItem, { borderBottomColor: colors.border }]}
-                        onPress={() => handleNavigate(item.route)}
-                      >
-                        <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
-                        <Text style={[styles.submenuItemText, { color: colors.textSecondary }]}>{item.label}</Text>
-                        {item.connected ? (
-                          <View style={styles.connectedIndicator}>
-                            <FontAwesome name="check-circle" size={12} color={colors.success} />
-                          </View>
-                        ) : (
-                          <View style={styles.disconnectedIndicator}>
-                            <FontAwesome name="times-circle" size={12} color={colors.error} />
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
               </View>
 
-              <TouchableOpacity
-                style={[styles.menuItem, styles.logoutItem, { borderTopColor: colors.border }]}
-                onPress={handleLogout}
+              <ScrollView 
+                style={styles.menuList}
+                contentContainerStyle={styles.menuListContent}
+                showsVerticalScrollIndicator={true}
               >
-                <FontAwesome name="sign-out" size={16} color={colors.error} style={styles.menuIcon} />
-                <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>Logout</Text>
-              </TouchableOpacity>
-            </ScrollView>
+                {menuItems.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => handleNavigate(item.route)}
+                  >
+                    <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
+                    <Text style={[styles.menuItemText, { color: colors.text }]}>{item.label}</Text>
+                    <FontAwesome name="chevron-right" size={12} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+
+                <View style={[styles.menuSection, { borderTopColor: colors.border }]}>
+                  <TouchableOpacity
+                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => setServicesSubmenuOpen(!servicesSubmenuOpen)}
+                  >
+                    <FontAwesome name="plug" size={16} color={colors.text} style={styles.menuIcon} />
+                    <Text style={[styles.menuItemText, { color: colors.text }]}>Services</Text>
+                    <FontAwesome
+                      name={servicesSubmenuOpen ? 'chevron-up' : 'chevron-down'}
+                      size={12}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+
+                  {servicesSubmenuOpen && (
+                    <View style={[styles.submenu, { backgroundColor: colors.background }]}>
+                      {serviceItems.map((item) => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={[styles.submenuItem, { borderBottomColor: colors.border }]}
+                          onPress={() => handleNavigate(item.route)}
+                        >
+                          <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
+                          <Text style={[styles.submenuItemText, { color: colors.textSecondary }]}>{item.label}</Text>
+                          {item.connected ? (
+                            <View style={styles.connectedIndicator}>
+                              <FontAwesome name="check-circle" size={12} color={colors.success} />
+                            </View>
+                          ) : (
+                            <View style={styles.disconnectedIndicator}>
+                              <FontAwesome name="times-circle" size={12} color={colors.error} />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.menuItem, styles.logoutItem, { borderTopColor: colors.border }]}
+                  onPress={handleLogout}
+                >
+                  <FontAwesome name="sign-out" size={16} color={colors.error} style={styles.menuIcon} />
+                  <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>Logout</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </>
-  );
-}
+        </Modal>
+      </>
+    );
+  }
+);
 
 const styles = StyleSheet.create({
   settingsButton: {
@@ -327,4 +361,6 @@ const styles = StyleSheet.create({
     // Color applied inline
   },
 });
+
+export default SettingsMenu;
 

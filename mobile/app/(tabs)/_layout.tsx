@@ -31,10 +31,16 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="families"
         options={{
-          title: 'Families',
-          tabBarLabel: 'Families',
+          href: null, // Hide from tab bar - accessible via Home card
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarLabel: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <FontAwesome name="users" size={size} color={color} />
+            <FontAwesome name="cog" size={size} color={color} />
           ),
         }}
       />
@@ -48,6 +54,12 @@ export default function TabsLayout() {
         name="families/create"
         options={{
           href: null, // Hide from tab bar
+        }}
+      />
+      <Tabs.Screen
+        name="today"
+        options={{
+          href: null, // Hide from tab bar - accessible via Home card
         }}
       />
     </Tabs>

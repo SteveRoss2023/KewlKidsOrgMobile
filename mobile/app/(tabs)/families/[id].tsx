@@ -11,6 +11,7 @@ import FamilyInvitationsTab from '../../../components/families/FamilyInvitations
 import FamilyStorageTab from '../../../components/families/FamilyStorageTab';
 import AlertModal from '../../../components/AlertModal';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useFamily } from '../../../contexts/FamilyContext';
 
 type TabType = 'profile' | 'members' | 'invitations' | 'storage';
 
@@ -18,6 +19,7 @@ export default function FamilyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { colors } = useTheme();
+  const { refreshFamilies } = useFamily();
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,38 +37,33 @@ export default function FamilyDetailScreen() {
 
   useEffect(() => {
     if (id) {
-      loadFamilyData();
-      loadCurrentUser();
+      loadData();
     }
   }, [id]);
 
-  const loadCurrentUser = async () => {
+  const loadData = async () => {
     try {
+      setLoading(true);
+      // Load current user first
       const userData = await AuthService.getUserData();
       if (userData) {
         setCurrentUserId(userData.id);
-      }
-    } catch (error) {
-      console.error('Error loading current user:', error);
-    }
-  };
-
-  const loadFamilyData = async () => {
-    try {
-      setLoading(true);
-      const [familyData, membersData] = await Promise.all([
-        FamilyService.getFamily(Number(id)),
-        FamilyService.getFamilyMembers(Number(id)),
-      ]);
-      setFamily(familyData);
-      setMembers(membersData);
-      
-      // Determine current user's role
-      const currentMember = membersData.find(m => m.user === currentUserId);
-      if (currentMember) {
-        setCurrentUserRole(currentMember.role);
-      } else if (familyData.owner === currentUserId) {
-        setCurrentUserRole('owner');
+        
+        // Then load family data
+        const [familyData, membersData] = await Promise.all([
+          FamilyService.getFamily(Number(id)),
+          FamilyService.getFamilyMembers(Number(id)),
+        ]);
+        setFamily(familyData);
+        setMembers(membersData);
+        
+        // Determine current user's role now that we have both userData and membersData
+        const currentMember = membersData.find(m => m.user === userData.id);
+        if (currentMember) {
+          setCurrentUserRole(currentMember.role);
+        } else if (familyData.owner === userData.id) {
+          setCurrentUserRole('owner');
+        }
       }
     } catch (error) {
       const apiError = error as APIError;
@@ -81,8 +78,10 @@ export default function FamilyDetailScreen() {
     }
   };
 
-  const handleFamilyUpdate = (updatedFamily: Family) => {
+  const handleFamilyUpdate = async (updatedFamily: Family) => {
     setFamily(updatedFamily);
+    // Refresh the families list in the context so the FamilySelector updates
+    await refreshFamilies();
     setAlertModal({
       visible: true,
       title: 'Success',
@@ -164,38 +163,6 @@ export default function FamilyDetailScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: family.color }]}>
-        <View style={styles.headerTop}>
-          <TouchableOpacity 
-            onPress={() => router.back()} 
-            style={styles.backButton}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <FontAwesome name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.headerRight}>
-            {isOwner && (
-              <TouchableOpacity
-                style={styles.deleteHeaderButton}
-                onPress={handleDeleteFamily}
-                disabled={deleting}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                {deleting ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <FontAwesome name="trash" size={18} color="#fff" />
-                )}
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity 
-              onPress={() => router.push('/(tabs)')} 
-              style={styles.homeButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <FontAwesome name="home" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
         <Text style={styles.familyName}>{family.name}</Text>
         <Text style={styles.memberCount}>
           {members.length} {members.length === 1 ? 'member' : 'members'}
@@ -233,6 +200,8 @@ export default function FamilyDetailScreen() {
             family={family}
             currentUserRole={currentUserRole}
             onFamilyUpdate={handleFamilyUpdate}
+            onDeleteFamily={handleDeleteFamily}
+            deleting={deleting}
           />
         )}
         {activeTab === 'members' && (
@@ -309,30 +278,6 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 60,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backButton: {
-    padding: 8,
-    zIndex: 10,
-  },
-  homeButton: {
-    padding: 8,
-    zIndex: 10,
-  },
-  deleteHeaderButton: {
-    padding: 8,
-    marginRight: 12,
-    zIndex: 10,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
   },
   familyName: {
     fontSize: 28,

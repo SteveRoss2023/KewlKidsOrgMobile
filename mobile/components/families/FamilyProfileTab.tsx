@@ -9,6 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { Family } from '../../services/familyService';
 import FamilyService from '../../services/familyService';
 import { APIError } from '../../services/api';
@@ -19,6 +20,8 @@ interface FamilyProfileTabProps {
   family: Family;
   currentUserRole: 'owner' | 'admin' | 'member' | 'child' | null;
   onFamilyUpdate: (family: Family) => void;
+  onDeleteFamily?: () => void;
+  deleting?: boolean;
 }
 
 const COLORS = [
@@ -36,8 +39,12 @@ export default function FamilyProfileTab({
   family,
   currentUserRole,
   onFamilyUpdate,
+  onDeleteFamily,
+  deleting = false,
 }: FamilyProfileTabProps) {
+  const router = useRouter();
   const { colors } = useTheme();
+  const [isEditing, setIsEditing] = useState(false);
   const [editFamilyName, setEditFamilyName] = useState(family.name);
   const [editFamilyColor, setEditFamilyColor] = useState(family.color);
   const [updating, setUpdating] = useState(false);
@@ -49,6 +56,20 @@ export default function FamilyProfileTab({
   }, [family]);
 
   const canEdit = currentUserRole === 'owner' || currentUserRole === 'admin';
+  const isOwner = currentUserRole === 'owner';
+
+  const handleEdit = () => {
+    setIsEditing(true);
+    setEditFamilyName(family.name);
+    setEditFamilyColor(family.color);
+  };
+
+  const handleCancel = () => {
+    setIsEditing(false);
+    setEditFamilyName(family.name);
+    setEditFamilyColor(family.color);
+    setColorPickerOpen(false);
+  };
 
   const handleUpdate = async () => {
     if (!editFamilyName.trim()) return;
@@ -60,6 +81,8 @@ export default function FamilyProfileTab({
         color: editFamilyColor,
       });
       onFamilyUpdate(updatedFamily);
+      setIsEditing(false);
+      setColorPickerOpen(false);
     } catch (error) {
       const apiError = error as APIError;
       console.error('Error updating family:', apiError);
@@ -69,10 +92,21 @@ export default function FamilyProfileTab({
     }
   };
 
-  if (canEdit) {
+  if (isEditing) {
     return (
       <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.form, { backgroundColor: colors.surface }]}>
+          <View style={styles.headerRow}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Edit Family</Text>
+            <TouchableOpacity
+              onPress={handleCancel}
+              style={styles.cancelButton}
+              disabled={updating}
+            >
+              <FontAwesome name="times" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
           <Text style={[styles.label, { color: colors.text }]}>Family Name</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
@@ -110,17 +144,26 @@ export default function FamilyProfileTab({
             </View>
           )}
 
-          <TouchableOpacity
-            style={[styles.saveButton, { backgroundColor: colors.primary }, updating && styles.saveButtonDisabled]}
-            onPress={handleUpdate}
-            disabled={updating || !editFamilyName.trim()}
-          >
-            {updating ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={[styles.cancelButtonFull, { backgroundColor: colors.border }]}
+              onPress={handleCancel}
+              disabled={updating}
+            >
+              <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: colors.primary }, updating && styles.saveButtonDisabled]}
+              onPress={handleUpdate}
+              disabled={updating || !editFamilyName.trim()}
+            >
+              {updating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     );
@@ -129,6 +172,38 @@ export default function FamilyProfileTab({
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.viewOnly, { backgroundColor: colors.surface }]}>
+        <View style={styles.editHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Family Information</Text>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/families')}
+              style={styles.backButton}
+            >
+              <FontAwesome name="arrow-left" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            {canEdit && (
+              <TouchableOpacity
+                onPress={handleEdit}
+                style={styles.editButton}
+              >
+                <FontAwesome name="pencil" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+            {isOwner && onDeleteFamily && (
+              <TouchableOpacity
+                onPress={onDeleteFamily}
+                style={styles.deleteButton}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color={colors.error} />
+                ) : (
+                  <FontAwesome name="trash" size={18} color={colors.error} />
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
         <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
           <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Name:</Text>
           <Text style={[styles.infoValue, { color: colors.text }]}>{family.name}</Text>
@@ -166,6 +241,19 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 12,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    padding: 8,
+  },
   label: {
     fontSize: 16,
     fontWeight: '600',
@@ -201,11 +289,26 @@ const styles = StyleSheet.create({
   colorPickerContainer: {
     marginTop: 12,
   },
-  saveButton: {
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 24,
+  },
+  cancelButtonFull: {
+    flex: 1,
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
-    marginTop: 24,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    flex: 1,
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
   },
   saveButtonDisabled: {
     opacity: 0.6,
@@ -219,6 +322,28 @@ const styles = StyleSheet.create({
     padding: 20,
     margin: 16,
     borderRadius: 12,
+  },
+  editHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backButton: {
+    padding: 8,
+  },
+  editButton: {
+    padding: 8,
+  },
+  deleteButton: {
+    padding: 8,
   },
   infoRow: {
     flexDirection: 'row',

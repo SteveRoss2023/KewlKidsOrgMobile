@@ -81,7 +81,7 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
     loadFamilies();
   }, []);
 
-  // Update selected family if it's no longer in the list
+  // Update selected family if it's no longer in the list or if it has been updated
   useEffect(() => {
     if (selectedFamily && families.length > 0) {
       const familyStillExists = families.find(f => f.id === selectedFamily.id);
@@ -95,15 +95,20 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
           storage.removeItem(STORAGE_KEYS.FAMILY_ID);
         }
       } else {
-        // Update selected family with latest data
-        setSelectedFamilyState(familyStillExists);
+        // Update selected family with latest data (including color, name, etc.)
+        // Only update if the data has actually changed to avoid unnecessary re-renders
+        if (familyStillExists.name !== selectedFamily.name || 
+            familyStillExists.color !== selectedFamily.color ||
+            familyStillExists.updated_at !== selectedFamily.updated_at) {
+          setSelectedFamilyState(familyStillExists);
+        }
       }
     } else if (!selectedFamily && families.length > 0) {
       // No family selected but families available, select first
       setSelectedFamilyState(families[0]);
       storage.setItem(STORAGE_KEYS.FAMILY_ID, families[0].id.toString());
     }
-  }, [families]);
+  }, [families, selectedFamily]);
 
   const value: FamilyContextType = {
     selectedFamily,
