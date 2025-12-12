@@ -13,20 +13,28 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 // Import draggable flatlist conditionally to avoid worklets issues
+// In Expo Go, these modules cause worklets version mismatch errors
+// In development builds (eas build or expo run), they should work properly
 let DraggableFlatList: any = null;
 let ScaleDecorator: any = null;
 let RenderItemParams: any = null;
 let GestureHandlerRootView: any = null;
 
-try {
-  const draggableModule = require('react-native-draggable-flatlist');
-  DraggableFlatList = draggableModule.default;
-  ScaleDecorator = draggableModule.ScaleDecorator;
-  RenderItemParams = draggableModule.RenderItemParams;
-  const gestureModule = require('react-native-gesture-handler');
-  GestureHandlerRootView = gestureModule.GestureHandlerRootView;
-} catch (e) {
-  console.warn('DraggableFlatList not available, using regular FlatList');
+// Try to load these modules on mobile (not web, since we use HTML5 drag-and-drop there)
+// If they fail to load (e.g., in Expo Go), we'll gracefully fall back to move buttons
+if (Platform.OS !== 'web') {
+  try {
+    const DraggableFlatListModule = require('react-native-draggable-flatlist');
+    DraggableFlatList = DraggableFlatListModule.default;
+    ScaleDecorator = DraggableFlatListModule.ScaleDecorator;
+    RenderItemParams = DraggableFlatListModule.RenderItemParams;
+    
+    const GestureHandlerModule = require('react-native-gesture-handler');
+    GestureHandlerRootView = GestureHandlerModule.GestureHandlerRootView;
+  } catch (error) {
+    // Modules not available (likely Expo Go) - will use move button fallback
+    // This is expected and handled gracefully by the UI
+  }
 }
 import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useTheme } from '../../../contexts/ThemeContext';
@@ -37,6 +45,7 @@ import ListItemComponent from '../../../components/lists/ListItemComponent';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
+import DraggableListItem from '../../../components/lists/DraggableListItem';
 import { APIError } from '../../../services/api';
 
 export default function ListDetailScreen() {
@@ -65,6 +74,8 @@ export default function ListDetailScreen() {
     itemName: '',
   });
   const [selectedRecipeFilter, setSelectedRecipeFilter] = useState<string>('');
+  const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const isGroceryList = list?.list_type === 'grocery';
   const isTodoList = list?.list_type === 'todo';
@@ -88,20 +99,17 @@ export default function ListDetailScreen() {
 
   // Collapse all categories by default when list or items change
   useEffect(() => {
-    if (isGroceryList && groupedItems && Object.keys(groupedItems).length > 0) {
-      const allCategoryIds = new Set(Object.keys(groupedItems));
-      setCollapsedCategories(allCategoryIds);
+    if (isGroceryList && listItems.length > 0) {
+      // Compute categories from listItems directly
+      const categoryIds = new Set<string>();
+      listItems.forEach((item) => {
+        const categoryId = item.category ? String(item.category) : 'uncategorized';
+        categoryIds.add(categoryId);
+      });
+      setCollapsedCategories(categoryIds);
     }
-  }, [list?.id, isGroceryList]);
+  }, [list?.id, isGroceryList, listItems.length]);
 
-  // Debug: Log when editingItem changes
-  useEffect(() => {
-    console.log('editingItem changed:', editingItem);
-    console.log('isTodoList:', isTodoList);
-    console.log('DraggableFlatList available:', !!DraggableFlatList);
-    console.log('GestureHandlerRootView available:', !!GestureHandlerRootView);
-    console.log('Should show edit form:', editingItem && (Platform.OS === 'web' || !isTodoList || !DraggableFlatList || !GestureHandlerRootView));
-  }, [editingItem, isTodoList]);
 
   const fetchList = async () => {
     if (!listId) return;
@@ -237,9 +245,7 @@ export default function ListDetailScreen() {
   const handleAddItem = async (data: CreateListItemData) => {
     try {
       setAdding(true);
-      console.log('Adding item with data:', data);
       const newItem = await ListService.createListItem(data);
-      console.log('Item created successfully:', newItem);
       await fetchListItems();
       setShowAddItem(false);
     } catch (err) {
@@ -253,18 +259,15 @@ export default function ListDetailScreen() {
 
   const handleUpdateItem = async (data: UpdateListItemData) => {
     if (!editingItem) {
-      console.log('handleUpdateItem called but editingItem is null');
       return;
     }
 
-    console.log('handleUpdateItem called with:', data, 'editingItem:', editingItem);
     try {
       setUpdatingItem(true);
       await ListService.updateListItem(editingItem.id, data);
       // Close the modal immediately to prevent showing stale data
       setEditingItem(null);
       await fetchListItems();
-      console.log('Item updated successfully');
     } catch (err) {
       console.error('Error updating item:', err);
       const apiError = err as APIError;
@@ -314,6 +317,108 @@ export default function ListDetailScreen() {
     }
   };
 
+  // Web drag-and-drop handlers
+  const handleWebDragStart = (itemId: number) => {
+    setDraggedItemId(itemId);
+  };
+
+  const handleWebDragOver = (e: any, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleWebDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleWebDrop = async (e: any, dropIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverIndex(null);
+
+    if (draggedItemId === null) {
+      return;
+    }
+
+    const sortedItems = [...filteredItems].sort((a, b) => {
+      if (a.order !== b.order) {
+        return (a.order || 0) - (b.order || 0);
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    const draggedItem = sortedItems.find((item) => item.id === draggedItemId);
+    if (!draggedItem) return;
+
+    const dragIndex = sortedItems.findIndex((item) => item.id === draggedItemId);
+    if (dragIndex === -1 || dragIndex === dropIndex) {
+      setDraggedItemId(null);
+      return;
+    }
+
+    // Reorder items
+    const newItems = [...sortedItems];
+    newItems.splice(dragIndex, 1);
+    newItems.splice(dropIndex, 0, draggedItem);
+
+    // Update order values
+    const updatePromises = newItems.map((item, index) =>
+      ListService.updateListItem(item.id, { order: index })
+    );
+
+    try {
+      await Promise.all(updatePromises);
+      setListItems(newItems);
+      await fetchListItems();
+    } catch (err) {
+      console.error('Error reordering items:', err);
+      await fetchListItems(); // Revert by refetching
+    }
+
+    setDraggedItemId(null);
+  };
+
+  const handleWebDragEnd = () => {
+    setDraggedItemId(null);
+    setDragOverIndex(null);
+  };
+
+  // Simple move functions for mobile when DraggableFlatList is not available
+  const handleMoveItem = async (itemId: number, direction: 'up' | 'down') => {
+    const sortedItems = [...filteredItems].sort((a, b) => {
+      if (a.order !== b.order) {
+        return (a.order || 0) - (b.order || 0);
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    const currentIndex = sortedItems.findIndex((item) => item.id === itemId);
+    if (currentIndex === -1) return;
+
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= sortedItems.length) return;
+
+    // Swap items
+    const newItems = [...sortedItems];
+    [newItems[currentIndex], newItems[newIndex]] = [newItems[newIndex], newItems[currentIndex]];
+
+    // Update order values
+    const updatePromises = newItems.map((item, index) =>
+      ListService.updateListItem(item.id, { order: index })
+    );
+
+    try {
+      await Promise.all(updatePromises);
+      await fetchListItems();
+    } catch (err) {
+      console.error('Error moving item:', err);
+      await fetchListItems(); // Revert by refetching
+    }
+  };
+
   const renderItem = ({ item, drag, isActive }: any) => {
     // On web, use modal instead of inline editing
     if (editingItem && editingItem.id === item.id && Platform.OS !== 'web') {
@@ -338,22 +443,34 @@ export default function ListDetailScreen() {
         item={item}
         onToggleComplete={() => toggleItemComplete(item)}
         onEdit={() => {
-          console.log('Edit button clicked for item:', item);
           setEditingItem(item);
         }}
         onDelete={() => handleDeleteItem(item)}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
+        onDrag={drag ? () => {
+          drag();
+        } : undefined}
+        onMoveUp={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+          handleMoveItem(item.id, 'up');
+        } : undefined}
+        onMoveDown={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+          handleMoveItem(item.id, 'down');
+        } : undefined}
       />
     );
 
-    if (isTodoList && ScaleDecorator && drag) {
+    if (isTodoList && ScaleDecorator && drag && Platform.OS !== 'web') {
       return (
         <ScaleDecorator>
           <TouchableOpacity
-            onLongPress={drag}
+            onLongPress={() => {
+              drag();
+            }}
             disabled={isActive}
             activeOpacity={0.7}
+            style={isActive ? { opacity: 0.5 } : undefined}
+            delayLongPress={300} // Reduce delay to 300ms for better UX
           >
             {itemComponent}
           </TouchableOpacity>
@@ -431,7 +548,6 @@ export default function ListDetailScreen() {
           {!showAddItem && !editingItem ? (
             <TouchableOpacity
               onPress={() => {
-                console.log('Add Item button pressed, showAddItem:', showAddItem, 'editingItem:', editingItem);
                 setShowAddItem(true);
               }}
               style={[styles.addButton, { backgroundColor: colors.primary }]}
@@ -442,7 +558,6 @@ export default function ListDetailScreen() {
           ) : showAddItem && !editingItem ? (
             <TouchableOpacity
               onPress={() => {
-                console.log('Cancel Add Item button pressed');
                 setShowAddItem(false);
               }}
               style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
@@ -453,7 +568,6 @@ export default function ListDetailScreen() {
           ) : editingItem && (!isTodoList || !DraggableFlatList || !GestureHandlerRootView) ? (
             <TouchableOpacity
               onPress={() => {
-                console.log('Cancel Edit Item button pressed');
                 setEditingItem(null);
               }}
               style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
@@ -472,11 +586,9 @@ export default function ListDetailScreen() {
         >
           <AddItemForm
             onSubmit={(data) => {
-              console.log('AddItemForm onSubmit called with:', data);
               handleAddItem(data);
             }}
             onCancel={() => {
-              console.log('AddItemForm onCancel called');
               setShowAddItem(false);
             }}
             listId={list.id}
@@ -524,11 +636,9 @@ export default function ListDetailScreen() {
                   <AddItemForm
                     editingItem={editingItem}
                     onSubmit={(data) => {
-                      console.log('AddItemForm edit onSubmit called with:', data);
                       handleUpdateItem(data);
                     }}
                     onCancel={() => {
-                      console.log('AddItemForm edit onCancel called');
                       setEditingItem(null);
                     }}
                     listId={list.id}
@@ -556,16 +666,14 @@ export default function ListDetailScreen() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.modalContentContainer}
               >
-                <AddItemForm
-                  editingItem={editingItem}
-                  onSubmit={(data) => {
-                    console.log('AddItemForm edit onSubmit called with:', data);
-                    handleUpdateItem(data);
-                  }}
-                  onCancel={() => {
-                    console.log('AddItemForm edit onCancel called');
-                    setEditingItem(null);
-                  }}
+                  <AddItemForm
+                    editingItem={editingItem}
+                    onSubmit={(data) => {
+                      handleUpdateItem(data);
+                    }}
+                    onCancel={() => {
+                      setEditingItem(null);
+                    }}
                   listId={list.id}
                   categories={categories}
                   isGroceryList={isGroceryList}
@@ -608,7 +716,6 @@ export default function ListDetailScreen() {
                 onToggleCollapse={() => toggleCategory(categoryId)}
                 onToggleItemComplete={toggleItemComplete}
                 onEditItem={(item) => {
-                  console.log('onEditItem called for item:', item);
                   setEditingItem(item);
                 }}
                 onDeleteItem={handleDeleteItem}
@@ -617,7 +724,7 @@ export default function ListDetailScreen() {
             );
           })}
         </ScrollView>
-      ) : isTodoList && DraggableFlatList && GestureHandlerRootView ? (
+      ) : isTodoList && DraggableFlatList && GestureHandlerRootView && Platform.OS !== 'web' ? (
         <GestureHandlerRootView style={{ flex: 1 }}>
           <DraggableFlatList
             data={[...filteredItems].sort((a, b) => {
@@ -626,7 +733,9 @@ export default function ListDetailScreen() {
               }
               return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
             })}
-            onDragEnd={handleDragEnd}
+            onDragEnd={(params) => {
+              handleDragEnd(params);
+            }}
             keyExtractor={(item) => item.id.toString()}
             renderItem={renderItem}
             contentContainerStyle={styles.itemsContainer}
@@ -634,21 +743,56 @@ export default function ListDetailScreen() {
         </GestureHandlerRootView>
       ) : (
         <FlatList
-          data={filteredItems}
+          data={[...filteredItems].sort((a, b) => {
+            if (a.order !== b.order) {
+              return (a.order || 0) - (b.order || 0);
+            }
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          })}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <ListItemComponent
-              item={item}
-              onToggleComplete={() => toggleItemComplete(item)}
-              onEdit={() => {
-          console.log('Edit button clicked for item:', item);
-          setEditingItem(item);
-        }}
-              onDelete={() => handleDeleteItem(item)}
-              isGroceryList={isGroceryList}
-              isTodoList={isTodoList}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            if (Platform.OS === 'web' && isTodoList) {
+              return (
+                <DraggableListItem
+                  item={item}
+                  index={index}
+                  draggedItemId={draggedItemId}
+                  dragOverIndex={dragOverIndex}
+                  onDragStart={handleWebDragStart}
+                  onDragOver={handleWebDragOver}
+                  onDragLeave={handleWebDragLeave}
+                  onDrop={handleWebDrop}
+                  onDragEnd={handleWebDragEnd}
+                  onToggleComplete={() => toggleItemComplete(item)}
+                  onEdit={() => {
+                    setEditingItem(item);
+                  }}
+                  onDelete={() => handleDeleteItem(item)}
+                  isGroceryList={isGroceryList}
+                  isTodoList={isTodoList}
+                />
+              );
+            }
+            
+            return (
+              <ListItemComponent
+                item={item}
+                onToggleComplete={() => toggleItemComplete(item)}
+                onEdit={() => {
+                  setEditingItem(item);
+                }}
+                onDelete={() => handleDeleteItem(item)}
+                isGroceryList={isGroceryList}
+                isTodoList={isTodoList}
+                onMoveUp={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+                  handleMoveItem(item.id, 'up');
+                } : undefined}
+                onMoveDown={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+                  handleMoveItem(item.id, 'down');
+                } : undefined}
+              />
+            );
+          }}
           contentContainerStyle={styles.itemsContainer}
         />
       )}
@@ -870,6 +1014,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: 16,
     textAlign: 'center',
+  },
+  draggingItem: {
+    opacity: 0.5,
+    // @ts-ignore - web-specific cursor style
+    ...(Platform.OS === 'web' && { cursor: 'grabbing' }),
+  },
+  dragOverItem: {
+    borderTopWidth: 2,
+    borderTopColor: '#007AFF',
+    // @ts-ignore - web-specific border style
+    ...(Platform.OS === 'web' && { borderTopStyle: 'solid' }),
   },
 });
 

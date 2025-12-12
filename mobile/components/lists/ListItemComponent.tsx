@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { ListItem } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -14,6 +14,9 @@ interface ListItemComponentProps {
   categories?: Array<{ id: number; name: string }>;
   isGroceryList?: boolean;
   isTodoList?: boolean;
+  onDrag?: () => void; // For mobile drag-and-drop
+  onMoveUp?: () => void; // For simple mobile reordering
+  onMoveDown?: () => void; // For simple mobile reordering
 }
 
 export default function ListItemComponent({
@@ -26,6 +29,9 @@ export default function ListItemComponent({
   categories = [],
   isGroceryList = false,
   isTodoList = false,
+  onDrag,
+  onMoveUp,
+  onMoveDown,
 }: ListItemComponentProps) {
   const { colors } = useTheme();
 
@@ -40,10 +46,58 @@ export default function ListItemComponent({
         !item.category && isGroceryList && styles.uncategorizedItem,
       ]}
     >
+      {isTodoList && (
+        <View style={styles.dragHandleContainer}>
+          {onDrag ? (
+            <TouchableOpacity
+              style={styles.dragHandle}
+              onLongPress={onDrag}
+              disabled={false}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <FontAwesome name="bars" size={14} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.dragHandle}>
+              <FontAwesome name="bars" size={14} color={colors.textSecondary} />
+            </View>
+          )}
+          {(onMoveUp || onMoveDown) && (
+            <View style={styles.moveButtons}>
+              {onMoveUp && (
+                <TouchableOpacity
+                  style={styles.moveButton}
+                  onPress={onMoveUp}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <FontAwesome name="chevron-up" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+              {onMoveDown && (
+                <TouchableOpacity
+                  style={styles.moveButton}
+                  onPress={onMoveDown}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <FontAwesome name="chevron-down" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+      )}
       <TouchableOpacity
         style={styles.checkboxContainer}
         onPress={onToggleComplete}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        // @ts-ignore - web-specific props
+        {...(Platform.OS === 'web' && {
+          'data-no-drag': 'true',
+          onMouseDown: (e: any) => {
+            // Stop propagation to prevent drag when clicking checkbox
+            e.stopPropagation();
+          },
+        })}
       >
         <View
           style={[
@@ -112,6 +166,14 @@ export default function ListItemComponent({
             style={styles.actionButton}
             onPress={onEdit}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            // @ts-ignore - web-specific props
+            {...(Platform.OS === 'web' && {
+              'data-no-drag': 'true',
+              onMouseDown: (e: any) => {
+                // Stop propagation to prevent drag when clicking edit button
+                e.stopPropagation();
+              },
+            })}
           >
             <FontAwesome name="edit" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -121,6 +183,14 @@ export default function ListItemComponent({
             style={styles.actionButton}
             onPress={onDelete}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            // @ts-ignore - web-specific props
+            {...(Platform.OS === 'web' && {
+              'data-no-drag': 'true',
+              onMouseDown: (e: any) => {
+                // Stop propagation to prevent drag when clicking delete button
+                e.stopPropagation();
+              },
+            })}
           >
             <FontAwesome name="trash" size={16} color="#FF3B30" />
           </TouchableOpacity>
@@ -138,6 +208,35 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'flex-start',
+    gap: 12,
+  },
+  dragHandleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: -4,
+    marginTop: 2,
+  },
+  dragHandle: {
+    padding: 4,
+    ...Platform.select({
+      web: {
+        cursor: 'grab',
+      },
+    }),
+  },
+  moveButtons: {
+    flexDirection: 'column',
+    marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moveButton: {
+    padding: 6,
+    marginVertical: 2,
+    minWidth: 24,
+    minHeight: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemCompleted: {
     opacity: 0.6,
