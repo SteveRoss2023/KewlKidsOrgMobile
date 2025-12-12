@@ -1,6 +1,11 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
+
+# Create router and register viewsets
+router = DefaultRouter()
+router.register(r'users', views.UserViewSet, basename='user')
 
 urlpatterns = [
     # Health check
@@ -11,8 +16,8 @@ urlpatterns = [
     path('auth/register/', views.RegisterView.as_view(), name='register'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
-    # API endpoints (to be added)
-    # path('users/', views.UserList.as_view(), name='user-list'),
+    # Router URLs (includes /users/me/profile/ and /users/me/profile/photo/)
+    path('', include(router.urls)),
 ]
 
 

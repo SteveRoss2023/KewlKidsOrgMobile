@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   TouchableOpacity,
@@ -6,17 +6,66 @@ import {
   Platform,
   Image,
   StatusBar,
+  AppState,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import FamilySelector from './FamilySelector';
 import { useTheme } from '../contexts/ThemeContext';
-import AuthService from '../services/authService';
+import ProfileService from '../services/profileService';
+import AuthenticatedImage from './AuthenticatedImage';
 
 export default function GlobalNavBar() {
   const router = useRouter();
   const { theme, toggleTheme, colors } = useTheme();
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
+  const [photoCacheBuster, setPhotoCacheBuster] = useState<number>(Date.now());
+
+  const loadUserPhoto = async () => {
+    try {
+      const profile = await ProfileService.getProfile();
+      if (profile?.photo_url) {
+        // Handle both full URLs and relative paths
+        const photoUrl = profile.photo_url.startsWith('http') 
+          ? profile.photo_url 
+          : profile.photo_url;
+        setUserPhotoUrl(photoUrl);
+        // Update cache buster to force image reload
+        setPhotoCacheBuster(Date.now());
+      } else {
+        setUserPhotoUrl(null);
+      }
+    } catch (error: any) {
+      // Silently fail if endpoint doesn't exist (404) - profile feature may not be implemented yet
+      if (error?.status !== 404) {
+        console.error('Error loading user photo:', error);
+      }
+      setUserPhotoUrl(null);
+    }
+  };
+
+  // Load photo on mount
+  useEffect(() => {
+    loadUserPhoto();
+    
+    // Reload photo when app comes to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        loadUserPhoto();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // Reload photo when screen comes into focus (e.g., returning from profile page)
+  useFocusEffect(
+    useCallback(() => {
+      loadUserPhoto();
+    }, [])
+  );
 
   const handleProfilePress = () => {
     router.push('/(tabs)/profile');
@@ -50,7 +99,19 @@ export default function GlobalNavBar() {
           activeOpacity={0.7}
         >
           {userPhotoUrl ? (
-            <Image source={{ uri: userPhotoUrl }} style={styles.avatar} />
+            <AuthenticatedImage 
+              source={{ 
+                uri: userPhotoUrl.includes('?') 
+                  ? `${userPhotoUrl}&_t=${photoCacheBuster}` 
+                  : `${userPhotoUrl}?_t=${photoCacheBuster}`
+              }} 
+              style={styles.avatar}
+              placeholder={
+                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                  <FontAwesome name="user" size={16} color={colors.textSecondary} />
+                </View>
+              }
+            />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
               <FontAwesome name="user" size={16} color={colors.textSecondary} />

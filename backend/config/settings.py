@@ -188,12 +188,55 @@ SIMPLE_JWT = {
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
     CORS_ALLOW_CREDENTIALS = True
+    # Explicitly allow common development origins
+    CORS_ALLOWED_ORIGINS = [
+        'http://localhost:8081',
+        'http://localhost:19000',
+        'http://localhost:19006',
+        'http://127.0.0.1:8081',
+        'http://127.0.0.1:19000',
+        'http://127.0.0.1:19006',
+    ]
+    # Allow credentials for authenticated requests
+    CORS_ALLOW_CREDENTIALS = True
+    # Allow all headers (needed for Authorization header)
+    CORS_ALLOW_HEADERS = [
+        'accept',
+        'accept-encoding',
+        'authorization',
+        'content-type',
+        'dnt',
+        'origin',
+        'user-agent',
+        'x-csrftoken',
+        'x-requested-with',
+    ]
+    # Allow all methods
+    CORS_ALLOW_METHODS = [
+        'DELETE',
+        'GET',
+        'OPTIONS',
+        'PATCH',
+        'POST',
+        'PUT',
+    ]
 else:
     CORS_ALLOWED_ORIGINS = os.getenv(
         'CORS_ALLOWED_ORIGINS',
         'http://localhost:8081,http://localhost:19000,http://localhost:19006'
     ).split(',')
     CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'True') == 'True'
+    CORS_ALLOW_HEADERS = [
+        'accept',
+        'accept-encoding',
+        'authorization',
+        'content-type',
+        'dnt',
+        'origin',
+        'user-agent',
+        'x-csrftoken',
+        'x-requested-with',
+    ]
 
 # Channels Configuration (for WebSockets)
 ASGI_APPLICATION = 'config.asgi.application'

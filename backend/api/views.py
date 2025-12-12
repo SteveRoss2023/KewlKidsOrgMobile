@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status, serializers
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.generics import CreateAPIView
@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from .models import UserProfile
+from .serializers import UserProfileSerializer
 
 User = get_user_model()
 
@@ -183,6 +184,106 @@ class EmailTokenObtainPairView(TokenObtainPairView):
                 pass
 
         return response
+
+
+class UserViewSet(viewsets.ReadOnlyModelViewSet):
+    """User viewset for profile management."""
+    queryset = User.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_context(self):
+        """Add request to serializer context."""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    @action(detail=False, methods=['get', 'put', 'patch'], url_path='me/profile')
+    def my_profile(self, request):
+        """Get or update current user's profile."""
+        profile = UserProfile.get_or_create_profile(request.user)
+
+        if request.method == 'GET':
+            serializer = UserProfileSerializer(profile, context={'request': request})
+            return Response(serializer.data)
+
+        elif request.method in ['PUT', 'PATCH']:
+            serializer = UserProfileSerializer(
+                profile, 
+                data=request.data, 
+                partial=request.method == 'PATCH', 
+                context={'request': request}
+            )
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['delete'], url_path='me/profile/photo')
+    def delete_photo(self, request):
+        """Delete current user's profile photo."""
+        profile = UserProfile.get_or_create_profile(request.user)
+        if profile.photo:
+            profile.photo.delete()
+            profile.save()
+            return Response({'detail': 'Photo deleted successfully.'}, status=status.HTTP_200_OK)
+        return Response({'detail': 'No photo to delete.'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['get'], url_path='photo', permission_classes=[IsAuthenticated])
+    def get_photo(self, request, pk=None):
+        """Get user's profile photo (decrypted)."""
+        from django.http import HttpResponse
+
+        user = self.get_object()
+        profile = UserProfile.get_or_create_profile(user)
+
+        # Allow users to view their own photo or photos of users in their families
+        can_view = False
+        if user == request.user:
+            can_view = True
+        else:
+            # Check if user is in the same family
+            from families.models import Member
+            user_families = Member.objects.filter(user=request.user).values_list('family_id', flat=True)
+            target_families = Member.objects.filter(user=user).values_list('family_id', flat=True)
+            if set(user_families) & set(target_families):
+                can_view = True
+
+        if not can_view:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if not profile.photo:
+            return Response({'detail': 'No photo available.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            profile.photo.seek(0)
+            file_data = profile.photo.read()
+
+            # Decrypt the file data
+            decrypted_data = profile._decrypt_file_data(file_data)
+
+            # Determine content type
+            if hasattr(profile.photo, 'name'):
+                name = profile.photo.name
+                if name.endswith('.png'):
+                    content_type = 'image/png'
+                elif name.endswith('.gif'):
+                    content_type = 'image/gif'
+                else:
+                    content_type = 'image/jpeg'
+            else:
+                content_type = 'image/jpeg'
+
+            # Return HttpResponse directly to bypass DRF content negotiation
+            # This allows any Accept header to work
+            response = HttpResponse(decrypted_data, content_type=content_type)
+            # Add cache headers to help with performance
+            response['Cache-Control'] = 'private, max-age=3600'
+            return response
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error serving photo: {str(e)}', exc_info=True)
+            return Response({'detail': 'Error serving photo.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Add more views here as you migrate features from the reference project
