@@ -363,6 +363,12 @@ class AcceptInvitationView(APIView):
     # GET doesn't require auth (for email links), POST requires auth (for API calls)
     permission_classes = [AllowAny]
 
+    def _is_mobile_request(self, request):
+        """Check if request is from a mobile device."""
+        user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+        mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'ipod', 'blackberry', 'windows phone']
+        return any(keyword in user_agent for keyword in mobile_keywords)
+
     def _get_web_app_url(self, request):
         """Helper method to determine web app URL for redirects."""
         host = request.get_host()
@@ -387,6 +393,24 @@ class AcceptInvitationView(APIView):
             web_url = f"{request.scheme}://{clean_host}"
         
         return web_url
+
+    def _get_redirect_url(self, request, path, params=None):
+        """Get redirect URL - deep link for mobile, web URL for desktop."""
+        from urllib.parse import urlencode
+        
+        if params is None:
+            params = {}
+        
+        query_string = urlencode(params) if params else ''
+        full_path = f"{path}?{query_string}" if query_string else path
+        
+        # If mobile device, use deep link
+        if self._is_mobile_request(request):
+            return f"kewlkids://{full_path}"
+        
+        # Otherwise, use web app URL
+        web_url = self._get_web_app_url(request)
+        return f"{web_url}{full_path}"
 
     def post(self, request):
         """Accept invitation with token - requires authentication."""
@@ -467,9 +491,135 @@ class AcceptInvitationView(APIView):
             'family_name': str(invitation.family.name)
         }, status=status.HTTP_200_OK)
 
+    def _safe_redirect(self, url):
+        """Create a safe redirect response that allows custom URL schemes."""
+        from django.http import HttpResponse
+        # Check if it's a custom scheme (like kewlkids://)
+        if '://' in url and not url.startswith(('http://', 'https://')):
+            # For custom schemes, use immediate JavaScript redirect with fallback
+            # Escape the URL for use in HTML/JavaScript
+            import html
+            escaped_url = html.escape(url)
+            html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opening App...</title>
+    <style>
+        * {{
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }}
+        .container {{
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }}
+        .spinner {{
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }}
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        .message {{
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 30px;
+        }}
+        .link-button {{
+            display: inline-block;
+            background-color: #3b82f6;
+            color: white !important;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .link-button:hover {{
+            background-color: #2563eb;
+        }}
+        .link-button:active {{
+            background-color: #1d4ed8;
+        }}
+        .info-text {{
+            font-size: 14px;
+            color: #666;
+            margin-top: 20px;
+            line-height: 1.5;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <p class="message">Opening app...</p>
+        <a href="{escaped_url}" class="link-button">Open in App</a>
+        <p class="info-text">
+            If the app doesn't open automatically, tap the button above.
+            <br><br>
+            <small>Note: Deep links work after building the app. In Expo Go, you may need to tap the button.</small>
+        </p>
+    </div>
+    <script>
+        // Try immediate redirect
+        (function() {{
+            try {{
+                window.location.href = "{escaped_url}";
+            }} catch (e) {{
+                console.error('Redirect error:', e);
+            }}
+        }})();
+        
+        // Fallback: try after a short delay
+        setTimeout(function() {{
+            try {{
+                window.location.href = "{escaped_url}";
+            }} catch (e) {{
+                console.error('Fallback redirect error:', e);
+            }}
+        }}, 100);
+        
+        // Final fallback: try with location.replace
+        setTimeout(function() {{
+            try {{
+                window.location.replace("{escaped_url}");
+            }} catch (e) {{
+                console.error('Replace redirect error:', e);
+            }}
+        }}, 500);
+    </script>
+</body>
+</html>'''
+            response = HttpResponse(html_content, content_type='text/html; charset=utf-8')
+            response.status_code = 200
+            return response
+        else:
+            # For http/https, use standard redirect
+            from django.http import HttpResponseRedirect
+            return HttpResponseRedirect(url)
+
     def get(self, request):
         """Accept invitation via GET request (for email links) - redirects to login/register or returns JSON."""
-        from django.http import HttpResponseRedirect
         from urllib.parse import urlencode
         
         token = request.query_params.get('token')
@@ -479,9 +629,8 @@ class AcceptInvitationView(APIView):
             # Check if browser request - redirect to login with error
             accept_header = request.META.get('HTTP_ACCEPT', '')
             if 'text/html' in accept_header or not accept_header.startswith('application/json'):
-                web_url = self._get_web_app_url(request)
-                redirect_url = f"{web_url}/(auth)/login?error=Invalid invitation link"
-                return HttpResponseRedirect(redirect_url)
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'Invalid invitation link'})
+                return self._safe_redirect(redirect_url)
             
             return Response(
                 {'detail': 'Token is required.', 'needs_registration': False},
@@ -495,9 +644,8 @@ class AcceptInvitationView(APIView):
             # Invitation doesn't exist at all
             accept_header = request.META.get('HTTP_ACCEPT', '')
             if 'text/html' in accept_header or not accept_header.startswith('application/json'):
-                web_url = self._get_web_app_url(request)
-                redirect_url = f"{web_url}/(auth)/login?error=Invalid invitation link"
-                return HttpResponseRedirect(redirect_url)
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'Invalid invitation link'})
+                return self._safe_redirect(redirect_url)
             
             return Response(
                 {'detail': 'Invalid invitation token. The invitation may have been cancelled or does not exist.', 'needs_registration': False},
@@ -508,24 +656,21 @@ class AcceptInvitationView(APIView):
         if invitation.status == 'accepted':
             accept_header = request.META.get('HTTP_ACCEPT', '')
             if 'text/html' in accept_header or not accept_header.startswith('application/json'):
-                web_url = self._get_web_app_url(request)
                 # Check if user is logged in
                 if request.user.is_authenticated:
                     # Redirect to home page with message
-                    params = urlencode({
+                    redirect_url = self._get_redirect_url(request, '/(tabs)', {
                         'message': f'This invitation to join {invitation.family.name} has already been accepted.',
                         'message_type': 'info'
                     })
-                    redirect_url = f"{web_url}/(tabs)?{params}"
                 else:
                     # Redirect to login with message and email
-                    params = urlencode({
+                    redirect_url = self._get_redirect_url(request, '/(auth)/login', {
                         'message': f'This invitation to join {invitation.family.name} has already been accepted. Please log in to access the family.',
                         'message_type': 'info',
                         'email': invitation.email
                     })
-                    redirect_url = f"{web_url}/(auth)/login?{params}"
-                    return HttpResponseRedirect(redirect_url)
+                return self._safe_redirect(redirect_url)
             
             return Response({
                 'detail': 'This invitation has already been accepted.',
@@ -538,9 +683,8 @@ class AcceptInvitationView(APIView):
         if invitation.status == 'cancelled':
             accept_header = request.META.get('HTTP_ACCEPT', '')
             if 'text/html' in accept_header or not accept_header.startswith('application/json'):
-                web_url = self._get_web_app_url(request)
-                redirect_url = f"{web_url}/(auth)/login?error=This invitation has been cancelled"
-                return HttpResponseRedirect(redirect_url)
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'This invitation has been cancelled'})
+                return self._safe_redirect(redirect_url)
             
             return Response({
                 'detail': 'This invitation has been cancelled.',
@@ -552,19 +696,17 @@ class AcceptInvitationView(APIView):
         if not invitation.can_be_accepted():
             accept_header = request.META.get('HTTP_ACCEPT', '')
             if 'text/html' in accept_header or not accept_header.startswith('application/json'):
-                web_url = self._get_web_app_url(request)
                 # Check if expired or other reason
                 if invitation.is_expired():
                     error_msg = 'This invitation has expired. Please ask for another invitation from your host.'
                 else:
                     error_msg = 'This invitation is no longer valid. Please ask for another invitation from your host.'
                 
-                params = urlencode({
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {
                     'error': error_msg,
                     'email': invitation.email
                 })
-                redirect_url = f"{web_url}/(auth)/login?{params}"
-                return HttpResponseRedirect(redirect_url)
+                return self._safe_redirect(redirect_url)
             
             return Response(
                 {'detail': 'Invitation has expired or is no longer valid. Please ask for another invitation from your host.', 'needs_registration': False},
@@ -577,9 +719,6 @@ class AcceptInvitationView(APIView):
             user_exists = True
         except User.DoesNotExist:
             user_exists = False
-
-        # Get web app URL for redirects
-        web_url = self._get_web_app_url(request)
         
         # Check if this is a browser request (wants HTML) vs API request (wants JSON)
         accept_header = request.META.get('HTTP_ACCEPT', '')
@@ -589,13 +728,12 @@ class AcceptInvitationView(APIView):
         if not user_exists:
             if is_browser_request:
                 # Redirect to register with invitation token
-                params = urlencode({
+                redirect_url = self._get_redirect_url(request, '/(auth)/register', {
                     'invitation_token': token,
                     'invitation_email': invitation.email,
                     'family_name': str(invitation.family.name)
                 })
-                redirect_url = f"{web_url}/(auth)/register?{params}"
-                return HttpResponseRedirect(redirect_url)
+                return self._safe_redirect(redirect_url)
             
             return Response({
                 'detail': 'User account not found. Please register to accept this invitation.',
@@ -611,12 +749,11 @@ class AcceptInvitationView(APIView):
             # Check if logged-in user's email matches invitation email
             if request.user.email.lower() != invitation.email.lower():
                 if is_browser_request:
-                    params = urlencode({
+                    redirect_url = self._get_redirect_url(request, '/(auth)/login', {
                         'error': f'This invitation was sent to {invitation.email}, but you are logged in as {request.user.email}',
                         'email': invitation.email
                     })
-                    redirect_url = f"{web_url}/(auth)/login?{params}"
-                    return HttpResponseRedirect(redirect_url)
+                    return self._safe_redirect(redirect_url)
                 
                 return Response({
                     'detail': f'This invitation was sent to {invitation.email}, but you are logged in as {request.user.email}. Please log out and log in with the correct account.',
@@ -629,8 +766,8 @@ class AcceptInvitationView(APIView):
                 invitation.status = 'cancelled'
                 invitation.save()
                 if is_browser_request:
-                    redirect_url = f"{web_url}/(tabs)"
-                    return HttpResponseRedirect(redirect_url)
+                    redirect_url = self._get_redirect_url(request, '/(tabs)')
+                    return self._safe_redirect(redirect_url)
                 
                 return Response({
                     'detail': 'You are already a member of this family.',
@@ -644,11 +781,10 @@ class AcceptInvitationView(APIView):
             profile = UserProfile.get_or_create_profile(request.user)
             if not profile.email_verified:
                 if is_browser_request:
-                    params = urlencode({
+                    redirect_url = self._get_redirect_url(request, '/(tabs)/profile', {
                         'error': 'Please verify your email before accepting invitations'
                     })
-                    redirect_url = f"{web_url}/(tabs)/profile?{params}"
-                    return HttpResponseRedirect(redirect_url)
+                    return self._safe_redirect(redirect_url)
                 
                 return Response({
                     'detail': 'Please verify your email before accepting invitations.',
@@ -678,14 +814,13 @@ class AcceptInvitationView(APIView):
 
             if is_browser_request:
                 # Redirect to web app with temp token
-                params = urlencode({
+                redirect_url = self._get_redirect_url(request, '/', {
                     'verify_token': temp_token,
                     'email': request.user.email,
                     'accept_invitation_token': token,
                     'accept_invitation_email': invitation.email
                 })
-                redirect_url = f"{web_url}?{params}"
-                return HttpResponseRedirect(redirect_url)
+                return self._safe_redirect(redirect_url)
             
             return Response({
                 'detail': 'Invitation accepted successfully.',
@@ -702,12 +837,14 @@ class AcceptInvitationView(APIView):
         
         if not profile.email_verified:
             if is_browser_request:
-                params = urlencode({
-                    'error': 'Please verify your email before accepting invitations',
-                    'email': invitation.email
+                # Redirect to login with clear instructions
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {
+                    'message': 'Please verify your email address before accepting this invitation. After logging in, check your email for a verification link, then click the invitation link again.',
+                    'message_type': 'warning',
+                    'email': invitation.email,
+                    'invitation_token': token
                 })
-                redirect_url = f"{web_url}/(auth)/login?{params}"
-                return HttpResponseRedirect(redirect_url)
+                return self._safe_redirect(redirect_url)
             
             return Response({
                 'detail': 'Please verify your email before accepting invitations.',
@@ -737,14 +874,13 @@ class AcceptInvitationView(APIView):
         
         if is_browser_request:
             # Redirect to web app with temp token
-            params = urlencode({
+            redirect_url = self._get_redirect_url(request, '/', {
                 'verify_token': temp_token,
                 'email': invited_user.email,
                 'accept_invitation_token': token,
                 'accept_invitation_email': invitation.email
             })
-            redirect_url = f"{web_url}?{params}"
-            return HttpResponseRedirect(redirect_url)
+            return self._safe_redirect(redirect_url)
         
         return Response({
             'detail': 'Invitation accepted successfully. Use the temporary token to log in.',

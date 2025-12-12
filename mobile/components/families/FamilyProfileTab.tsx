@@ -9,7 +9,6 @@ import {
   ScrollView,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { Family } from '../../services/familyService';
 import FamilyService from '../../services/familyService';
 import { APIError } from '../../services/api';
@@ -42,7 +41,6 @@ export default function FamilyProfileTab({
   onDeleteFamily,
   deleting = false,
 }: FamilyProfileTabProps) {
-  const router = useRouter();
   const { colors } = useTheme();
   const [isEditing, setIsEditing] = useState(false);
   const [editFamilyName, setEditFamilyName] = useState(family.name);
@@ -175,12 +173,6 @@ export default function FamilyProfileTab({
         <View style={styles.editHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Family Information</Text>
           <View style={styles.headerButtons}>
-            <TouchableOpacity
-              onPress={() => router.push('/(tabs)/families')}
-              style={styles.backButton}
-            >
-              <FontAwesome name="arrow-left" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
             {canEdit && (
               <TouchableOpacity
                 onPress={handleEdit}
@@ -335,9 +327,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  backButton: {
-    padding: 8,
   },
   editButton: {
     padding: 8,

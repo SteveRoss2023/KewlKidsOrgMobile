@@ -448,6 +448,12 @@ class EmailVerificationView(APIView):
     """Verify user email with token."""
     permission_classes = [AllowAny]
 
+    def _is_mobile_request(self, request):
+        """Check if request is from a mobile device."""
+        user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+        mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'ipod', 'blackberry', 'windows phone']
+        return any(keyword in user_agent for keyword in mobile_keywords)
+
     def _get_web_app_url(self, request):
         """Helper method to determine web app URL for redirects."""
         import os
@@ -471,6 +477,151 @@ class EmailVerificationView(APIView):
             web_url = f"{request.scheme}://{clean_host}"
         
         return web_url
+
+    def _get_redirect_url(self, request, path, params=None):
+        """Get redirect URL - deep link for mobile, web URL for desktop."""
+        from urllib.parse import urlencode
+        
+        if params is None:
+            params = {}
+        
+        query_string = urlencode(params) if params else ''
+        full_path = f"{path}?{query_string}" if query_string else path
+        
+        # If mobile device, use deep link
+        if self._is_mobile_request(request):
+            return f"kewlkids://{full_path}"
+        
+        # Otherwise, use web app URL
+        web_url = self._get_web_app_url(request)
+        return f"{web_url}{full_path}"
+
+    def _safe_redirect(self, url):
+        """Create a safe redirect response that allows custom URL schemes."""
+        from django.http import HttpResponse
+        # Check if it's a custom scheme (like kewlkids://)
+        if '://' in url and not url.startswith(('http://', 'https://')):
+            # For custom schemes, use immediate JavaScript redirect with fallback
+            # Escape the URL for use in HTML/JavaScript
+            import html
+            escaped_url = html.escape(url)
+            html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opening App...</title>
+    <style>
+        * {{
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }}
+        .container {{
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }}
+        .spinner {{
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }}
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        .message {{
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 30px;
+        }}
+        .link-button {{
+            display: inline-block;
+            background-color: #3b82f6;
+            color: white !important;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .link-button:hover {{
+            background-color: #2563eb;
+        }}
+        .link-button:active {{
+            background-color: #1d4ed8;
+        }}
+        .info-text {{
+            font-size: 14px;
+            color: #666;
+            margin-top: 20px;
+            line-height: 1.5;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <p class="message">Opening app...</p>
+        <a href="{escaped_url}" class="link-button">Open in App</a>
+        <p class="info-text">
+            If the app doesn't open automatically, tap the button above.
+            <br><br>
+            <small>Note: Deep links work after building the app. In Expo Go, you may need to tap the button.</small>
+        </p>
+    </div>
+    <script>
+        // Try immediate redirect
+        (function() {{
+            try {{
+                window.location.href = "{escaped_url}";
+            }} catch (e) {{
+                console.error('Redirect error:', e);
+            }}
+        }})();
+        
+        // Fallback: try after a short delay
+        setTimeout(function() {{
+            try {{
+                window.location.href = "{escaped_url}";
+            }} catch (e) {{
+                console.error('Fallback redirect error:', e);
+            }}
+        }}, 100);
+        
+        // Final fallback: try with location.replace
+        setTimeout(function() {{
+            try {{
+                window.location.replace("{escaped_url}");
+            }} catch (e) {{
+                console.error('Replace redirect error:', e);
+            }}
+        }}, 500);
+    </script>
+</body>
+</html>'''
+            response = HttpResponse(html_content, content_type='text/html; charset=utf-8')
+            response.status_code = 200
+            return response
+        else:
+            # For http/https, use standard redirect
+            from django.http import HttpResponseRedirect
+            return HttpResponseRedirect(url)
 
     def post(self, request):
         """Verify email via POST request."""
@@ -507,7 +658,6 @@ class EmailVerificationView(APIView):
 
     def get(self, request):
         """Verify email via GET request (for email links)."""
-        from django.http import HttpResponseRedirect
         from urllib.parse import urlencode
         import os
         
@@ -520,9 +670,8 @@ class EmailVerificationView(APIView):
 
         if not token or not email:
             if is_browser_request:
-                web_url = self._get_web_app_url(request)
-                redirect_url = f"{web_url}/(auth)/login?error=Invalid verification link"
-                return HttpResponseRedirect(redirect_url)
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'Invalid verification link'})
+                return self._safe_redirect(redirect_url)
             
             return Response(
                 {'detail': 'Token and email are required.'},
@@ -536,28 +685,25 @@ class EmailVerificationView(APIView):
             # Check if email is already verified
             if profile.email_verified:
                 if is_browser_request:
-                    web_url = self._get_web_app_url(request)
                     # Email already verified, redirect to success page
-                    redirect_url = f"{web_url}/(tabs)?verified=true&email={email}"
-                    return HttpResponseRedirect(redirect_url)
+                    redirect_url = self._get_redirect_url(request, '/(tabs)', {'verified': 'true', 'email': email})
+                    return self._safe_redirect(redirect_url)
                 
                 return Response({'detail': 'Email is already verified.'}, status=status.HTTP_200_OK)
 
             # Try to verify the email
             if profile.verify_email(token):
                 if is_browser_request:
-                    web_url = self._get_web_app_url(request)
                     # Always redirect to home page - the web app will handle showing success message
                     # and redirecting to login if user is not authenticated
-                    redirect_url = f"{web_url}/(tabs)?verified=true&email={email}"
-                    return HttpResponseRedirect(redirect_url)
+                    redirect_url = self._get_redirect_url(request, '/(tabs)', {'verified': 'true', 'email': email})
+                    return self._safe_redirect(redirect_url)
                 
                 return Response({'detail': 'Email verified successfully.'}, status=status.HTTP_200_OK)
             else:
                 if is_browser_request:
-                    web_url = self._get_web_app_url(request)
-                    redirect_url = f"{web_url}/(auth)/login?error=Invalid or expired verification token"
-                    return HttpResponseRedirect(redirect_url)
+                    redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'Invalid or expired verification token'})
+                    return self._safe_redirect(redirect_url)
                 
                 return Response(
                     {'detail': 'Invalid or expired verification token.'},
@@ -565,9 +711,8 @@ class EmailVerificationView(APIView):
                 )
         except User.DoesNotExist:
             if is_browser_request:
-                web_url = self._get_web_app_url(request)
-                redirect_url = f"{web_url}/(auth)/login?error=User not found"
-                return HttpResponseRedirect(redirect_url)
+                redirect_url = self._get_redirect_url(request, '/(auth)/login', {'error': 'User not found'})
+                return self._safe_redirect(redirect_url)
             
             return Response(
                 {'detail': 'User not found.'},

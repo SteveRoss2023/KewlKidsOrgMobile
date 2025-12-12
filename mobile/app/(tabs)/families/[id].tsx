@@ -163,10 +163,18 @@ export default function FamilyDetailScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: family.color }]}>
-        <Text style={styles.familyName}>{family.name}</Text>
-        <Text style={styles.memberCount}>
-          {members.length} {members.length === 1 ? 'member' : 'members'}
-        </Text>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => router.push('/(tabs)/families')}
+        >
+          <FontAwesome name="arrow-left" size={20} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <Text style={styles.familyName}>{family.name}</Text>
+          <Text style={styles.memberCount}>
+            {members.length} {members.length === 1 ? 'member' : 'members'}
+          </Text>
+        </View>
       </View>
 
       <View style={[styles.tabBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
@@ -278,6 +286,17 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 16,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  headerContent: {
+    flex: 1,
   },
   familyName: {
     fontSize: 28,
