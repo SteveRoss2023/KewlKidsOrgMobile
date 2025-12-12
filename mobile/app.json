@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kewlkids.organizer"
+      "bundleIdentifier": "com.kewlkids.organizer",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone to use voice commands for creating and managing lists."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +26,10 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.kewlkids.organizer",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

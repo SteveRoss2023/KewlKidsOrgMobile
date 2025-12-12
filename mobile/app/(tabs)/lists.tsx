@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -20,6 +21,10 @@ import ListCard from '../../components/lists/ListCard';
 import AddListForm from '../../components/lists/AddListForm';
 import AlertModal from '../../components/AlertModal';
 import { APIError } from '../../services/api';
+import { useVoiceRecognition } from '../../hooks/useVoiceRecognition';
+import { speak } from '../../utils/voiceFeedback';
+import { parseCreateList } from '../../utils/voiceCommands';
+import VoiceButton from '../../components/VoiceButton';
 
 type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'other';
 
@@ -47,6 +52,12 @@ export default function ListsScreen() {
     itemCount: 0,
   });
 
+  // Voice recognition
+  const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
+  const lastProcessedTranscriptRef = useRef('');
+  const [awaitingListType, setAwaitingListType] = useState(false);
+  const [pendingListName, setPendingListName] = useState<string | null>(null);
+
   // Load lists when family changes or screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -57,6 +68,208 @@ export default function ListsScreen() {
       }
     }, [selectedFamily])
   );
+
+  // Handle voice commands
+  useEffect(() => {
+    if (!transcript || !isSupported || !selectedFamily) return;
+
+    // Prevent duplicate processing of the same transcript
+    if (transcript === lastProcessedTranscriptRef.current) return;
+    lastProcessedTranscriptRef.current = transcript;
+
+    const handleVoiceCommand = async () => {
+      const text = transcript.toLowerCase().trim();
+
+      try {
+        // Handle list type selection if we're waiting for it (check this FIRST)
+        if (awaitingListType) {
+          // Ignore if this looks like the prompt message being repeated back
+          if (text.includes('what type of list') || text.includes('say todo') || text.includes('say grocery') || 
+              text.includes('say shopping') || text.includes('say other')) {
+            console.log('🎤 [LISTS] Ignoring prompt message:', text);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            // Restart listening
+            setTimeout(() => {
+              start({ ignoreTranscriptsForMs: 2000 });
+            }, 300); // Reduced from 500ms to 300ms
+            return;
+          }
+
+          const normalizedType = text.toLowerCase().trim();
+          let listType: ListType | null = null;
+          
+          // Normalize "to do" variations
+          const normalizedForTodo = normalizedType.replace(/\s+/g, ' '); // Normalize spaces
+          
+          // Check for exact matches first (most common case)
+          // Handle "to do" as two words
+          if (normalizedType === 'todo' || normalizedType === 'to do' || normalizedType === 'to-do' || 
+              normalizedType === '1' || normalizedType === 'one' || normalizedForTodo === 'to do') {
+            listType = 'todo';
+          } else if (normalizedType === 'grocery' || normalizedType === '2' || normalizedType === 'two') {
+            listType = 'grocery';
+          } else if (normalizedType === 'shopping' || normalizedType === '3' || normalizedType === 'three') {
+            listType = 'shopping';
+          } else if (normalizedType === 'other' || normalizedType === '4' || normalizedType === 'four') {
+            listType = 'other';
+          } 
+          // Check for partial matches (but be careful not to match "say todo" etc.)
+          else if (normalizedType.includes('todo') || normalizedType.includes('to do') || normalizedType.includes('to-do')) {
+            // Make sure it's not part of "say todo" or similar
+            if (!normalizedType.includes('say')) {
+              listType = 'todo';
+            }
+          } else if (normalizedType.includes('grocery') && !normalizedType.includes('say')) {
+            listType = 'grocery';
+          } else if (normalizedType.includes('shopping') && !normalizedType.includes('say')) {
+            listType = 'shopping';
+          } else if (normalizedType.includes('other') && !normalizedType.includes('say')) {
+            listType = 'other';
+          }
+          
+          if (!listType) {
+            // Invalid selection - ask again but don't reset everything
+            console.log('🎤 [LISTS] Invalid list type response:', text);
+            speak('Invalid selection. Please say: to do, grocery, shopping, or other', () => {
+              setTimeout(() => {
+                start({ ignoreTranscriptsForMs: 2000 });
+              }, 300); // Reduced from 500ms to 300ms
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+
+          stop();
+          setAwaitingListType(false);
+          
+          if (pendingListName) {
+            try {
+              setCreating(true);
+              setError('');
+              await ListService.createList({
+                name: pendingListName,
+                description: '',
+                list_type: listType,
+                color: '#10b981',
+                family: selectedFamily.id,
+              });
+
+              await fetchLists();
+              const listTypeDisplay = listType === 'todo' ? 'to do' : listType;
+              speak(`List "${pendingListName}" created successfully as a ${listTypeDisplay} list.`);
+              setCreating(false);
+              setPendingListName(null);
+            } catch (err) {
+              console.error('Error creating list:', err);
+              const apiError = err as APIError;
+              setError(apiError.message || 'Failed to create list. Please try again.');
+              speak('Sorry, I could not create the list. Please try again.');
+              setCreating(false);
+              setPendingListName(null);
+            }
+          }
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        // Ignore transcripts that look like feedback messages (to prevent feedback loops)
+        // But only if we're NOT waiting for list type (to avoid blocking valid responses)
+        if (!awaitingListType) {
+          const feedbackPatterns = [
+            'created successfully',
+            'could not create',
+            'please use',
+            'please say',
+            'sorry',
+            'error',
+            'try again',
+            'what type of list',
+            'invalid selection',
+            'say todo',
+            'say grocery',
+            'say shopping',
+            'say other',
+          ];
+          if (feedbackPatterns.some((pattern) => text.includes(pattern))) {
+            console.log('🎤 [LISTS] Ignoring feedback message:', text);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            stop();
+            return;
+          }
+        }
+
+        // Parse create list command
+        const createListCmd = parseCreateList(text);
+        if (createListCmd) {
+          // Stop recognition immediately to prevent picking up feedback
+          stop();
+
+          // Always prompt for list type
+          setPendingListName(createListCmd.name);
+          setAwaitingListType(true);
+          lastProcessedTranscriptRef.current = '';
+          reset(); // Clear transcript before speaking
+          speak('What type of list? Say: to do, grocery, shopping, or other', () => {
+            // Start listening quickly but ignore the prompt message
+            setTimeout(() => {
+              start({ ignoreTranscriptsForMs: 2000 }); // Ignore transcripts for 2 seconds after prompt
+            }, 300); // Reduced from 1000ms to 300ms
+          });
+          return;
+        }
+
+        // No command matched
+        speak('Please use: create list name');
+        lastProcessedTranscriptRef.current = '';
+        reset();
+      } catch (error) {
+        console.error('Error processing voice command:', error);
+        speak('Sorry, there was an error. Please try again.');
+        reset();
+      }
+    };
+
+    handleVoiceCommand();
+  }, [transcript, isSupported, selectedFamily, awaitingListType, pendingListName]);
+
+  const handleVoiceClick = () => {
+    if (isListening) {
+      stop();
+      reset();
+      return;
+    }
+
+    if (Platform.OS === 'web' && !isSupported) {
+      alert('Speech recognition is not supported in this browser.');
+      return;
+    }
+
+    // Reset state
+    reset();
+    setAwaitingListType(false);
+    setPendingListName(null);
+
+    // Start recognition briefly to capture user gesture (required for permission)
+    // Then stop it, speak instruction, and restart after instruction finishes
+    try {
+      start();
+      setTimeout(() => {
+        stop();
+        speak('Please say create list followed by the list name', () => {
+          setTimeout(() => {
+            start();
+          }, 100);
+        });
+      }, 50);
+    } catch (err) {
+      console.error('Error starting recognition:', err);
+      alert('Unable to start voice recognition. Please check your microphone permissions.');
+    }
+  };
 
   const fetchLists = async () => {
     if (!selectedFamily) return;
@@ -173,18 +386,27 @@ export default function ListsScreen() {
         <Text style={[styles.title, { color: colors.text }]}>
           Lists - {selectedFamily.name}
         </Text>
-        <TouchableOpacity
-          onPress={() => {
-            setEditingList(null);
-            setShowCreateForm(!showCreateForm);
-          }}
-          style={[styles.createButton, { backgroundColor: colors.primary }]}
-        >
-          <FontAwesome name={showCreateForm ? 'times' : 'plus'} size={16} color="#fff" />
-          <Text style={styles.createButtonText}>
-            {showCreateForm ? 'Cancel' : 'Create List'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {isSupported && (
+            <VoiceButton
+              onPress={handleVoiceClick}
+              isListening={isListening}
+              disabled={creating || updating}
+            />
+          )}
+          <TouchableOpacity
+            onPress={() => {
+              setEditingList(null);
+              setShowCreateForm(!showCreateForm);
+            }}
+            style={[styles.createButton, { backgroundColor: colors.primary }]}
+          >
+            <FontAwesome name={showCreateForm ? 'times' : 'plus'} size={16} color="#fff" />
+            <Text style={styles.createButtonText}>
+              {showCreateForm ? 'Cancel' : 'Create List'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {error ? (
@@ -319,6 +541,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   createButton: {
     flexDirection: 'row',

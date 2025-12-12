@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -47,6 +47,10 @@ import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
 import DraggableListItem from '../../../components/lists/DraggableListItem';
 import { APIError } from '../../../services/api';
+import { useVoiceRecognition } from '../../../hooks/useVoiceRecognition';
+import { speak } from '../../../utils/voiceFeedback';
+import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } from '../../../utils/voiceCommands';
+import VoiceButton from '../../../components/VoiceButton';
 
 export default function ListDetailScreen() {
   const router = useRouter();
@@ -76,6 +80,13 @@ export default function ListDetailScreen() {
   const [selectedRecipeFilter, setSelectedRecipeFilter] = useState<string>('');
   const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  // Voice recognition
+  const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
+  const lastProcessedTranscriptRef = useRef('');
+  const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
+  const [pendingMatches, setPendingMatches] = useState<ListItem[]>([]);
+  const [pendingAction, setPendingAction] = useState<'delete' | 'update' | null>(null);
 
   const isGroceryList = list?.list_type === 'grocery';
   const isTodoList = list?.list_type === 'todo';
@@ -109,6 +120,234 @@ export default function ListDetailScreen() {
       setCollapsedCategories(categoryIds);
     }
   }, [list?.id, isGroceryList, listItems.length]);
+
+  // Handle voice commands
+  useEffect(() => {
+    if (!transcript || !isSupported || !list) return;
+
+    // Prevent duplicate processing of the same transcript
+    if (transcript === lastProcessedTranscriptRef.current) return;
+    lastProcessedTranscriptRef.current = transcript;
+
+    const handleVoiceCommand = async () => {
+      const text = transcript.toLowerCase().trim();
+
+      try {
+        // Handle number selection for multiple matches
+        if (awaitingNumberSelection) {
+          const number = parseInt(text);
+          if (number >= 1 && number <= pendingMatches.length) {
+            const selected = pendingMatches[number - 1];
+            stop();
+
+            if (pendingAction === 'delete') {
+              try {
+                await ListService.deleteListItem(selected.id);
+                await fetchListItems();
+                speak('Item deleted successfully.');
+              } catch (err) {
+                console.error('Error deleting item:', err);
+                speak('Sorry, I could not delete the item.');
+              }
+            } else if (pendingAction === 'update') {
+              speak('Please use the update command with both old and new names.');
+            }
+            setAwaitingNumberSelection(false);
+            setPendingMatches([]);
+            setPendingAction(null);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          } else {
+            speak('Invalid selection. Please try again.');
+            setAwaitingNumberSelection(false);
+            setPendingMatches([]);
+            setPendingAction(null);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+        }
+
+        // Ignore transcripts that look like feedback messages
+        const feedbackPatterns = [
+          'added successfully',
+          'deleted successfully',
+          'updated successfully',
+          'could not add',
+          'could not delete',
+          'could not update',
+          'could not find',
+          'please use',
+          'sorry',
+          'error',
+          'try again',
+          'please specify',
+        ];
+        if (feedbackPatterns.some((pattern) => text.includes(pattern))) {
+          console.log('🎤 [LIST DETAIL] Ignoring feedback message:', text);
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          stop();
+          return;
+        }
+
+        // Parse add item command
+        const addItemCmd = parseAddItem(text);
+        if (addItemCmd) {
+          stop();
+
+          try {
+            await ListService.createListItem({
+              list: list.id,
+              name: addItemCmd.name,
+            });
+            await fetchListItems();
+            speak('Item added successfully.');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          } catch (err) {
+            console.error('Error adding item:', err);
+            speak('Sorry, I could not add the item. Please try again.');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+        }
+
+        // Parse delete item command
+        const deleteItemCmd = parseDeleteItem(text);
+        if (deleteItemCmd) {
+          stop();
+
+          const matches = findMatchingItems(listItems, deleteItemCmd.name, (item) => item.name);
+          if (matches.length === 0) {
+            speak('Sorry, I could not find that item.');
+          } else if (matches.length === 1) {
+            try {
+              await ListService.deleteListItem(matches[0].id);
+              await fetchListItems();
+              speak('Item deleted successfully.');
+            } catch (err) {
+              console.error('Error deleting item:', err);
+              speak('Sorry, I could not delete the item.');
+            }
+          } else {
+            // Multiple matches - ask for clarification
+            let message = 'I found multiple matching items. Please specify which one to delete: ';
+            matches.forEach((item, index) => {
+              message += `${index + 1}: ${item.name}. `;
+            });
+            setPendingMatches(matches);
+            setPendingAction('delete');
+            setAwaitingNumberSelection(true);
+            lastProcessedTranscriptRef.current = '';
+            speak(message, () => {
+              setTimeout(() => {
+                start();
+              }, 500);
+            });
+            return;
+          }
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        // Parse update item command
+        const updateItemCmd = parseUpdateItem(text);
+        if (updateItemCmd) {
+          stop();
+
+          const matches = findMatchingItems(listItems, updateItemCmd.oldName, (item) => item.name);
+          if (matches.length === 0) {
+            speak('Sorry, I could not find that item.');
+          } else if (matches.length === 1) {
+            try {
+              await ListService.updateListItem(matches[0].id, {
+                name: updateItemCmd.newName,
+              });
+              await fetchListItems();
+              speak('Item updated successfully.');
+            } catch (err) {
+              console.error('Error updating item:', err);
+              speak('Sorry, I could not update the item. Please try again.');
+            }
+          } else {
+            // Multiple matches - ask for clarification
+            let message = 'I found multiple matching items. Please specify which one to update: ';
+            matches.forEach((item, index) => {
+              message += `${index + 1}: ${item.name}. `;
+            });
+            setPendingMatches(matches);
+            setPendingAction('update');
+            setAwaitingNumberSelection(true);
+            lastProcessedTranscriptRef.current = '';
+            speak(message, () => {
+              setTimeout(() => {
+                start();
+              }, 500);
+            });
+            return;
+          }
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        // No command matched
+        speak('Please use one of these commands: add item name, delete item name, or update item name to new name');
+        lastProcessedTranscriptRef.current = '';
+        reset();
+      } catch (error) {
+        console.error('Error processing voice command:', error);
+        speak('Sorry, there was an error. Please try again.');
+        reset();
+      }
+    };
+
+    handleVoiceCommand();
+  }, [transcript, list, listItems, awaitingNumberSelection, pendingMatches, pendingAction, isSupported]);
+
+  const handleVoiceClick = () => {
+    if (isListening) {
+      stop();
+      reset();
+      return;
+    }
+
+    if (Platform.OS === 'web' && !isSupported) {
+      alert('Speech recognition is not supported in this browser.');
+      return;
+    }
+
+    // Reset state
+    reset();
+    setAwaitingNumberSelection(false);
+    setPendingMatches([]);
+    setPendingAction(null);
+
+    // Start recognition briefly to capture user gesture (required for permission)
+    // Then stop it, speak instruction, and restart after instruction finishes
+    try {
+      start();
+      setTimeout(() => {
+        stop();
+        speak(
+          'Please say add followed by your item to add an item, delete followed by the item name to delete, or update followed by the item name and new name to update',
+          () => {
+            setTimeout(() => {
+              start();
+            }, 100);
+          }
+        );
+      }, 50);
+    } catch (err) {
+      console.error('Error starting recognition:', err);
+      alert('Unable to start voice recognition. Please check your microphone permissions.');
+    }
+  };
 
 
   const fetchList = async () => {
@@ -545,6 +784,13 @@ export default function ListDetailScreen() {
           </View>
         )}
         <View style={styles.actionButtons}>
+          {isSupported && !showAddItem && !editingItem && (
+            <VoiceButton
+              onPress={handleVoiceClick}
+              isListening={isListening}
+              disabled={adding || updatingItem}
+            />
+          )}
           {!showAddItem && !editingItem ? (
             <TouchableOpacity
               onPress={() => {
