@@ -266,6 +266,18 @@ class ProfileService {
   }
 
   /**
+   * Resend email verification email
+   */
+  async resendVerificationEmail(): Promise<void> {
+    try {
+      const response = await apiClient.post('/auth/resend-verification/');
+      // No data returned, just success
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
    * Delete user's profile photo
    */
   async deletePhoto(): Promise<void> {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthService, { RegisterData } from '../../services/authService';
 import AlertModal from '../../components/AlertModal';
@@ -19,6 +19,11 @@ import { useTheme } from '../../contexts/ThemeContext';
 export default function RegisterScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const params = useLocalSearchParams<{ 
+    invitation_email?: string; 
+    invitation_token?: string; 
+    family_name?: string;
+  }>();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -28,6 +33,16 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPassword2, setShowPassword2] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  // Pre-populate email from invitation if present
+  useEffect(() => {
+    if (params.invitation_email) {
+      setFormData(prev => ({
+        ...prev,
+        email: params.invitation_email || '',
+      }));
+    }
+  }, [params.invitation_email]);
   const [alertModal, setAlertModal] = useState<{
     visible: boolean;
     title: string;
@@ -171,8 +186,20 @@ export default function RegisterScreen() {
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign up to get started</Text>
 
           <View style={styles.form}>
+            {params.invitation_email && params.family_name && (
+              <View style={[styles.invitationBanner, { backgroundColor: `${colors.primary}20`, borderColor: colors.primary }]}>
+                <FontAwesome name="envelope" size={16} color={colors.primary} />
+                <Text style={[styles.invitationText, { color: colors.primary }]}>
+                  You've been invited to join {params.family_name}
+                </Text>
+              </View>
+            )}
             <TextInput
-              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              style={[
+                styles.input, 
+                { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
+                params.invitation_email && styles.inputDisabled
+              ]}
               placeholder="Email *"
               placeholderTextColor={colors.textSecondary}
               value={formData.email}
@@ -180,7 +207,7 @@ export default function RegisterScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              editable={!loading}
+              editable={!loading && !params.invitation_email}
             />
 
             <TextInput
@@ -355,6 +382,23 @@ const styles = StyleSheet.create({
   },
   linkTextBold: {
     fontWeight: '600',
+  },
+  invitationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    gap: 8,
+  },
+  invitationText: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+  inputDisabled: {
+    opacity: 0.6,
   },
 });
 

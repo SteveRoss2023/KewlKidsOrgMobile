@@ -64,6 +64,16 @@ export default function ProfileScreen() {
     } catch (err) {
       const apiError = err as APIError;
       
+      // If unauthorized (401), user needs to log in again
+      if (apiError.status === 401) {
+        console.error('Authentication failed. Redirecting to login.');
+        // Clear any stored tokens
+        await AuthService.logout();
+        // Redirect to login
+        router.replace('/(auth)/login');
+        return;
+      }
+      
       // If endpoint doesn't exist (404), use fallback data from AuthService
       if (apiError.status === 404) {
         // Don't log 404 errors - endpoint may not be implemented yet

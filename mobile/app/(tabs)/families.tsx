@@ -3,16 +3,35 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import FamilyService, { Family } from '../../services/familyService';
 import { APIError } from '../../services/api';
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useFamily } from '../../contexts/FamilyContext';
+import AuthService from '../../services/authService';
 
 export default function FamiliesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { selectedFamily } = useFamily();
   const [families, setFamilies] = useState<Family[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
+  // Load current user ID
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      try {
+        const userData = await AuthService.getUserData();
+        if (userData) {
+          setCurrentUserId(userData.id);
+        }
+      } catch (error) {
+        console.error('Error loading current user:', error);
+      }
+    };
+    loadCurrentUser();
+  }, []);
 
   // Load families on mount
   useEffect(() => {
@@ -78,22 +97,41 @@ export default function FamiliesScreen() {
         </View>
       ) : (
         <View style={styles.familiesList}>
-          {families.map((family) => (
-            <TouchableOpacity
-              key={family.id}
-              style={[styles.familyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleFamilyPress(family.id)}
-            >
-              <View style={[styles.familyColor, { backgroundColor: family.color }]} />
-              <View style={styles.familyContent}>
-                <Text style={[styles.familyName, { color: colors.text }]}>{family.name}</Text>
-                <Text style={[styles.familyInfo, { color: colors.textSecondary }]}>
-                  {family.member_count || 0} {family.member_count === 1 ? 'member' : 'members'}
-                </Text>
-              </View>
-              <FontAwesome name="chevron-right" size={16} color={colors.textSecondary} />
-            </TouchableOpacity>
-          ))}
+          {families.map((family) => {
+            const isActive = selectedFamily?.id === family.id;
+            const isOwner = currentUserId !== null && family.owner === currentUserId;
+            
+            return (
+              <TouchableOpacity
+                key={family.id}
+                style={[styles.familyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => handleFamilyPress(family.id)}
+              >
+                <View style={[styles.familyColor, { backgroundColor: family.color }]} />
+                <View style={styles.familyContent}>
+                  <View style={styles.familyHeader}>
+                    <Text style={[styles.familyName, { color: colors.text }]} numberOfLines={1}>
+                      {family.name}
+                    </Text>
+                    {isActive && (
+                      <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={styles.checkmark} />
+                    )}
+                  </View>
+                  <View style={styles.familyBadges}>
+                    <View style={[styles.badge, isOwner ? styles.ownerBadge : styles.memberBadge]}>
+                      <Text style={[styles.badgeText, isOwner ? styles.ownerBadgeText : styles.memberBadgeText]}>
+                        {isOwner ? 'Owner' : 'Member'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.familyInfo, { color: colors.textSecondary }]}>
+                      {family.member_count || 0} {family.member_count === 1 ? 'member' : 'members'}
+                    </Text>
+                  </View>
+                </View>
+                <FontAwesome name="chevron-right" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
       </ScrollView>
@@ -184,10 +222,45 @@ const styles = StyleSheet.create({
   familyContent: {
     flex: 1,
   },
+  familyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    flexShrink: 1,
+  },
   familyName: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 4,
+  },
+  checkmark: {
+    marginLeft: 8,
+    flexShrink: 0,
+  },
+  familyBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  ownerBadge: {
+    backgroundColor: '#fef3c7',
+  },
+  memberBadge: {
+    backgroundColor: '#e0e7ff',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  ownerBadgeText: {
+    color: '#92400e',
+  },
+  memberBadgeText: {
+    color: '#3730a3',
   },
   familyInfo: {
     fontSize: 14,

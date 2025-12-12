@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Family } from '../services/familyService';
 import FamilyService from '../services/familyService';
 import { storage, STORAGE_KEYS } from '../utils/storage';
+import AuthService from '../services/authService';
 
 interface FamilyContextType {
   selectedFamily: Family | null;
@@ -31,7 +32,7 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   // Load families and restore selected family from storage
-  const loadFamilies = async () => {
+  const loadFamilies = React.useCallback(async () => {
     try {
       setLoading(true);
       const familiesData = await FamilyService.getFamilies();
@@ -44,22 +45,27 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
         const savedFamily = familiesList.find(f => f.id === parseInt(savedFamilyId));
         if (savedFamily) {
           setSelectedFamilyState(savedFamily);
+          setLoading(false);
           return;
         }
       }
 
-      // Auto-select first family if none selected
-      if (!selectedFamily && familiesList.length > 0) {
-        setSelectedFamilyState(familiesList[0]);
-        await storage.setItem(STORAGE_KEYS.FAMILY_ID, familiesList[0].id.toString());
-      }
+      // Auto-select first family if none selected (check current state, not parameter)
+      setSelectedFamilyState((currentSelected) => {
+        if (!currentSelected && familiesList.length > 0) {
+          storage.setItem(STORAGE_KEYS.FAMILY_ID, familiesList[0].id.toString());
+          return familiesList[0];
+        }
+        return currentSelected;
+      });
     } catch (error) {
       console.error('Error loading families:', error);
       setFamilies([]);
+      setSelectedFamilyState(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Set selected family and persist to storage
   const setSelectedFamily = async (family: Family | null) => {
@@ -71,14 +77,48 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
     }
   };
 
-  // Refresh families list
-  const refreshFamilies = async () => {
+  // Refresh families list - memoized to prevent infinite loops
+  const refreshFamilies = React.useCallback(async () => {
     await loadFamilies();
-  };
+  }, [loadFamilies]);
 
   // Load families on mount
   useEffect(() => {
-    loadFamilies();
+    let isMounted = true;
+    
+    const checkAuthAndLoad = async () => {
+      try {
+        // Check if authenticated
+        const isAuthenticated = await AuthService.isAuthenticated();
+        if (!isMounted) return;
+        
+        if (isAuthenticated) {
+          // Load families - the API will handle authentication
+          await loadFamilies();
+        } else {
+          // Not authenticated, clear families
+          if (isMounted) {
+            setFamilies([]);
+            setSelectedFamilyState(null);
+            setLoading(false);
+          }
+        }
+      } catch (error: any) {
+        console.error('Error in checkAuthAndLoad:', error);
+        // On error, still set loading to false so UI doesn't spin forever
+        if (isMounted) {
+          setLoading(false);
+          setFamilies([]);
+          setSelectedFamilyState(null);
+        }
+      }
+    };
+    
+    checkAuthAndLoad();
+    
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Update selected family if it's no longer in the list or if it has been updated

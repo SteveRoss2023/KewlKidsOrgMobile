@@ -19,8 +19,21 @@ const getApiBaseUrl = (): string => {
     return url;
   }
   
-  // On web, use localhost
+  // On web, detect if we're running on ngrok and use ngrok API URL
   if (Platform.OS === 'web') {
+    // Check if we're accessing the app via ngrok
+    if (typeof window !== 'undefined' && window.location.hostname.includes('ngrok')) {
+      // If on ngrok web app, use ngrok API URL (same domain, different path)
+      // Replace web app ngrok domain with API ngrok domain
+      const hostname = window.location.hostname;
+      // Assuming API is on kewlkidsorganizermobile.ngrok.app and web is on kewlkidsorganizermobile-web.ngrok.app
+      if (hostname.includes('kewlkidsorganizermobile-web')) {
+        return 'https://kewlkidsorganizermobile.ngrok.app/api';
+      }
+      // Fallback: use same domain for API
+      return `https://${hostname.replace('-web', '')}/api`;
+    }
+    // Not on ngrok, use localhost
     return 'http://localhost:8900/api';
   }
   

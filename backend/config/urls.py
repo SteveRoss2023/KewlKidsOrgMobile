@@ -18,6 +18,12 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+
+# Customize admin site
+admin.site.site_header = "KewlKids Organizer Admin"
+admin.site.site_title = "KewlKids Admin"
+admin.site.index_title = "Welcome to KewlKids Organizer Administration"
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -25,7 +31,9 @@ urlpatterns = [
     path('api/', include('families.urls')),
 ]
 
-# Serve media files in development
+# Serve static and media files in development
 if settings.DEBUG:
+    # Use staticfiles URL patterns (automatically finds files in app static/ directories)
+    urlpatterns += staticfiles_urlpatterns()
+    # Serve media files
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

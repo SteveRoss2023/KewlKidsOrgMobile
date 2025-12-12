@@ -35,6 +35,7 @@ export interface UserData {
   id: number;
   email: string;
   display_name?: string;
+  email_verified?: boolean;
 }
 
 /**

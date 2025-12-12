@@ -10,6 +10,7 @@ router.register(r'families', views.FamilyViewSet, basename='family')
 router.register(r'invitations', views.InvitationViewSet, basename='invitation')
 
 urlpatterns = [
+    path('invitations/accept/', views.AcceptInvitationView.as_view(), name='accept_invitation'),
     path('', include(router.urls)),
 ]
 

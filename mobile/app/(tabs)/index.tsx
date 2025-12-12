@@ -1,10 +1,14 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useEffect, useState, useCallback } from 'react';
 import AuthService from '../../services/authService';
 import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useFamily } from '../../contexts/FamilyContext';
+import AlertModal from '../../components/AlertModal';
+import EmailVerificationBanner from '../../components/EmailVerificationBanner';
+import ProfileService from '../../services/profileService';
 
 interface FeatureCard {
   id: string;
@@ -18,8 +22,18 @@ interface FeatureCard {
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { refreshFamilies } = useFamily();
+  const params = useLocalSearchParams<{ 
+    verified?: string; 
+    email?: string;
+    message?: string;
+    message_type?: 'success' | 'error' | 'info' | 'warning';
+  }>();
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [showVerifiedModal, setShowVerifiedModal] = useState(false);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
 
   const cards: FeatureCard[] = [
     {
@@ -84,11 +98,64 @@ export default function HomeScreen() {
     loadUserData();
   }, []);
 
+  // Refresh verification status when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Only refresh if we have a user email and verification status is false
+      if (userEmail && emailVerified === false) {
+        loadUserData();
+      }
+      // Don't refresh families here - let FamilyContext handle it on mount
+      // This prevents infinite loops
+    }, [userEmail, emailVerified])
+  );
+
+  useEffect(() => {
+    // Check if email was just verified
+    if (params.verified === 'true') {
+      setShowVerifiedModal(true);
+      setEmailVerified(true); // Update verification status
+      // Reload user data to get updated verification status
+      loadUserData();
+      // Clear the URL parameters after a short delay to avoid re-triggering
+      const timer = setTimeout(() => {
+        router.replace('/(tabs)');
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    
+    // Check for other messages (e.g., invitation already accepted)
+    if (params.message && params.message_type) {
+      setShowMessageModal(true);
+      // Clear the URL parameters after a short delay
+      const timer = setTimeout(() => {
+        router.replace('/(tabs)');
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [params.verified, params.message, params.message_type]);
+
   const loadUserData = async () => {
     try {
       const userData = await AuthService.getUserData();
       if (userData) {
         setUserEmail(userData.email);
+        // Check email verification status from user data first
+        if (userData.email_verified !== undefined) {
+          setEmailVerified(userData.email_verified);
+        }
+      }
+      
+      // Also check profile to get latest verification status
+      try {
+        const profile = await ProfileService.getProfile();
+        setEmailVerified(profile.email_verified);
+      } catch (error) {
+        // If profile fetch fails, use the value from userData if available
+        // Don't set to false if we don't have any data
+        if (userData?.email_verified === undefined) {
+          setEmailVerified(null);
+        }
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -164,6 +231,16 @@ export default function HomeScreen() {
         )}
       </View>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
+        {/* Show email verification banner if email is not verified */}
+        {emailVerified === false && userEmail && (
+          <EmailVerificationBanner
+            email={userEmail}
+            onVerificationComplete={() => {
+              setEmailVerified(true);
+              loadUserData();
+            }}
+          />
+        )}
 
       <View style={styles.cardsContainer}>
         {cards.filter(card => !card.hidden).map(card => (
@@ -184,6 +261,20 @@ export default function HomeScreen() {
         ))}
       </View>
       </ScrollView>
+      <AlertModal
+        visible={showVerifiedModal}
+        title="Email Verified"
+        message={`Your email ${params.email || 'address'} has been successfully verified!`}
+        type="success"
+        onClose={() => setShowVerifiedModal(false)}
+      />
+      <AlertModal
+        visible={showMessageModal}
+        title={params.message_type === 'info' ? 'Information' : params.message_type === 'error' ? 'Error' : 'Notice'}
+        message={params.message || ''}
+        type={params.message_type || 'info'}
+        onClose={() => setShowMessageModal(false)}
+      />
     </View>
   );
 }

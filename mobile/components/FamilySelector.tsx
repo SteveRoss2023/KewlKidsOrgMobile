@@ -1,26 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import { useFamily } from '../contexts/FamilyContext';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function FamilySelector() {
   const { selectedFamily, setSelectedFamily, families, loading } = useFamily();
   const { colors } = useTheme();
-  const [modalVisible, setModalVisible] = useState(false);
+  const [dropdownVisible, setDropdownVisible] = useState(false);
+  const selectorRef = useRef<View>(null);
 
   const handleSelectFamily = (family: typeof families[0]) => {
     setSelectedFamily(family);
-    setModalVisible(false);
+    setDropdownVisible(false);
+  };
+
+  const handleToggleDropdown = () => {
+    setDropdownVisible(!dropdownVisible);
+  };
+
+  const handleCloseDropdown = () => {
+    setDropdownVisible(false);
   };
 
   if (loading) {
@@ -40,10 +48,10 @@ export default function FamilySelector() {
   }
 
   return (
-    <>
+    <View style={styles.container} ref={selectorRef}>
       <TouchableOpacity
         style={[styles.selector, { backgroundColor: colors.background, borderColor: colors.border }]}
-        onPress={() => setModalVisible(true)}
+        onPress={handleToggleDropdown}
         activeOpacity={0.7}
       >
         <View style={[styles.colorIndicator, { backgroundColor: selectedFamily?.color || colors.primary }]} />
@@ -53,31 +61,27 @@ export default function FamilySelector() {
         >
           {selectedFamily?.name || 'Select Family'}
         </Text>
-        <FontAwesome name="chevron-down" size={14} color={colors.textSecondary} style={styles.chevron} />
+        <Ionicons 
+          name={dropdownVisible ? "chevron-up" : "chevron-down"} 
+          size={16} 
+          color={colors.textSecondary} 
+          style={styles.chevron} 
+        />
       </TouchableOpacity>
 
-      <Modal
-        visible={modalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setModalVisible(false)}
-        >
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Select Family</Text>
-              <TouchableOpacity
-                onPress={() => setModalVisible(false)}
-                style={styles.closeButton}
-              >
-                <FontAwesome name="times" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.familiesList}>
+      {dropdownVisible && (
+        <>
+          <TouchableOpacity
+            style={styles.dropdownOverlay}
+            activeOpacity={1}
+            onPress={handleCloseDropdown}
+          />
+          <View style={[styles.dropdown, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <ScrollView 
+              style={styles.dropdownList}
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+            >
               {families.map((family) => (
                 <TouchableOpacity
                   key={family.id}
@@ -96,24 +100,26 @@ export default function FamilySelector() {
                     </Text>
                   </View>
                   {selectedFamily?.id === family.id && (
-                    <FontAwesome name="check" size={16} color={colors.primary} />
+                    <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
                   )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
-        </TouchableOpacity>
-      </Modal>
-    </>
+        </>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 40,
+    zIndex: 1000,
   },
   selector: {
     flexDirection: 'row',
@@ -153,21 +159,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    borderRadius: 12,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '80%',
+  dropdownOverlay: {
+    position: 'absolute',
+    top: -10000,
+    left: -10000,
+    right: -10000,
+    bottom: -10000,
+    zIndex: 998,
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      },
+    }),
+  },
+  dropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    maxHeight: 300,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+        minWidth: 200,
       },
       default: {
         shadowColor: '#000',
@@ -177,41 +198,25 @@ const styles = StyleSheet.create({
         elevation: 8,
       },
     }),
+    zIndex: 1001,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  familiesList: {
-    maxHeight: 400,
+  dropdownList: {
+    maxHeight: 300,
   },
   familyOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: 12,
     borderBottomWidth: 1,
-  },
-  familyOptionSelected: {
-    // Applied inline with backgroundColor
   },
   familyOptionContent: {
     flex: 1,
     marginLeft: 12,
   },
   familyOptionName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   familyOptionMembers: {
     fontSize: 12,

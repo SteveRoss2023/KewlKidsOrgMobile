@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthService, { LoginCredentials } from '../../services/authService';
 import AlertModal from '../../components/AlertModal';
@@ -19,10 +19,19 @@ import { useTheme } from '../../contexts/ThemeContext';
 export default function LoginScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const params = useLocalSearchParams<{ 
+    email?: string; 
+    invitation_email?: string;
+    error?: string;
+    verified?: string;
+    message?: string;
+    message_type?: 'success' | 'error' | 'info' | 'warning';
+  }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const messageShownRef = useRef(false); // Track if we've already shown the message
   const [alertModal, setAlertModal] = useState<{
     visible: boolean;
     title: string;
@@ -34,6 +43,66 @@ export default function LoginScreen() {
     message: '',
     type: 'info',
   });
+
+  // Pre-populate email from URL parameters (run first to capture email before clearing URL)
+  useEffect(() => {
+    const emailParam = params.email || params.invitation_email;
+    if (emailParam) {
+      setEmail(emailParam);
+    }
+  }, [params.email, params.invitation_email]);
+
+  // Show error message if present in URL
+  useEffect(() => {
+    if (params.error && !alertModal.visible) {
+      setAlertModal({
+        visible: true,
+        title: 'Error',
+        message: decodeURIComponent(params.error),
+        type: 'error',
+      });
+    }
+  }, [params.error]);
+
+  // Show success message if email was verified
+  useEffect(() => {
+    if (params.verified === 'true' && params.email && !alertModal.visible) {
+      setAlertModal({
+        visible: true,
+        title: 'Email Verified',
+        message: `Your email ${params.email} has been successfully verified!`,
+        type: 'success',
+      });
+    }
+  }, [params.verified, params.email]);
+
+  // Show info/warning message if present in URL (e.g., invitation already accepted)
+  useEffect(() => {
+    if (params.message && params.message_type && !messageShownRef.current && !alertModal.visible) {
+      messageShownRef.current = true;
+      
+      const title = params.message_type === 'info' ? 'Information' 
+        : params.message_type === 'warning' ? 'Warning'
+        : params.message_type === 'error' ? 'Error'
+        : 'Notice';
+      
+      let decodedMessage = params.message;
+      try {
+        decodedMessage = params.message.replace(/\+/g, ' ');
+        decodedMessage = decodeURIComponent(decodedMessage);
+      } catch (e) {
+        decodedMessage = params.message.replace(/\+/g, ' ');
+      }
+      
+      // Set modal state - this persists regardless of URL changes
+      setAlertModal({
+        visible: true,
+        title: title,
+        message: decodedMessage,
+        type: params.message_type,
+      });
+    }
+  }, [params.message, params.message_type]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -154,7 +223,21 @@ export default function LoginScreen() {
         title={alertModal.title}
         message={alertModal.message}
         type={alertModal.type}
-        onClose={() => setAlertModal({ ...alertModal, visible: false })}
+        onClose={() => {
+          // Close modal first
+          setAlertModal(prev => ({ ...prev, visible: false }));
+          messageShownRef.current = false; // Reset so it can show again if needed
+          
+          // Clear URL parameters after a small delay to ensure modal closes smoothly
+          setTimeout(() => {
+            const emailParam = params.email || params.invitation_email;
+            if (emailParam) {
+              router.replace(`/(auth)/login?email=${encodeURIComponent(emailParam)}`);
+            } else {
+              router.replace('/(auth)/login');
+            }
+          }, 100);
+        }}
       />
     </KeyboardAvoidingView>
   );
