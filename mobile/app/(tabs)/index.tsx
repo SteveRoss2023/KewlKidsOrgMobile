@@ -173,7 +173,7 @@ export default function HomeScreen() {
         // TODO: Navigate to calendar when implemented
         break;
       case 'lists':
-        // TODO: Navigate to lists when implemented
+        router.push('/(tabs)/lists');
         break;
       case 'chat':
         // TODO: Navigate to chat when implemented

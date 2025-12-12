@@ -29,6 +29,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
     path('api/', include('families.urls')),
+    path('api/', include('lists.urls')),
 ]
 
 # Serve static and media files in development

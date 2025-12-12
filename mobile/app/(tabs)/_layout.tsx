@@ -35,6 +35,22 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="lists"
+        options={{
+          title: 'Lists',
+          tabBarLabel: 'Lists',
+          tabBarIcon: ({ color, size }) => (
+            <FontAwesome name="list" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="lists/[id]"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',

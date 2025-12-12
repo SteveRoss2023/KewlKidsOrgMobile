@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     # Local apps (must come before staticfiles to override runserver)
     'api',
     'families',
+    'lists',
     
     'django.contrib.staticfiles',
     
