@@ -25,6 +25,12 @@ export interface Member {
   user: number;
   user_email: string;
   user_display_name: string;
+  user_profile?: {
+    location_sharing_enabled: boolean;
+    latitude: string | null;
+    longitude: string | null;
+    last_location_update: string | null;
+  };
   role: 'owner' | 'admin' | 'member' | 'child';
   joined_at: string;
   is_active: boolean;

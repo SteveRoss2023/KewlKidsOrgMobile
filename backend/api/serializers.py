@@ -16,7 +16,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = ['id', 'email', 'display_name', 'photo', 'photo_url', 'email_verified', 
-                  'date_joined', 'created_at', 'updated_at']
+                  'date_joined', 'location_sharing_enabled', 'latitude', 'longitude', 
+                  'last_location_update', 'created_at', 'updated_at']
         read_only_fields = ['id', 'email', 'email_verified', 'date_joined', 'created_at', 'updated_at']
 
     def get_photo_url(self, obj):

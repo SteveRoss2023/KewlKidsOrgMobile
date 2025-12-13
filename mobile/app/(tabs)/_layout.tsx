@@ -100,6 +100,12 @@ export default function TabsLayout() {
           href: null, // Hide from tab bar - accessible via Home card
         }}
       />
+      <Tabs.Screen
+        name="map"
+        options={{
+          href: null, // Hide from tab bar - accessible via Home card
+        }}
+      />
     </Tabs>
   );
 }

@@ -13,10 +13,11 @@ class MemberSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_display_name = serializers.SerializerMethodField()
     family_name = serializers.SerializerMethodField()
+    user_profile = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
-        fields = ['id', 'family', 'family_name', 'user', 'user_email', 'user_display_name', 'role', 'joined_at', 'is_active']
+        fields = ['id', 'family', 'family_name', 'user', 'user_email', 'user_display_name', 'user_profile', 'role', 'joined_at', 'is_active']
         read_only_fields = ['id', 'joined_at']
 
     def get_family_name(self, obj):
@@ -37,6 +38,23 @@ class MemberSerializer(serializers.ModelSerializer):
         if hasattr(obj.user, 'profile') and obj.user.profile.display_name:
             return obj.user.profile.display_name
         return obj.user.email
+
+    def get_user_profile(self, obj):
+        """Get user's profile location data."""
+        if hasattr(obj.user, 'profile') and obj.user.profile:
+            profile = obj.user.profile
+            return {
+                'location_sharing_enabled': profile.location_sharing_enabled,
+                'latitude': str(profile.latitude) if profile.latitude is not None else None,
+                'longitude': str(profile.longitude) if profile.longitude is not None else None,
+                'last_location_update': profile.last_location_update.isoformat() if profile.last_location_update else None,
+            }
+        return {
+            'location_sharing_enabled': False,
+            'latitude': None,
+            'longitude': None,
+            'last_location_update': None,
+        }
 
 
 class FamilySerializer(serializers.ModelSerializer):

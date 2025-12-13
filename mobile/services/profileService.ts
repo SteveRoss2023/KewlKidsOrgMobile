@@ -13,6 +13,10 @@ export interface UserProfile {
   photo_url?: string;
   email_verified: boolean;
   date_joined: string;
+  location_sharing_enabled?: boolean;
+  latitude?: string | null;
+  longitude?: string | null;
+  last_location_update?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -283,6 +287,45 @@ class ProfileService {
   async deletePhoto(): Promise<void> {
     try {
       await apiClient.delete('/users/me/profile/photo/');
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Update user's location
+   */
+  async updateLocation(latitude: number, longitude: number): Promise<UserProfile> {
+    try {
+      // Format to 6 decimal places to match backend DecimalField
+      const response = await apiClient.patch<UserProfile>('/users/me/profile/', {
+        latitude: latitude.toFixed(6),
+        longitude: longitude.toFixed(6),
+      });
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Toggle location sharing
+   */
+  async toggleLocationSharing(enabled: boolean): Promise<UserProfile> {
+    try {
+      const updateData: any = {
+        location_sharing_enabled: enabled,
+      };
+      
+      // If disabling, clear location data
+      if (!enabled) {
+        updateData.latitude = null;
+        updateData.longitude = null;
+        updateData.last_location_update = null;
+      }
+      
+      const response = await apiClient.patch<UserProfile>('/users/me/profile/', updateData);
+      return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
     }

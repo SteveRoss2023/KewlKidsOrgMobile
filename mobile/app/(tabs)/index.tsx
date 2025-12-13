@@ -203,7 +203,7 @@ export default function HomeScreen() {
         // TODO: Navigate to finance when implemented
         break;
       case 'map':
-        // TODO: Navigate to map when implemented
+        router.push('/(tabs)/map');
         break;
       default:
         console.log('Feature not yet implemented:', cardId);
