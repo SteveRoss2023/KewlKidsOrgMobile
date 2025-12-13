@@ -30,12 +30,25 @@ export default function CategoryGroup({
   isUncategorized = false,
   categoryIcon,
 }: CategoryGroupProps) {
-  const { colors } = useTheme();
+  const { colors, theme } = useTheme();
+
+  // Different background color when expanded vs collapsed - use light blue when expanded
+  const headerBackgroundColor = isCollapsed 
+    ? colors.surface 
+    : theme === 'dark' 
+      ? 'rgba(10, 132, 255, 0.25)' // Light blue tint for dark mode
+      : '#E8F2FF'; // Light blue for light mode
 
   return (
     <View style={[styles.group, { borderColor: colors.border }]}>
       <TouchableOpacity
-        style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+        style={[
+          styles.header, 
+          { 
+            backgroundColor: headerBackgroundColor, 
+            borderBottomColor: colors.border 
+          }
+        ]}
         onPress={onToggleCollapse}
         activeOpacity={0.7}
       >

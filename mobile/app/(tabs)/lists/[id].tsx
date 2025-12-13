@@ -57,7 +57,7 @@ export default function ListDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const listId = params.id ? parseInt(params.id as string, 10) : null;
-  const { colors } = useTheme();
+  const { colors, theme } = useTheme();
   const { selectedFamily } = useFamily();
   const [list, setList] = useState<List | null>(null);
   const [listItems, setListItems] = useState<ListItem[]>([]);
@@ -471,6 +471,30 @@ export default function ListDetailScreen() {
     return grouped;
   }, [filteredItems, isGroceryList]);
 
+  // Compute sorted category IDs - memoized and called before early returns
+  const sortedCategoryIds = useMemo(() => {
+    if (!isGroceryList) return [];
+    return Object.keys(groupedItems).sort((a, b) => {
+      if (a === 'uncategorized') return 1;
+      if (b === 'uncategorized') return -1;
+      const categoryA = categories.find((c) => c.id === parseInt(a, 10));
+      const categoryB = categories.find((c) => c.id === parseInt(b, 10));
+      if (!categoryA && !categoryB) return 0;
+      if (!categoryA) return 1;
+      if (!categoryB) return -1;
+      if (categoryA.order !== categoryB.order) {
+        return (categoryA.order || 0) - (categoryB.order || 0);
+      }
+      return (categoryA.name || '').localeCompare(categoryB.name || '');
+    });
+  }, [isGroceryList, groupedItems, categories]);
+
+  // Compute areAllCollapsed - memoized and called before early returns
+  const areAllCollapsed = useMemo(() => {
+    if (!isGroceryList || sortedCategoryIds.length === 0) return true;
+    return sortedCategoryIds.every((categoryId) => collapsedCategories.has(categoryId));
+  }, [isGroceryList, sortedCategoryIds, collapsedCategories]);
+
   const toggleCategory = (categoryId: string) => {
     setCollapsedCategories((prev) => {
       const newSet = new Set(prev);
@@ -481,6 +505,21 @@ export default function ListDetailScreen() {
       }
       return newSet;
     });
+  };
+
+  const expandAllCategories = () => {
+    setCollapsedCategories(new Set());
+  };
+
+  const collapseAllCategories = () => {
+    if (isGroceryList && listItems.length > 0) {
+      const categoryIds = new Set<string>();
+      listItems.forEach((item) => {
+        const categoryId = item.category ? String(item.category) : 'uncategorized';
+        categoryIds.add(categoryId);
+      });
+      setCollapsedCategories(categoryIds);
+    }
   };
 
   const getCategoryName = (categoryId: string) => {
@@ -769,22 +808,6 @@ export default function ListDetailScreen() {
     );
   }
 
-  const sortedCategoryIds = isGroceryList
-    ? Object.keys(groupedItems).sort((a, b) => {
-        if (a === 'uncategorized') return 1;
-        if (b === 'uncategorized') return -1;
-        const categoryA = categories.find((c) => c.id === parseInt(a, 10));
-        const categoryB = categories.find((c) => c.id === parseInt(b, 10));
-        if (!categoryA && !categoryB) return 0;
-        if (!categoryA) return 1;
-        if (!categoryB) return -1;
-        if (categoryA.order !== categoryB.order) {
-          return (categoryA.order || 0) - (categoryB.order || 0);
-        }
-        return (categoryA.name || '').localeCompare(categoryB.name || '');
-      })
-    : [];
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
@@ -805,54 +828,71 @@ export default function ListDetailScreen() {
       </View>
 
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        {isGroceryList && availableRecipes.length > 0 && (
-          <View style={styles.recipeFilter}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>Filter by recipe:</Text>
-            <View style={[styles.pickerContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
-              {/* Recipe filter dropdown would go here - simplified for now */}
+        <View style={styles.actionsBarLeft}>
+          {isGroceryList && availableRecipes.length > 0 && (
+            <View style={styles.recipeFilter}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Filter by recipe:</Text>
+              <View style={[styles.pickerContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                {/* Recipe filter dropdown would go here - simplified for now */}
+              </View>
             </View>
-          </View>
-        )}
-        <View style={styles.actionButtons}>
-          {isSupported && !showAddItem && !editingItem && (
-            <VoiceButton
-              onPress={handleVoiceClick}
-              isListening={isListening}
-              disabled={adding || updatingItem}
-            />
           )}
-          {!showAddItem && !editingItem ? (
-            <TouchableOpacity
-              onPress={() => {
-                setShowAddItem(true);
-              }}
-              style={[styles.addButton, { backgroundColor: colors.primary }]}
-            >
-              <FontAwesome name="plus" size={16} color="#fff" />
-              <Text style={styles.addButtonText}>Add Item</Text>
-            </TouchableOpacity>
-          ) : showAddItem && !editingItem ? (
-            <TouchableOpacity
-              onPress={() => {
-                setShowAddItem(false);
-              }}
-              style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
-            >
-              <FontAwesome name="times" size={16} color="#fff" />
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          ) : editingItem && (!isTodoList || !DraggableFlatList || !GestureHandlerRootView) ? (
-            <TouchableOpacity
-              onPress={() => {
-                setEditingItem(null);
-              }}
-              style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
-            >
-              <FontAwesome name="times" size={16} color="#fff" />
-              <Text style={styles.cancelButtonText}>Cancel Edit</Text>
-            </TouchableOpacity>
-          ) : null}
+          <View style={styles.actionButtons}>
+            {isSupported && !showAddItem && !editingItem && (
+              <VoiceButton
+                onPress={handleVoiceClick}
+                isListening={isListening}
+                disabled={adding || updatingItem}
+              />
+            )}
+            {!showAddItem && !editingItem ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setShowAddItem(true);
+                }}
+                style={[styles.addButton, { backgroundColor: colors.primary }]}
+              >
+                <FontAwesome name="plus" size={16} color="#fff" />
+                <Text style={styles.addButtonText}>Add Item</Text>
+              </TouchableOpacity>
+            ) : showAddItem && !editingItem ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setShowAddItem(false);
+                }}
+                style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
+              >
+                <FontAwesome name="times" size={16} color="#fff" />
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            ) : editingItem && (!isTodoList || !DraggableFlatList || !GestureHandlerRootView) ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setEditingItem(null);
+                }}
+                style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
+              >
+                <FontAwesome name="times" size={16} color="#fff" />
+                <Text style={styles.cancelButtonText}>Cancel Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
+        {isGroceryList && sortedCategoryIds.length > 0 && (
+          <TouchableOpacity
+            onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
+            style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+          >
+            <FontAwesome 
+              name={areAllCollapsed ? 'chevron-down' : 'chevron-up'} 
+              size={14} 
+              color={colors.textSecondary} 
+            />
+            <Text style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}>
+              {areAllCollapsed ? 'Expand All' : 'Collapse All'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {showAddItem && !editingItem && (
@@ -1127,8 +1167,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   actionsBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
+    gap: 12,
+  },
+  actionsBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     gap: 12,
   },
   recipeFilter: {
@@ -1314,6 +1363,19 @@ const styles = StyleSheet.create({
     borderTopColor: '#007AFF',
     // @ts-ignore - web-specific border style
     ...(Platform.OS === 'web' && { borderTopStyle: 'solid' }),
+  },
+  expandCollapseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    borderWidth: 1,
+  },
+  expandCollapseButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 
