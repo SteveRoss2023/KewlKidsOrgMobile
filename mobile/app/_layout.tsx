@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FamilyProvider } from '../contexts/FamilyContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
 
@@ -24,18 +25,20 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <ThemeProvider>
-      <FamilyProvider>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        </Stack>
-      </FamilyProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <FamilyProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+            }}
+          >
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          </Stack>
+        </FamilyProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

@@ -111,16 +111,31 @@ export default function ListItemComponent({
       </TouchableOpacity>
 
       <View style={styles.itemContent}>
-        <Text
-          style={[
-            styles.itemName,
-            { color: colors.text },
-            item.completed && styles.itemNameCompleted,
-          ]}
-          numberOfLines={2}
-        >
-          {item.name}
-        </Text>
+        <View style={styles.itemHeader}>
+          <Text
+            style={[
+              styles.itemName,
+              { color: colors.text },
+              item.completed && styles.itemNameCompleted,
+            ]}
+            numberOfLines={Platform.OS === 'web' ? 2 : 3}
+          >
+            {item.name}
+          </Text>
+          {/* Quantity on mobile - show below name for grocery lists */}
+          {item.quantity && isGroceryList && Platform.OS !== 'web' && (
+            <Text style={[styles.quantityMobile, { color: colors.textSecondary }]}>
+              Qty: {item.quantity}
+            </Text>
+          )}
+          {/* Quantity on web or for non-grocery lists - show inline */}
+          {item.quantity && Platform.OS === 'web' && (
+            <Text style={[styles.quantity, { color: colors.textSecondary }]}>
+              Qty: {item.quantity}
+            </Text>
+          )}
+        </View>
+        
         {item.notes && !item.notes.startsWith('From recipe:') && (
           <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
             {item.notes}
@@ -149,17 +164,15 @@ export default function ListItemComponent({
         )}
       </View>
 
-      <View style={styles.itemActions}>
+      <View style={[
+        styles.itemActions,
+        Platform.OS !== 'web' && isGroceryList && styles.itemActionsMobile
+      ]}>
         {showCategorySelect && isGroceryList && categories.length > 0 && (
           <View style={styles.categorySelect}>
             <Text style={[styles.categoryLabel, { color: colors.textSecondary }]}>Category:</Text>
             {/* Category dropdown would go here - simplified for now */}
           </View>
-        )}
-        {item.quantity && (
-          <Text style={[styles.quantity, { color: colors.textSecondary }]}>
-            Qty: {item.quantity}
-          </Text>
         )}
         {onEdit && (
           <TouchableOpacity
@@ -175,7 +188,7 @@ export default function ListItemComponent({
               },
             })}
           >
-            <FontAwesome name="edit" size={16} color={colors.textSecondary} />
+            <FontAwesome name="edit" size={Platform.OS !== 'web' ? 20 : 16} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
         {onDelete && (
@@ -192,7 +205,7 @@ export default function ListItemComponent({
               },
             })}
           >
-            <FontAwesome name="trash" size={16} color="#FF3B30" />
+            <FontAwesome name="trash" size={Platform.OS !== 'web' ? 20 : 16} color="#FF3B30" />
           </TouchableOpacity>
         )}
       </View>
@@ -209,6 +222,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'flex-start',
     gap: 12,
+    ...(Platform.OS !== 'web' ? {
+      minHeight: 80, // Ensure minimum height on mobile
+    } : {}),
   },
   dragHandleContainer: {
     flexDirection: 'row',
@@ -259,11 +275,17 @@ const styles = StyleSheet.create({
   },
   itemContent: {
     flex: 1,
+    minWidth: 0, // Allow text to wrap properly
+  },
+  itemHeader: {
+    flexDirection: 'column',
+    marginBottom: Platform.OS !== 'web' ? 4 : 0,
   },
   itemName: {
-    fontSize: 16,
+    fontSize: Platform.OS !== 'web' ? 16 : 16,
     fontWeight: '500',
-    marginBottom: 4,
+    marginBottom: Platform.OS !== 'web' ? 4 : 4,
+    lineHeight: Platform.OS !== 'web' ? 22 : 20,
   },
   itemNameCompleted: {
     textDecorationLine: 'line-through',
@@ -271,6 +293,7 @@ const styles = StyleSheet.create({
   itemNotes: {
     fontSize: 14,
     marginTop: 4,
+    lineHeight: 20,
   },
   recipeBadge: {
     marginTop: 4,
@@ -291,9 +314,15 @@ const styles = StyleSheet.create({
   },
   itemActions: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: Platform.OS !== 'web' ? 'flex-start' : 'center',
     gap: 8,
-    marginLeft: 8,
+    marginLeft: Platform.OS !== 'web' ? 0 : 8,
+    paddingTop: Platform.OS !== 'web' ? 2 : 0,
+  },
+  itemActionsMobile: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 4,
   },
   categorySelect: {
     marginRight: 8,
@@ -303,10 +332,20 @@ const styles = StyleSheet.create({
   },
   quantity: {
     fontSize: 12,
-    marginRight: 8,
+    marginTop: 2,
+  },
+  quantityMobile: {
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: '400',
+    opacity: 0.7,
   },
   actionButton: {
-    padding: 4,
+    padding: Platform.OS !== 'web' ? 8 : 4,
+    minWidth: Platform.OS !== 'web' ? 40 : undefined,
+    minHeight: Platform.OS !== 'web' ? 40 : undefined,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

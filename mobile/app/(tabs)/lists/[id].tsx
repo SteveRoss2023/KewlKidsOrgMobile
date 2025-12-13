@@ -1261,7 +1261,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 0,
     ...(Platform.OS !== 'web' ? {
-      minHeight: 250, // Reserve space for dropdown (200px) + delete button + padding
+      minHeight: 220, // Reserve space for dropdown + recipe filter
     } : {}),
   },
   actionsBarTop: {
@@ -1278,7 +1278,7 @@ const styles = StyleSheet.create({
     alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
     gap: 12,
     width: '100%',
-    ...(Platform.OS === 'web' ? {} : { marginTop: 4 }),
+    marginTop: Platform.OS === 'web' ? 0 : 12, // Add spacing on mobile
   },
   filterLabel: {
     fontSize: 14,
@@ -1309,7 +1309,7 @@ const styles = StyleSheet.create({
       ? { flexShrink: 0 } 
       : { 
           width: '100%',
-          marginTop: 60, // Space for dropdown when open (50px picker + 10px spacing)
+          marginTop: 12, // Reduced spacing
           zIndex: 0,
           position: 'relative',
         }
