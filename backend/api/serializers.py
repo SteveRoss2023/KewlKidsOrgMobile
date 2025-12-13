@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from .models import UserProfile
+from meals.models import Recipe, MealPlan
 
 User = get_user_model()
 
@@ -136,4 +138,137 @@ class UserProfileSerializer(serializers.ModelSerializer):
                 # Don't raise - the new photo is already saved, this is just cleanup
 
         return updated_instance
+
+
+class RecipeSerializer(serializers.ModelSerializer):
+    """Recipe serializer."""
+    created_by_username = serializers.SerializerMethodField()
+    ingredients = serializers.JSONField(required=False, allow_null=True)
+    instructions = serializers.JSONField(required=False, allow_null=True)
+    image_url = serializers.SerializerMethodField()  # Override to return either stored image URL or original URL
+
+    def get_created_by_username(self, obj):
+        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
+            return obj.created_by.user.profile.display_name or obj.created_by.user.email
+        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+
+    def get_image_url(self, obj):
+        """Return the image URL - prefer stored image, fall back to original URL."""
+        if obj.image and obj.image.name:
+            # Return full URL to stored image
+            request = self.context.get('request')
+            if request:
+                # Get the actual host from the request
+                # request.get_host() returns the Host header, which should be correct
+                host = request.get_host()
+                scheme = request.scheme
+                
+                # Build the media URL manually to ensure we use the correct host
+                media_path = obj.image.url
+                # Ensure media_path starts with /media/
+                if not media_path.startswith('/'):
+                    media_path = '/' + media_path
+                if not media_path.startswith('/media/'):
+                    media_path = '/media/' + media_path.lstrip('/')
+                
+                image_url = f'{scheme}://{host}{media_path}'
+                
+                # Log for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Built image URL: {image_url} from request host: {host}, scheme: {scheme}")
+                
+                return image_url
+            else:
+                # Fallback: construct URL from settings
+                # This should rarely happen as request should always be in context
+                media_url = settings.MEDIA_URL
+                if not media_url.startswith('http'):
+                    # Use first allowed host or default to localhost
+                    if settings.ALLOWED_HOSTS and settings.ALLOWED_HOSTS[0] != '*':
+                        host = settings.ALLOWED_HOSTS[0]
+                        # Add port if not present and not a special host
+                        if ':' not in host and host not in ['localhost', '127.0.0.1']:
+                            host = f'{host}:8900'
+                    else:
+                        host = 'localhost:8900'
+                    return f'http://{host}{media_url}{obj.image.name}'
+                return f'{media_url}{obj.image.name}'
+        # Fall back to original external URL (for backward compatibility)
+        return obj.image_url if hasattr(obj, 'image_url') else None
+
+    class Meta:
+        model = Recipe
+        fields = [
+            'id', 'family', 'created_by', 'created_by_username', 'title', 'notes',
+            'ingredients', 'instructions', 'servings', 'prep_time_minutes', 'cook_time_minutes',
+            'image', 'image_url', 'source_url', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Create recipe with encrypted JSON fields."""
+        ingredients = validated_data.pop('ingredients', [])
+        instructions = validated_data.pop('instructions', [])
+        recipe = Recipe.objects.create(**validated_data)
+        recipe.ingredients = ingredients
+        recipe.instructions = instructions
+        recipe.save()
+        return recipe
+
+    def update(self, instance, validated_data):
+        """Update recipe with encrypted JSON fields."""
+        ingredients = validated_data.pop('ingredients', None)
+        instructions = validated_data.pop('instructions', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if ingredients is not None:
+            instance.ingredients = ingredients
+        if instructions is not None:
+            instance.instructions = instructions
+
+        instance.save()
+        return instance
+
+
+class MealPlanSerializer(serializers.ModelSerializer):
+    """MealPlan serializer."""
+    created_by_username = serializers.SerializerMethodField()
+    meals = serializers.JSONField(required=False, allow_null=True)
+
+    def get_created_by_username(self, obj):
+        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
+            return obj.created_by.user.profile.display_name or obj.created_by.user.email
+        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+
+    class Meta:
+        model = MealPlan
+        fields = [
+            'id', 'family', 'created_by', 'created_by_username', 'notes',
+            'week_start_date', 'meals', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Create meal plan with encrypted JSON field."""
+        meals = validated_data.pop('meals', {})
+        meal_plan = MealPlan.objects.create(**validated_data)
+        meal_plan.meals = meals
+        meal_plan.save()
+        return meal_plan
+
+    def update(self, instance, validated_data):
+        """Update meal plan with encrypted JSON field."""
+        meals = validated_data.pop('meals', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if meals is not None:
+            instance.meals = meals
+
+        instance.save()
+        return instance
 

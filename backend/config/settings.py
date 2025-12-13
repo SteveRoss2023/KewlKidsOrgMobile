@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'api',
     'families',
     'lists',
+    'meals',
     
     'django.contrib.staticfiles',
     

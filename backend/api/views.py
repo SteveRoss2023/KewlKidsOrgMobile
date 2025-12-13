@@ -9,8 +9,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.signing import TimestampSigner
+from django.shortcuts import get_object_or_404
+from django.http import Http404
 from .models import UserProfile
-from .serializers import UserProfileSerializer
+from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer
+from meals.models import Recipe, MealPlan
+from families.models import Family, Member
 
 User = get_user_model()
 
@@ -941,3 +945,514 @@ class ExchangeTempTokenView(APIView):
 
 
 # Add more views here as you migrate features from the reference project
+
+
+class RecipeViewSet(viewsets.ModelViewSet):
+    """Recipe viewset."""
+    serializer_class = RecipeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return recipes for families the user belongs to."""
+        user = self.request.user
+        return Recipe.objects.filter(family__members__user=user)
+
+    def perform_create(self, serializer):
+        """Create recipe with creator as created_by."""
+        family = get_object_or_404(Family, id=self.request.data.get('family'))
+        member = get_object_or_404(Member, user=self.request.user, family=family)
+        serializer.save(created_by=member)
+
+    def perform_destroy(self, instance):
+        """Allow deletion if user is a member of the recipe's family."""
+        user = self.request.user
+        try:
+            member = Member.objects.get(user=user, family=instance.family)
+            # Any family member can delete recipes
+            instance.delete()
+        except Member.DoesNotExist:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You must be a member of the family to delete recipes.')
+
+    @action(detail=False, methods=['post'])
+    def import_from_url(self, request):
+        """Import recipe from URL."""
+        from meals.importers import import_recipe_from_url, extract_ingredients_for_shopping_list
+
+        url = request.data.get('url')
+        family_id = request.data.get('family')
+        list_id = request.data.get('list_id')  # Optional: add to shopping list
+
+        if not url or not family_id:
+            return Response({'error': 'URL and family are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Import recipe
+        recipe_data = import_recipe_from_url(url)
+        if not recipe_data:
+            return Response({'error': 'Failed to import recipe'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create recipe
+        family = get_object_or_404(Family, id=family_id)
+        member = get_object_or_404(Member, user=request.user, family=family)
+
+        # Create recipe first (without image)
+        recipe = Recipe.objects.create(
+            family=family,
+            created_by=member,
+            title=recipe_data['title'],
+            ingredients=recipe_data['ingredients'],
+            instructions=recipe_data['instructions'],
+            servings=recipe_data.get('servings'),
+            prep_time_minutes=recipe_data.get('prep_time_minutes'),
+            cook_time_minutes=recipe_data.get('cook_time_minutes'),
+            image_url=recipe_data.get('image_url'),  # Keep original URL for reference
+            source_url=recipe_data.get('source_url'),
+        )
+
+        # Download and save image if we have an image URL
+        if recipe_data.get('image_url'):
+            from meals.importers import download_and_save_image
+            from django.core.files import File
+            from django.core.files.storage import default_storage
+            import os
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            try:
+                # Download image directly and save to recipe.image field
+                image_url = recipe_data.get('image_url')
+                if image_url:
+                    import requests
+                    from django.core.files.base import ContentFile
+                    from urllib.parse import urlparse
+                    
+                    # Extract referrer from source URL if available
+                    referer = recipe_data.get('source_url', image_url)
+                    if referer and '/' in referer:
+                        # Get base URL for referer
+                        parsed_referer = urlparse(referer)
+                        referer = f'{parsed_referer.scheme}://{parsed_referer.netloc}'
+                    
+                    # Download the image with proper headers to avoid 403 errors
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Referer': referer if referer else image_url,
+                        'Origin': referer if referer else image_url,
+                        'Sec-Fetch-Dest': 'image',
+                        'Sec-Fetch-Mode': 'no-cors',
+                        'Sec-Fetch-Site': 'cross-site',
+                    }
+                    response = requests.get(image_url, timeout=30, headers=headers, stream=True)
+                    response.raise_for_status()
+                    
+                    # Check content type
+                    content_type = response.headers.get('Content-Type', '')
+                    if content_type.startswith('image/'):
+                        # Get file extension
+                        parsed_url = urlparse(image_url)
+                        path = parsed_url.path
+                        ext = os.path.splitext(path)[1].lower().lstrip('.')
+                        if not ext:
+                            content_type_map = {
+                                'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+                                'image/gif': 'gif', 'image/webp': 'webp',
+                            }
+                            ext = content_type_map.get(content_type.split(';')[0].strip(), 'jpg')
+                        
+                        # Save directly to recipe.image field
+                        filename = f'recipe_{recipe.id}.{ext}'
+                        recipe.image.save(filename, ContentFile(response.content), save=True)
+                        recipe.refresh_from_db()
+                        logger.info(f"Successfully downloaded and saved image for recipe {recipe.id}: {recipe.image.name}")
+                    else:
+                        logger.warning(f"URL does not point to an image: {content_type}")
+            except requests.exceptions.HTTPError as e:
+                # If image download fails (403, 404, etc.), log but don't fail the recipe import
+                image_url = recipe_data.get('image_url', 'unknown')
+                logger.warning(f"Failed to download image for recipe {recipe.id} from {image_url}: {e.response.status_code} {e.response.reason}. Recipe will be created without image.")
+            except Exception as e:
+                # For other errors, log but don't fail the recipe import
+                image_url = recipe_data.get('image_url', 'unknown')
+                logger.error(f"Error downloading/saving image for recipe {recipe.id}: {str(e)}. Recipe will be created without image.", exc_info=True)
+
+        # Optionally add ingredients to shopping or grocery list
+        if list_id:
+            from lists.models import List, ListItem
+            # Note: list_type is encrypted, so we check after fetching
+            shopping_list = get_object_or_404(List, id=list_id, family=family)
+            if shopping_list.list_type not in ['shopping', 'grocery']:
+                raise Http404("List is not a shopping or grocery list")
+            ingredients = extract_ingredients_for_shopping_list(recipe_data)
+
+            for ingredient in ingredients:
+                ListItem.objects.create(
+                    list=shopping_list,
+                    created_by=member,
+                    name=ingredient['name'],
+                    quantity=ingredient.get('quantity'),
+                )
+
+        serializer = self.get_serializer(recipe)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='add-to-list')
+    def add_to_list(self, request, pk=None):
+        """Add recipe ingredients to a shopping list."""
+        from lists.models import List, ListItem
+        from meals.importers import extract_ingredients_for_shopping_list
+
+        recipe = self.get_object()
+        list_id = request.data.get('list_id')
+
+        if not list_id:
+            return Response({'error': 'list_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Note: list_type is encrypted, so we check after fetching
+        shopping_list = get_object_or_404(List, id=list_id, family=recipe.family)
+        if shopping_list.list_type not in ['shopping', 'grocery']:
+            raise Http404("List is not a shopping or grocery list")
+        member = get_object_or_404(Member, user=request.user, family=recipe.family)
+
+        recipe_data = {
+            'ingredients': recipe.ingredients,
+        }
+        ingredients = extract_ingredients_for_shopping_list(recipe_data)
+
+        created_items = []
+        for ingredient in ingredients:
+            item = ListItem.objects.create(
+                list=shopping_list,
+                created_by=member,
+                name=ingredient['name'],
+                quantity=ingredient.get('quantity'),
+            )
+            created_items.append(item.id)
+
+        return Response({'added_items': created_items}, status=status.HTTP_201_CREATED)
+
+
+class MealPlanViewSet(viewsets.ModelViewSet):
+    """MealPlan viewset."""
+    serializer_class = MealPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return meal plans for families the user belongs to."""
+        user = self.request.user
+        return MealPlan.objects.filter(family__members__user=user)
+
+    def perform_create(self, serializer):
+        """Create meal plan with creator as created_by."""
+        family = get_object_or_404(Family, id=self.request.data.get('family'))
+        member = get_object_or_404(Member, user=self.request.user, family=family)
+        serializer.save(created_by=member)
+
+
+class RecipeImportView(APIView):
+    """Import recipe from URL."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from meals.importers import import_recipe_from_url
+
+        url = request.data.get('url')
+        family_id = request.data.get('family')
+
+        if not url:
+            return Response({'error': 'URL is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Basic URL validation
+        if not url.startswith(('http://', 'https://')):
+            return Response({
+                'error': 'Invalid URL format',
+                'detail': 'URL must start with http:// or https://'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not family_id:
+            return Response({'error': 'Family is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            family = Family.objects.get(id=family_id)
+        except Family.DoesNotExist:
+            return Response({'error': 'Family not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            member = Member.objects.get(user=request.user, family=family)
+        except Member.DoesNotExist:
+            return Response({'error': 'You are not a member of this family'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            recipe_data = import_recipe_from_url(url)
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"Recipe import error: {error_detail}")  # Log to console for debugging
+            return Response({
+                'error': 'Failed to import recipe from URL',
+                'detail': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not recipe_data:
+            return Response({
+                'error': 'Failed to import recipe. The URL may not contain a valid recipe, or the site is not supported.',
+                'suggestion': 'Try a recipe from sites like AllRecipes, Food Network, BBC Good Food, or any site with Schema.org recipe markup.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not recipe_data.get('title'):
+            return Response({
+                'error': 'Recipe import failed: Could not extract recipe title from the URL'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate that we have essential recipe data
+        ingredients = recipe_data.get('ingredients', [])
+        instructions = recipe_data.get('instructions', [])
+
+        if not ingredients and not instructions:
+            return Response({
+                'error': 'Failed to import recipe: Could not extract ingredients or instructions from the URL',
+                'detail': 'The recipe may not be in a supported format, or the website structure is not recognized.',
+                'suggestion': 'Try a recipe from sites like AllRecipes, Food Network, BBC Good Food, or any site with Schema.org recipe markup.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not ingredients:
+            return Response({
+                'error': 'Failed to import recipe: Could not extract ingredients from the URL',
+                'detail': 'The recipe was found but no ingredients could be extracted.',
+                'suggestion': 'The recipe may be incomplete or in an unsupported format.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not instructions:
+            return Response({
+                'error': 'Failed to import recipe: Could not extract instructions from the URL',
+                'detail': 'The recipe was found but no cooking instructions could be extracted.',
+                'suggestion': 'The recipe may be incomplete or in an unsupported format.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Create recipe first (without image)
+            recipe = Recipe.objects.create(
+                family=family,
+                created_by=member,
+                title=recipe_data['title'],
+                ingredients=ingredients,
+                instructions=instructions,
+                servings=recipe_data.get('servings'),
+                prep_time_minutes=recipe_data.get('prep_time_minutes'),
+                cook_time_minutes=recipe_data.get('cook_time_minutes'),
+                image_url=recipe_data.get('image_url'),  # Keep original URL for reference
+                source_url=recipe_data.get('source_url', url),
+            )
+
+            # Download and save image if we have an image URL
+            if recipe_data.get('image_url'):
+                import requests
+                import os
+                from django.core.files.base import ContentFile
+                from urllib.parse import urlparse
+                import logging
+                logger = logging.getLogger(__name__)
+                
+                try:
+                    image_url = recipe_data.get('image_url')
+                    # Extract referrer from source URL if available
+                    referer = recipe_data.get('source_url', image_url)
+                    if referer and '/' in referer:
+                        # Get base URL for referer
+                        parsed_referer = urlparse(referer)
+                        referer = f'{parsed_referer.scheme}://{parsed_referer.netloc}'
+                    
+                    # Download the image with proper headers to avoid 403 errors
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Referer': referer if referer else image_url,
+                        'Origin': referer if referer else image_url,
+                        'Sec-Fetch-Dest': 'image',
+                        'Sec-Fetch-Mode': 'no-cors',
+                        'Sec-Fetch-Site': 'cross-site',
+                    }
+                    response = requests.get(image_url, timeout=30, headers=headers, stream=True)
+                    response.raise_for_status()
+                    
+                    # Check content type
+                    content_type = response.headers.get('Content-Type', '')
+                    if content_type.startswith('image/'):
+                        # Get file extension
+                        parsed_url = urlparse(image_url)
+                        path = parsed_url.path
+                        ext = os.path.splitext(path)[1].lower().lstrip('.')
+                        if not ext:
+                            content_type_map = {
+                                'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+                                'image/gif': 'gif', 'image/webp': 'webp',
+                            }
+                            ext = content_type_map.get(content_type.split(';')[0].strip(), 'jpg')
+                        
+                        # Save directly to recipe.image field
+                        filename = f'recipe_{recipe.id}.{ext}'
+                        recipe.image.save(filename, ContentFile(response.content), save=True)
+                        recipe.refresh_from_db()
+                        logger.info(f"Successfully downloaded and saved image for recipe {recipe.id}: {recipe.image.name}")
+                    else:
+                        logger.warning(f"URL does not point to an image: {content_type}")
+                except Exception as e:
+                    logger.error(f"Error downloading/saving image for recipe {recipe.id}: {str(e)}", exc_info=True)
+
+            serializer = RecipeSerializer(recipe, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to create recipe',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def recipe_add_to_list(request, pk):
+    """Add recipe ingredients to a shopping list - explicit URL handler."""
+    try:
+        recipe = get_object_or_404(Recipe, id=pk)
+        list_id = request.data.get('list_id')
+
+        if not list_id:
+            return Response({'error': 'list_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Convert list_id to int if it's a string
+        try:
+            list_id = int(list_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid list_id format'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if list exists and belongs to the recipe's family (shopping or grocery)
+        # Note: list_type is encrypted, so we need to check after fetching
+        from lists.models import List, ListItem
+        from meals.importers import extract_ingredients_for_shopping_list
+        from lists.utils import assign_category_to_item
+
+        try:
+            shopping_list = List.objects.get(id=list_id, family=recipe.family)
+            # Verify list_type is shopping or grocery (encrypted field comparison)
+            if shopping_list.list_type not in ['shopping', 'grocery']:
+                raise List.DoesNotExist
+        except List.DoesNotExist:
+            # Check if list exists at all
+            list_exists = List.objects.filter(id=list_id).exists()
+            if not list_exists:
+                return Response({
+                    'error': f'Shopping list with ID {list_id} does not exist'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check if list belongs to a different family
+            list_family = List.objects.filter(id=list_id).first()
+            if list_family and list_family.family_id != recipe.family_id:
+                return Response({
+                    'error': f'Shopping list belongs to a different family. Recipe family: {recipe.family_id}, List family: {list_family.family_id}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check if list is not a shopping or grocery list
+            if list_family and list_family.list_type not in ['shopping', 'grocery']:
+                return Response({
+                    'error': f'List is not a shopping or grocery list. List type: {list_family.list_type}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                'error': 'Shopping list not found or does not belong to this recipe\'s family'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user is a member of the family
+        try:
+            member = Member.objects.get(user=request.user, family=recipe.family)
+        except Member.DoesNotExist:
+            return Response({
+                'error': 'You are not a member of this recipe\'s family'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        recipe_data = {
+            'ingredients': recipe.ingredients,
+        }
+        ingredients = extract_ingredients_for_shopping_list(recipe_data)
+
+        if not ingredients:
+            return Response({
+                'error': 'No ingredients found in recipe'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get existing items to check for duplicates
+        existing_items = ListItem.objects.filter(list=shopping_list, completed=False)
+        existing_names = {item.name.lower().strip() for item in existing_items}
+
+        created_items = []
+        skipped_duplicates = []
+        categorized_items = []
+        uncategorized_items = []
+        uncategorized_item_names = []
+
+        for ingredient in ingredients:
+            ingredient_name = ingredient['name'].strip()
+            ingredient_name_lower = ingredient_name.lower()
+
+            # Check if duplicate exists (case-insensitive)
+            if ingredient_name_lower in existing_names:
+                skipped_duplicates.append(ingredient_name)
+                continue
+
+            # Create new item with recipe name in notes
+            item = ListItem.objects.create(
+                list=shopping_list,
+                created_by=member,
+                name=ingredient_name,
+                quantity=ingredient.get('quantity'),
+                notes=f"From recipe: {recipe.title}",
+            )
+            created_items.append(item.id)
+            # Add to existing names to prevent duplicates within the same batch
+            existing_names.add(ingredient_name_lower)
+
+            # Auto-assign category for grocery lists
+            if shopping_list.list_type == 'grocery':
+                item, category_assigned, category_name = assign_category_to_item(item, recipe.family)
+                if category_assigned:
+                    categorized_items.append(item.id)
+                else:
+                    uncategorized_items.append(item.id)
+                    uncategorized_item_names.append(ingredient_name)
+
+        # Build response message
+        response_data = {
+            'added_count': len(created_items),
+            'skipped_count': len(skipped_duplicates),
+            'added_items': created_items,
+        }
+
+        # Add category information if this is a grocery list
+        if shopping_list.list_type == 'grocery':
+            response_data['categorized_items'] = categorized_items
+            response_data['uncategorized_items'] = uncategorized_items
+            response_data['uncategorized_item_names'] = uncategorized_item_names
+
+        if created_items and skipped_duplicates:
+            response_data['message'] = f'Added {len(created_items)} new ingredient(s). {len(skipped_duplicates)} duplicate(s) skipped.'
+            response_data['skipped_items'] = skipped_duplicates
+        elif created_items:
+            response_data['message'] = f'Successfully added {len(created_items)} ingredient(s) to shopping list!'
+        elif skipped_duplicates:
+            response_data['message'] = f'All {len(skipped_duplicates)} ingredient(s) already exist in the list and were skipped.'
+            response_data['skipped_items'] = skipped_duplicates
+        else:
+            response_data['message'] = 'No ingredients to add.'
+
+        # Use 200 OK if no items were added (all duplicates), 201 Created if items were added
+        status_code = status.HTTP_201_CREATED if created_items else status.HTTP_200_OK
+        return Response(response_data, status=status_code)
+    except Exception as e:
+        import traceback
+        return Response({
+            'error': 'Failed to add ingredients to list',
+            'detail': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

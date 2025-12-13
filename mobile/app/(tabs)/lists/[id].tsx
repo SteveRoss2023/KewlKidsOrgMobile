@@ -46,12 +46,14 @@ import ListItemComponent from '../../../components/lists/ListItemComponent';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
+import ConfirmModal from '../../../components/ConfirmModal';
 import DraggableListItem from '../../../components/lists/DraggableListItem';
 import { APIError } from '../../../services/api';
 import { useVoiceRecognition } from '../../../hooks/useVoiceRecognition';
 import { speak } from '../../../utils/voiceFeedback';
 import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } from '../../../utils/voiceCommands';
 import VoiceButton from '../../../components/VoiceButton';
+import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
 
 export default function ListDetailScreen() {
   const router = useRouter();
@@ -79,6 +81,16 @@ export default function ListDetailScreen() {
     itemId: null,
     itemName: '',
   });
+  const [deleteRecipeConfirm, setDeleteRecipeConfirm] = useState<{
+    isOpen: boolean;
+    recipeName: string;
+    itemCount: number;
+  }>({
+    isOpen: false,
+    recipeName: '',
+    itemCount: 0,
+  });
+  const [deletingRecipeItems, setDeletingRecipeItems] = useState(false);
   const [selectedRecipeFilter, setSelectedRecipeFilter] = useState<string>('');
   const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -607,6 +619,49 @@ export default function ListDetailScreen() {
     }
   };
 
+  const handleDeleteRecipeItems = () => {
+    if (!selectedRecipeFilter) return;
+    
+    // Count items that match the recipe filter
+    const recipeItems = listItems.filter(
+      (item) => item.notes && item.notes === `From recipe: ${selectedRecipeFilter}`
+    );
+    
+    setDeleteRecipeConfirm({
+      isOpen: true,
+      recipeName: selectedRecipeFilter,
+      itemCount: recipeItems.length,
+    });
+  };
+
+  const confirmDeleteRecipeItems = async () => {
+    if (!selectedRecipeFilter) return;
+
+    try {
+      setDeletingRecipeItems(true);
+      
+      // Get all items that match the recipe filter
+      const recipeItems = listItems.filter(
+        (item) => item.notes && item.notes === `From recipe: ${selectedRecipeFilter}`
+      );
+      
+      // Delete all items in parallel
+      await Promise.all(
+        recipeItems.map((item) => ListService.deleteListItem(item.id))
+      );
+      
+      // Refresh the list and clear the filter
+      await fetchListItems();
+      setSelectedRecipeFilter('');
+      setDeleteRecipeConfirm({ isOpen: false, recipeName: '', itemCount: 0 });
+    } catch (err) {
+      console.error('Error deleting recipe items:', err);
+      alert('Failed to delete some items. Please try again.');
+    } finally {
+      setDeletingRecipeItems(false);
+    }
+  };
+
   const handleDragEnd = async ({ data }: { data: ListItem[] }) => {
     if (!isTodoList) return;
 
@@ -828,15 +883,7 @@ export default function ListDetailScreen() {
       </View>
 
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={styles.actionsBarLeft}>
-          {isGroceryList && availableRecipes.length > 0 && (
-            <View style={styles.recipeFilter}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Filter by recipe:</Text>
-              <View style={[styles.pickerContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                {/* Recipe filter dropdown would go here - simplified for now */}
-              </View>
-            </View>
-          )}
+        <View style={styles.actionsBarTop}>
           <View style={styles.actionButtons}>
             {isSupported && !showAddItem && !editingItem && (
               <VoiceButton
@@ -877,21 +924,53 @@ export default function ListDetailScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
+          {isGroceryList && sortedCategoryIds.length > 0 && (
+            <TouchableOpacity
+              onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
+              style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+            >
+              <FontAwesome 
+                name={areAllCollapsed ? 'chevron-down' : 'chevron-up'} 
+                size={14} 
+                color={colors.textSecondary} 
+              />
+              <Text style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}>
+                {areAllCollapsed ? 'Expand All' : 'Collapse All'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
-        {isGroceryList && sortedCategoryIds.length > 0 && (
-          <TouchableOpacity
-            onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
-            style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-          >
-            <FontAwesome 
-              name={areAllCollapsed ? 'chevron-down' : 'chevron-up'} 
-              size={14} 
-              color={colors.textSecondary} 
-            />
-            <Text style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}>
-              {areAllCollapsed ? 'Expand All' : 'Collapse All'}
-            </Text>
-          </TouchableOpacity>
+        {isGroceryList && availableRecipes.length > 0 && (
+          <View style={styles.recipeFilterRow}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Filter by recipe:</Text>
+            <View style={styles.pickerWrapper}>
+              <ThemeAwarePicker
+                selectedValue={selectedRecipeFilter}
+                onValueChange={setSelectedRecipeFilter}
+                options={[
+                  { label: 'All items', value: '' },
+                  ...availableRecipes.map(recipe => ({ label: recipe, value: recipe })),
+                ]}
+                placeholder="All items"
+              />
+            </View>
+            {selectedRecipeFilter && (
+              <TouchableOpacity
+                onPress={handleDeleteRecipeItems}
+                style={[styles.deleteRecipeButton, { backgroundColor: '#E06C75' }]}
+                disabled={deletingRecipeItems}
+              >
+                {deletingRecipeItems ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <FontAwesome name="trash" size={14} color="#fff" />
+                    <Text style={styles.deleteRecipeButtonText}>Delete All</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       </View>
 
@@ -1137,6 +1216,16 @@ export default function ListDetailScreen() {
         cancelText="Cancel"
         showCancel={true}
       />
+      <ConfirmModal
+        visible={deleteRecipeConfirm.isOpen}
+        title="Delete Recipe Items"
+        message={`Are you sure you want to delete all ${deleteRecipeConfirm.itemCount} item(s) from "${deleteRecipeConfirm.recipeName}"? This action cannot be undone.`}
+        type="danger"
+        onClose={() => setDeleteRecipeConfirm({ isOpen: false, recipeName: '', itemCount: 0 })}
+        onConfirm={confirmDeleteRecipeItems}
+        confirmText="Delete All"
+        cancelText="Cancel"
+      />
     </View>
   );
 }
@@ -1167,61 +1256,103 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   actionsBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
     padding: 16,
     borderBottomWidth: 1,
-    gap: 12,
+    gap: 0,
+    ...(Platform.OS !== 'web' ? {
+      minHeight: 250, // Reserve space for dropdown (200px) + delete button + padding
+    } : {}),
   },
-  actionsBarLeft: {
+  actionsBarTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    gap: 12,
-  },
-  recipeFilter: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 12,
     gap: 8,
+    flexWrap: Platform.OS === 'web' ? 'nowrap' : 'wrap',
+  },
+  recipeFilterRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
+    gap: 12,
+    width: '100%',
+    ...(Platform.OS === 'web' ? {} : { marginTop: 4 }),
   },
   filterLabel: {
     fontSize: 14,
+    fontWeight: '500',
+    ...(Platform.OS === 'web' 
+      ? { minWidth: 120, flexShrink: 0 } 
+      : { 
+          width: '100%',
+          marginBottom: 4,
+        }
+    ),
   },
-  pickerContainer: {
-    flex: 1,
-    borderWidth: 1,
+  pickerWrapper: {
+    ...(Platform.OS === 'web' 
+      ? { flex: 1, minWidth: 150 }
+      : { width: '100%' }
+    ),
+  },
+  deleteRecipeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
-    overflow: 'hidden',
+    gap: 6,
+    ...(Platform.OS === 'web' 
+      ? { flexShrink: 0 } 
+      : { 
+          width: '100%',
+          marginTop: 60, // Space for dropdown when open (50px picker + 10px spacing)
+          zIndex: 0,
+          position: 'relative',
+        }
+    ),
+  },
+  deleteRecipeButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   actionButtons: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
+    flex: Platform.OS === 'web' ? 1 : 0,
+    ...(Platform.OS !== 'web' ? { minWidth: 0 } : {}),
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 12,
+    paddingVertical: Platform.OS === 'web' ? 10 : 8,
+    gap: 6,
+    flexShrink: 0,
   },
   addButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },
   cancelButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 12,
+    paddingVertical: Platform.OS === 'web' ? 10 : 8,
+    gap: 6,
+    flexShrink: 0,
   },
   cancelButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },
   modalOverlay: {
@@ -1337,8 +1468,17 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  scrollView: {
+    ...(Platform.OS !== 'web' ? {
+      zIndex: 200,
+      position: 'relative',
+    } : {}),
+  },
   itemsContainer: {
     padding: 16,
+    ...(Platform.OS !== 'web' ? {
+      zIndex: 200,
+    } : {}),
   },
   itemContainer: {
     marginBottom: 8,
@@ -1372,6 +1512,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 6,
     borderWidth: 1,
+    flexShrink: 0,
   },
   expandCollapseButtonText: {
     fontSize: 14,

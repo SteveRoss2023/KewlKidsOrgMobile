@@ -11,6 +11,7 @@ interface AddListFormProps {
   onCancel: () => void;
   familyId: number;
   loading?: boolean;
+  defaultListType?: ListType;
 }
 
 const LIST_TYPES: { label: string; value: ListType }[] = [
@@ -31,11 +32,12 @@ export default function AddListForm({
   onCancel,
   familyId,
   loading = false,
+  defaultListType = 'shopping',
 }: AddListFormProps) {
   const { colors } = useTheme();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [listType, setListType] = useState<ListType>('shopping');
+  const [listType, setListType] = useState<ListType>(defaultListType);
   const [color, setColor] = useState('#10b981');
 
   useEffect(() => {
@@ -44,8 +46,14 @@ export default function AddListForm({
       setDescription(editingList.description || '');
       setListType(editingList.list_type);
       setColor(editingList.color);
+    } else {
+      // Reset form when creating new list
+      setName('');
+      setDescription('');
+      setListType(defaultListType);
+      setColor('#10b981');
     }
-  }, [editingList]);
+  }, [editingList, defaultListType]);
 
   const handleSubmit = () => {
     if (!name.trim()) {

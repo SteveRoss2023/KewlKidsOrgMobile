@@ -19,6 +19,7 @@ interface AlertModalProps {
   confirmText?: string;
   cancelText?: string;
   showCancel?: boolean;
+  details?: Array<{ label: string; items: string[] }>;
 }
 
 export default function AlertModal({
@@ -31,6 +32,7 @@ export default function AlertModal({
   confirmText = 'OK',
   cancelText = 'Cancel',
   showCancel = false,
+  details,
 }: AlertModalProps) {
   const handleConfirm = () => {
     if (onConfirm) {
@@ -72,6 +74,19 @@ export default function AlertModal({
           </View>
           
           <Text style={styles.message}>{message}</Text>
+          
+          {details && details.length > 0 && (
+            <View style={styles.detailsContainer}>
+              {details.map((detail, index) => (
+                <View key={index} style={styles.detailSection}>
+                  <Text style={styles.detailLabel}>{detail.label}:</Text>
+                  {detail.items.map((item, itemIndex) => (
+                    <Text key={itemIndex} style={styles.detailItem}>• {item}</Text>
+                  ))}
+                </View>
+              ))}
+            </View>
+          )}
           
           <View style={styles.buttonContainer}>
             {showCancel && (
@@ -185,6 +200,27 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  detailsContainer: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+  },
+  detailSection: {
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  detailItem: {
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 8,
+    marginBottom: 2,
   },
 });
 

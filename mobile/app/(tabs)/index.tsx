@@ -194,7 +194,7 @@ export default function HomeScreen() {
         // TODO: Navigate to chat when implemented
         break;
       case 'meals':
-        // TODO: Navigate to meals when implemented
+        router.push('/(tabs)/meals');
         break;
       case 'documents':
         // TODO: Navigate to documents when implemented
