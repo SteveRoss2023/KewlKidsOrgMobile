@@ -9,6 +9,7 @@ import {
   Modal,
   FlatList,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -63,6 +64,7 @@ export default function ListDetailScreen() {
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItem, setEditingItem] = useState<ListItem | null>(null);
   const [adding, setAdding] = useState(false);
@@ -350,32 +352,42 @@ export default function ListDetailScreen() {
   };
 
 
-  const fetchList = async () => {
+  const fetchList = async (skipLoading = false) => {
     if (!listId) return;
 
     try {
-      setLoading(true);
+      if (!skipLoading) {
+        setLoading(true);
+      }
       const fetchedList = await ListService.getList(listId);
       setList(fetchedList);
     } catch (err) {
       console.error('Error fetching list:', err);
-      router.back();
+      if (!skipLoading) {
+        router.back();
+      }
     } finally {
-      setLoading(false);
+      if (!skipLoading) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchListItems = async () => {
+  const fetchListItems = async (skipLoading = false) => {
     if (!list) return;
 
     try {
-      setLoadingItems(true);
+      if (!skipLoading) {
+        setLoadingItems(true);
+      }
       const items = await ListService.getListItems(list.id);
       setListItems(items);
     } catch (err) {
       console.error('Error fetching list items:', err);
     } finally {
-      setLoadingItems(false);
+      if (!skipLoading) {
+        setLoadingItems(false);
+      }
     }
   };
 
@@ -389,6 +401,24 @@ export default function ListDetailScreen() {
       console.error('Error fetching categories:', err);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    if (!listId || !selectedFamily) return;
+    
+    setRefreshing(true);
+    try {
+      // Refresh list, categories, and items in parallel
+      await Promise.all([
+        fetchList(true), // Skip loading state
+        fetchCategories(),
+        ListService.getListItems(listId).then(items => setListItems(items)),
+      ]);
+    } catch (err) {
+      console.error('Error refreshing list detail:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [listId, selectedFamily]);
 
   // Extract unique recipe names from items
   const availableRecipes = useMemo(() => {
@@ -945,7 +975,16 @@ export default function ListDetailScreen() {
           </Text>
         </View>
       ) : isGroceryList ? (
-        <ScrollView style={styles.scrollView}>
+        <ScrollView 
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+            />
+          }
+        >
           {sortedCategoryIds.map((categoryId) => {
             const categoryItems = groupedItems[categoryId];
             const categoryName = getCategoryName(categoryId);
@@ -985,6 +1024,8 @@ export default function ListDetailScreen() {
             keyExtractor={(item) => item.id.toString()}
             renderItem={renderItem}
             contentContainerStyle={styles.itemsContainer}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
           />
         </GestureHandlerRootView>
       ) : (
@@ -996,6 +1037,8 @@ export default function ListDetailScreen() {
             return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
           })}
           keyExtractor={(item) => item.id.toString()}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
           renderItem={({ item, index }) => {
             if (Platform.OS === 'web' && isTodoList) {
               return (

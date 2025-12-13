@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, RefreshControl } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import AuthService from '../../services/authService';
@@ -31,6 +31,7 @@ export default function HomeScreen() {
   }>();
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showVerifiedModal, setShowVerifiedModal] = useState(false);
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
@@ -164,6 +165,20 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Refresh families
+      await refreshFamilies();
+      // Refresh user data
+      await loadUserData();
+    } catch (error) {
+      console.error('Error refreshing:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleCardPress = (cardId: string) => {
     switch (cardId) {
       case 'activity':
@@ -222,6 +237,17 @@ export default function HomeScreen() {
           <View style={styles.titleContainer}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
           </View>
+          <TouchableOpacity 
+            onPress={handleRefresh} 
+            style={[styles.refreshButton, { borderColor: colors.border }]}
+            disabled={refreshing || loading}
+          >
+            <FontAwesome 
+              name="refresh" 
+              size={16} 
+              color={refreshing || loading ? colors.textSecondary : colors.text} 
+            />
+          </TouchableOpacity>
         </View>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Manage your family's activities, events, and communication in one place
@@ -230,7 +256,18 @@ export default function HomeScreen() {
           <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{userEmail}</Text>
         )}
       </View>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.contentContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         {/* Show email verification banner if email is not verified */}
         {emailVerified === false && userEmail && (
           <EmailVerificationBanner
@@ -301,9 +338,23 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 8,
     paddingHorizontal: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   titleContainer: {
-    width: '100%',
+    flex: 1,
+    marginRight: 8,
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 36,
+    height: 36,
+    marginTop: -4, // Align with title
   },
   title: {
     fontSize: Platform.OS === 'web' ? 24 : 20,

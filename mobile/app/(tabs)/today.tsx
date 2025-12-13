@@ -1,14 +1,42 @@
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import GlobalNavBar from '../../components/GlobalNavBar';
+import { useFamily } from '../../contexts/FamilyContext';
 
 export default function TodayScreen() {
   const { colors } = useTheme();
+  const { refreshFamilies } = useFamily();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Refresh families and any other data that might be needed
+      await refreshFamilies();
+      // TODO: Add activity/event data refresh here when implemented
+    } catch (error) {
+      console.error('Error refreshing:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshFamilies]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.contentContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { color: colors.text }]}>Activity</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>

@@ -35,15 +35,19 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
   const loadFamilies = React.useCallback(async () => {
     try {
       setLoading(true);
+      console.log('[FamilyContext] Loading families...');
       const familiesData = await FamilyService.getFamilies();
       const familiesList = Array.isArray(familiesData) ? familiesData : [];
+      console.log('[FamilyContext] Loaded', familiesList.length, 'families');
       setFamilies(familiesList);
 
       // Restore selected family from storage if available
       const savedFamilyId = await storage.getItem(STORAGE_KEYS.FAMILY_ID);
+      console.log('[FamilyContext] Saved family ID from storage:', savedFamilyId);
       if (savedFamilyId && familiesList.length > 0) {
         const savedFamily = familiesList.find(f => f.id === parseInt(savedFamilyId));
         if (savedFamily) {
+          console.log('[FamilyContext] Restoring saved family:', savedFamily.name);
           setSelectedFamilyState(savedFamily);
           setLoading(false);
           return;
@@ -53,13 +57,16 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
       // Auto-select first family if none selected (check current state, not parameter)
       setSelectedFamilyState((currentSelected) => {
         if (!currentSelected && familiesList.length > 0) {
+          console.log('[FamilyContext] Auto-selecting first family:', familiesList[0].name);
           storage.setItem(STORAGE_KEYS.FAMILY_ID, familiesList[0].id.toString());
           return familiesList[0];
         }
         return currentSelected;
       });
     } catch (error) {
-      console.error('Error loading families:', error);
+      console.error('[FamilyContext] Error loading families:', error);
+      const errorDetails = error instanceof Error ? error.message : String(error);
+      console.error('[FamilyContext] Error details:', errorDetails);
       setFamilies([]);
       setSelectedFamilyState(null);
     } finally {
@@ -88,14 +95,17 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
     
     const checkAuthAndLoad = async () => {
       try {
+        console.log('[FamilyContext] Checking authentication...');
         // Check if authenticated
         const isAuthenticated = await AuthService.isAuthenticated();
+        console.log('[FamilyContext] Authentication status:', isAuthenticated);
         if (!isMounted) return;
         
         if (isAuthenticated) {
           // Load families - the API will handle authentication
           await loadFamilies();
         } else {
+          console.log('[FamilyContext] Not authenticated, clearing families');
           // Not authenticated, clear families
           if (isMounted) {
             setFamilies([]);
@@ -104,7 +114,9 @@ export const FamilyProvider: React.FC<FamilyProviderProps> = ({ children }) => {
           }
         }
       } catch (error: any) {
-        console.error('Error in checkAuthAndLoad:', error);
+        console.error('[FamilyContext] Error in checkAuthAndLoad:', error);
+        const errorDetails = error instanceof Error ? error.message : String(error);
+        console.error('[FamilyContext] Error details:', errorDetails);
         // On error, still set loading to false so UI doesn't spin forever
         if (isMounted) {
           setLoading(false);

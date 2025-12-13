@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import FamilyService, { Family } from '../../services/familyService';
@@ -12,11 +12,12 @@ import AuthService from '../../services/authService';
 export default function FamiliesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { selectedFamily } = useFamily();
+  const { selectedFamily, refreshFamilies: refreshContextFamilies } = useFamily();
   const [families, setFamilies] = useState<Family[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Load current user ID
   useEffect(() => {
@@ -45,17 +46,50 @@ export default function FamiliesScreen() {
     }, [])
   );
 
-  const loadFamilies = async () => {
+  const loadFamilies = async (showError = true) => {
     try {
+      setError(null);
       setLoading(true);
+      console.log('[FamiliesScreen] Loading families...');
+      
       const familiesData = await FamilyService.getFamilies();
-      setFamilies(Array.isArray(familiesData) ? familiesData : []);
+      const familiesList = Array.isArray(familiesData) ? familiesData : [];
+      
+      console.log('[FamiliesScreen] Families loaded:', familiesList.length, familiesList);
+      setFamilies(familiesList);
+      
+      // Also refresh the context
+      await refreshContextFamilies();
     } catch (error) {
-      console.error('Error loading families:', error);
+      console.error('[FamiliesScreen] Error loading families:', error);
+      const errorMessage = error instanceof APIError 
+        ? error.message 
+        : error instanceof Error 
+        ? error.message 
+        : 'Failed to load families. Please check your connection and try again.';
+      
+      setError(errorMessage);
       setFamilies([]);
+      
+      if (showError) {
+        Alert.alert(
+          'Error Loading Families',
+          errorMessage,
+          [
+            { text: 'Retry', onPress: () => loadFamilies() },
+            { text: 'OK', style: 'cancel' }
+          ]
+        );
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadFamilies(false); // Don't show alert on pull-to-refresh
   };
 
   const handleFamilyPress = (familyId: number) => {
@@ -77,14 +111,47 @@ export default function FamiliesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.text }]}>My Families</Text>
-        <TouchableOpacity onPress={handleCreateFamily} style={[styles.createButton, { backgroundColor: colors.primary }]}>
-          <FontAwesome name="plus" size={16} color="#fff" />
-          <Text style={styles.createButtonText}>Create Family</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity 
+            onPress={() => loadFamilies()} 
+            style={[styles.refreshButton, { borderColor: colors.border }]}
+            disabled={loading || refreshing}
+          >
+            <FontAwesome 
+              name="refresh" 
+              size={16} 
+              color={loading || refreshing ? colors.textSecondary : colors.text} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleCreateFamily} style={[styles.createButton, { backgroundColor: colors.primary }]}>
+            <FontAwesome name="plus" size={16} color="#fff" />
+            <Text style={styles.createButtonText}>Create Family</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {error && (
+        <View style={[styles.errorBanner, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
+          <FontAwesome name="exclamation-circle" size={16} color={colors.error} />
+          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+          <TouchableOpacity onPress={() => loadFamilies()}>
+            <Text style={[styles.retryText, { color: colors.error }]}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {families.length === 0 ? (
         <View style={styles.emptyState}>
@@ -157,6 +224,20 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 36,
+    height: 36,
   },
   createButton: {
     flexDirection: 'row',
@@ -264,6 +345,24 @@ const styles = StyleSheet.create({
   },
   familyInfo: {
     fontSize: 14,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    margin: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+  },
+  retryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
 

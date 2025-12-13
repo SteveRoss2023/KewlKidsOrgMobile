@@ -34,6 +34,7 @@ export default function ListsScreen() {
   const { selectedFamily } = useFamily();
   const [lists, setLists] = useState<List[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>('');
   const [activeTab, setActiveTab] = useState<ActiveTab>('todo');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -271,11 +272,15 @@ export default function ListsScreen() {
     }
   };
 
-  const fetchLists = async () => {
+  const fetchLists = async (isRefresh = false) => {
     if (!selectedFamily) return;
 
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError('');
       const fetchedLists = await ListService.getLists(selectedFamily.id);
       setLists(fetchedLists);
@@ -285,7 +290,12 @@ export default function ListsScreen() {
       setError(apiError.message || 'Failed to load lists. Please try again.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const handleRefresh = () => {
+    fetchLists(true);
   };
 
   const handleCreateList = async (data: CreateListData) => {
@@ -506,8 +516,8 @@ export default function ListsScreen() {
             />
           )}
           contentContainerStyle={styles.listsContainer}
-          refreshing={loading}
-          onRefresh={fetchLists}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
         />
       )}
 

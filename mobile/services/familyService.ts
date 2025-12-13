@@ -81,25 +81,42 @@ class FamilyService {
    */
   async getFamilies(): Promise<Family[]> {
     try {
+      console.log('[FamilyService] Fetching families from API...');
       const response = await apiClient.get('/families/');
+      console.log('[FamilyService] API Response:', {
+        status: response.status,
+        dataType: typeof response.data,
+        isArray: Array.isArray(response.data),
+        data: response.data
+      });
+      
       // Ensure we return an array
       if (Array.isArray(response.data)) {
+        console.log('[FamilyService] Returning array of', response.data.length, 'families');
         return response.data;
       }
       // If response.data is an object with results (pagination), return results
       if (response.data && Array.isArray(response.data.results)) {
+        console.log('[FamilyService] Returning paginated results:', response.data.results.length, 'families');
         return response.data.results;
       }
       // If it's a single object, wrap it in an array
       if (response.data && typeof response.data === 'object') {
+        console.log('[FamilyService] Wrapping single object in array');
         return [response.data];
       }
       // Default to empty array
-      console.warn('Unexpected API response format:', response.data);
+      console.warn('[FamilyService] Unexpected API response format:', response.data);
       return [];
     } catch (error) {
-      console.error('Error fetching families:', error);
-      throw handleAPIError(error as any);
+      console.error('[FamilyService] Error fetching families:', error);
+      const apiError = handleAPIError(error as any);
+      console.error('[FamilyService] API Error details:', {
+        message: apiError.message,
+        status: (error as any)?.response?.status,
+        data: (error as any)?.response?.data
+      });
+      throw apiError;
     }
   }
 
