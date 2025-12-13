@@ -188,3 +188,5 @@ class ListItemViewSet(viewsets.ModelViewSet):
             from .utils import assign_category_to_item
             assign_category_to_item(item, list_obj.family)
 
+
+

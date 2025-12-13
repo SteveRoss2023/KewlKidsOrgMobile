@@ -28,3 +28,5 @@ class GroceryCategoryAdmin(admin.ModelAdmin):
     search_fields = ['name']
     readonly_fields = ['created_at', 'updated_at']
 
+
+
