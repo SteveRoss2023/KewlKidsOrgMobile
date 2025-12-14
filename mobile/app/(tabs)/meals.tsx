@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -22,9 +22,17 @@ type ActiveTab = 'recipes' | 'meal-planning' | 'lists';
 
 export default function MealsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const [activeTab, setActiveTab] = useState<ActiveTab>('recipes');
+
+  // Set active tab from URL params if provided
+  useEffect(() => {
+    if (params.tab && ['recipes', 'meal-planning', 'lists'].includes(params.tab)) {
+      setActiveTab(params.tab as ActiveTab);
+    }
+  }, [params.tab]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [loading, setLoading] = useState(false);

@@ -431,10 +431,38 @@ export default function ListsScreen() {
               style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
               accessibilityLabel="View completed items history"
               accessibilityHint="Opens the history of completed grocery items"
+              // @ts-ignore - web-specific prop
+              {...(Platform.OS === 'web' && { title: 'View completed items history' })}
             >
               <FontAwesome name="history" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
             </TouchableOpacity>
             <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>History</Text>
+          </View>
+          <View style={styles.iconButtonContainer}>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/meals?tab=recipes')}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              accessibilityLabel="Recipes"
+              accessibilityHint="Opens the recipes screen"
+              // @ts-ignore - web-specific prop
+              {...(Platform.OS === 'web' && { title: 'Recipes' })}
+            >
+              <FontAwesome name="book" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
+            </TouchableOpacity>
+            <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>Recipes</Text>
+          </View>
+          <View style={styles.iconButtonContainer}>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/meals?tab=meal-planning')}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              accessibilityLabel="Meal Planning"
+              accessibilityHint="Opens the meal planning screen"
+              // @ts-ignore - web-specific prop
+              {...(Platform.OS === 'web' && { title: 'Meal Planning' })}
+            >
+              <FontAwesome name="calendar" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
+            </TouchableOpacity>
+            <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>Meals</Text>
           </View>
           <View style={styles.iconButtonContainer}>
             <TouchableOpacity
