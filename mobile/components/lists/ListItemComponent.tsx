@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { ListItem } from '../../types/lists';
@@ -9,6 +9,7 @@ interface ListItemComponentProps {
   onToggleComplete: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onMove?: () => void; // For moving item to different list
   onCategoryChange?: (categoryId: number | null) => void;
   showCategorySelect?: boolean;
   categories?: Array<{ id: number; name: string }>;
@@ -24,6 +25,7 @@ export default function ListItemComponent({
   onToggleComplete,
   onEdit,
   onDelete,
+  onMove,
   onCategoryChange,
   showCategorySelect = false,
   categories = [],
@@ -34,8 +36,49 @@ export default function ListItemComponent({
   onMoveDown,
 }: ListItemComponentProps) {
   const { colors } = useTheme();
+  const editButtonRef = useRef<any>(null);
+  const moveButtonRef = useRef<any>(null);
+  const deleteButtonRef = useRef<any>(null);
+  const editButtonWebRef = useRef<any>(null);
+  const moveButtonWebRef = useRef<any>(null);
+  const deleteButtonWebRef = useRef<any>(null);
 
   const isOverdue = isTodoList && item.due_date && !item.completed && new Date(item.due_date) < new Date();
+
+  // Set title attribute on web for tooltips
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const setTitle = (ref: any, title: string) => {
+        if (ref?.current) {
+          const getDOMNode = (node: any): HTMLElement | null => {
+            if (!node) return null;
+            if (node.nodeType === 1) return node;
+            if (node._nativeNode) return node._nativeNode;
+            if (node._internalFiberInstanceHandleDEV) {
+              const fiber = node._internalFiberInstanceHandleDEV;
+              if (fiber && fiber.stateNode) {
+                const stateNode = fiber.stateNode;
+                if (stateNode.nodeType === 1) return stateNode;
+                if (stateNode._nativeNode) return stateNode._nativeNode;
+              }
+            }
+            return null;
+          };
+          const domNode = getDOMNode(ref.current);
+          if (domNode) {
+            domNode.setAttribute('title', title);
+          }
+        }
+      };
+
+      if (onEdit) setTitle(editButtonRef, 'Edit item');
+      if (onMove) setTitle(moveButtonRef, 'Move item to another list');
+      if (onDelete) setTitle(deleteButtonRef, 'Delete item');
+      if (onEdit) setTitle(editButtonWebRef, 'Edit item');
+      if (onMove) setTitle(moveButtonWebRef, 'Move item to another list');
+      if (onDelete) setTitle(deleteButtonWebRef, 'Delete item');
+    }
+  }, [onEdit, onMove, onDelete]);
 
   return (
     <View
@@ -112,16 +155,59 @@ export default function ListItemComponent({
 
       <View style={styles.itemContent}>
         <View style={styles.itemHeader}>
-          <Text
-            style={[
-              styles.itemName,
-              { color: colors.text },
-              item.completed && styles.itemNameCompleted,
-            ]}
-            numberOfLines={Platform.OS === 'web' ? 2 : 3}
-          >
-            {item.name}
-          </Text>
+          <View style={styles.itemNameRow}>
+            <Text
+              style={[
+                styles.itemName,
+                { color: colors.text },
+                item.completed && styles.itemNameCompleted,
+              ]}
+              numberOfLines={Platform.OS === 'web' ? 2 : 2}
+            >
+              {item.name}
+            </Text>
+            {/* Edit, Move, and Delete buttons on same line as name on mobile */}
+            {Platform.OS !== 'web' && (
+              <View style={styles.itemActionsInline}>
+                {onEdit && (
+                  <TouchableOpacity
+                    ref={editButtonRef}
+                    style={styles.actionButton}
+                    onPress={onEdit}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityLabel="Edit item"
+                    accessibilityHint="Opens the edit form for this item"
+                  >
+                    <FontAwesome name="edit" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+                {onMove && (
+                  <TouchableOpacity
+                    ref={moveButtonRef}
+                    style={styles.actionButton}
+                    onPress={onMove}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityLabel="Move item"
+                    accessibilityHint="Move this item to a different list"
+                  >
+                    <FontAwesome name="arrows-alt" size={20} color={colors.primary} />
+                  </TouchableOpacity>
+                )}
+                {onDelete && (
+                  <TouchableOpacity
+                    ref={deleteButtonRef}
+                    style={styles.actionButton}
+                    onPress={onDelete}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityLabel="Delete item"
+                    accessibilityHint="Permanently delete this item"
+                  >
+                    <FontAwesome name="trash" size={20} color="#FF3B30" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
           {/* Quantity on mobile - show below name for grocery lists */}
           {item.quantity && isGroceryList && Platform.OS !== 'web' && (
             <Text style={[styles.quantityMobile, { color: colors.textSecondary }]}>
@@ -164,51 +250,77 @@ export default function ListItemComponent({
         )}
       </View>
 
-      <View style={[
-        styles.itemActions,
-        Platform.OS !== 'web' && isGroceryList && styles.itemActionsMobile
-      ]}>
-        {showCategorySelect && isGroceryList && categories.length > 0 && (
-          <View style={styles.categorySelect}>
-            <Text style={[styles.categoryLabel, { color: colors.textSecondary }]}>Category:</Text>
-            {/* Category dropdown would go here - simplified for now */}
-          </View>
-        )}
-        {onEdit && (
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={onEdit}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            // @ts-ignore - web-specific props
-            {...(Platform.OS === 'web' && {
-              'data-no-drag': 'true',
-              onMouseDown: (e: any) => {
-                // Stop propagation to prevent drag when clicking edit button
-                e.stopPropagation();
-              },
-            })}
-          >
-            <FontAwesome name="edit" size={Platform.OS !== 'web' ? 20 : 16} color={colors.textSecondary} />
-          </TouchableOpacity>
-        )}
-        {onDelete && (
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={onDelete}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            // @ts-ignore - web-specific props
-            {...(Platform.OS === 'web' && {
-              'data-no-drag': 'true',
-              onMouseDown: (e: any) => {
-                // Stop propagation to prevent drag when clicking delete button
-                e.stopPropagation();
-              },
-            })}
-          >
-            <FontAwesome name="trash" size={Platform.OS !== 'web' ? 20 : 16} color="#FF3B30" />
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* Actions on web - show on the right */}
+      {Platform.OS === 'web' && (
+        <View style={styles.itemActions}>
+          {showCategorySelect && isGroceryList && categories.length > 0 && (
+            <View style={styles.categorySelect}>
+              <Text style={[styles.categoryLabel, { color: colors.textSecondary }]}>Category:</Text>
+              {/* Category dropdown would go here - simplified for now */}
+            </View>
+          )}
+          {onEdit && (
+            <TouchableOpacity
+              ref={editButtonWebRef}
+              style={styles.actionButton}
+              onPress={onEdit}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Edit item"
+              accessibilityHint="Opens the edit form for this item"
+              // @ts-ignore - web-specific props
+              {...({
+                'data-no-drag': 'true',
+                onMouseDown: (e: any) => {
+                  // Stop propagation to prevent drag when clicking edit button
+                  e.stopPropagation();
+                },
+              })}
+            >
+              <FontAwesome name="edit" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+          {onMove && (
+            <TouchableOpacity
+              ref={moveButtonWebRef}
+              style={styles.actionButton}
+              onPress={onMove}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Move item"
+              accessibilityHint="Move this item to a different list"
+              // @ts-ignore - web-specific props
+              {...({
+                'data-no-drag': 'true',
+                onMouseDown: (e: any) => {
+                  // Stop propagation to prevent drag when clicking move button
+                  e.stopPropagation();
+                },
+              })}
+            >
+              <FontAwesome name="arrows-alt" size={16} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+          {onDelete && (
+            <TouchableOpacity
+              ref={deleteButtonWebRef}
+              style={styles.actionButton}
+              onPress={onDelete}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Delete item"
+              accessibilityHint="Permanently delete this item"
+              // @ts-ignore - web-specific props
+              {...({
+                'data-no-drag': 'true',
+                onMouseDown: (e: any) => {
+                  // Stop propagation to prevent drag when clicking delete button
+                  e.stopPropagation();
+                },
+              })}
+            >
+              <FontAwesome name="trash" size={16} color="#FF3B30" />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -281,11 +393,24 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     marginBottom: Platform.OS !== 'web' ? 4 : 0,
   },
+  itemNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Platform.OS !== 'web' ? 4 : 0,
+    gap: 8,
+  },
   itemName: {
     fontSize: Platform.OS !== 'web' ? 16 : 16,
     fontWeight: '500',
-    marginBottom: Platform.OS !== 'web' ? 4 : 4,
+    flex: 1,
     lineHeight: Platform.OS !== 'web' ? 22 : 20,
+  },
+  itemActionsInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
   },
   itemNameCompleted: {
     textDecorationLine: 'line-through',
@@ -314,15 +439,9 @@ const styles = StyleSheet.create({
   },
   itemActions: {
     flexDirection: 'row',
-    alignItems: Platform.OS !== 'web' ? 'flex-start' : 'center',
+    alignItems: 'center',
     gap: 8,
-    marginLeft: Platform.OS !== 'web' ? 0 : 8,
-    paddingTop: Platform.OS !== 'web' ? 2 : 0,
-  },
-  itemActionsMobile: {
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-    gap: 4,
+    marginLeft: 8,
   },
   categorySelect: {
     marginRight: 8,

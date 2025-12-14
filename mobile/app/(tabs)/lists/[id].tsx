@@ -49,6 +49,7 @@ import AlertModal from '../../../components/AlertModal';
 import ConfirmModal from '../../../components/ConfirmModal';
 import DraggableListItem from '../../../components/lists/DraggableListItem';
 import { APIError } from '../../../services/api';
+import apiClient from '../../../services/api';
 import { useVoiceRecognition } from '../../../hooks/useVoiceRecognition';
 import { speak } from '../../../utils/voiceFeedback';
 import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } from '../../../utils/voiceCommands';
@@ -91,6 +92,25 @@ export default function ListDetailScreen() {
     itemCount: 0,
   });
   const [deletingRecipeItems, setDeletingRecipeItems] = useState(false);
+  const [moveItemModal, setMoveItemModal] = useState<{
+    isOpen: boolean;
+    item: ListItem | null;
+  }>({
+    isOpen: false,
+    item: null,
+  });
+  const [availableLists, setAvailableLists] = useState<List[]>([]);
+  const [selectedTargetListId, setSelectedTargetListId] = useState<number | null>(null);
+  const [movingItem, setMovingItem] = useState(false);
+  const [moveItemResultModal, setMoveItemResultModal] = useState<{
+    visible: boolean;
+    message: string;
+    type: 'success' | 'error';
+  }>({
+    visible: false,
+    message: '',
+    type: 'success',
+  });
   const [selectedRecipeFilter, setSelectedRecipeFilter] = useState<string>('');
   const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -122,18 +142,44 @@ export default function ListDetailScreen() {
     }
   }, [list]);
 
-  // Collapse all categories by default when list or items change
+  // Initialize collapsed categories only when list changes (new list loaded)
+  // Preserve accordion state when items are added/removed
+  const lastListIdRef = React.useRef<number | null>(null);
   useEffect(() => {
     if (isGroceryList && listItems.length > 0) {
-      // Compute categories from listItems directly
-      const categoryIds = new Set<string>();
-      listItems.forEach((item) => {
-        const categoryId = item.category ? String(item.category) : 'uncategorized';
-        categoryIds.add(categoryId);
-      });
-      setCollapsedCategories(categoryIds);
+      const currentListId = list?.id;
+      
+      // Only reset collapsed categories if this is a new list
+      if (currentListId !== lastListIdRef.current) {
+        lastListIdRef.current = currentListId || null;
+        // Compute categories from listItems and collapse all for new list
+        const categoryIds = new Set<string>();
+        listItems.forEach((item) => {
+          const categoryId = item.category ? String(item.category) : 'uncategorized';
+          categoryIds.add(categoryId);
+        });
+        setCollapsedCategories(categoryIds);
+      } else {
+        // For the same list, just clean up categories that no longer exist
+        setCollapsedCategories((prev) => {
+          const currentCategoryIds = new Set<string>();
+          listItems.forEach((item) => {
+            const categoryId = item.category ? String(item.category) : 'uncategorized';
+            currentCategoryIds.add(categoryId);
+          });
+          
+          // Remove categories that no longer exist, but keep the rest
+          const newSet = new Set(prev);
+          prev.forEach((categoryId) => {
+            if (!currentCategoryIds.has(categoryId)) {
+              newSet.delete(categoryId);
+            }
+          });
+          return newSet;
+        });
+      }
     }
-  }, [list?.id, isGroceryList, listItems.length]);
+  }, [list?.id, isGroceryList, listItems]); // Include listItems to clean up removed categories, but preserve state
 
   // Handle voice commands
   useEffect(() => {
@@ -507,6 +553,11 @@ export default function ListDetailScreen() {
     return sortedCategoryIds.every((categoryId) => collapsedCategories.has(categoryId));
   }, [isGroceryList, sortedCategoryIds, collapsedCategories]);
 
+  // Memoize list color to prevent flashing during re-renders
+  const listColor = useMemo(() => {
+    return list?.color || undefined;
+  }, [list?.color]);
+
   const toggleCategory = (categoryId: string) => {
     setCollapsedCategories((prev) => {
       const newSet = new Set(prev);
@@ -542,23 +593,44 @@ export default function ListDetailScreen() {
   };
 
   const toggleItemComplete = async (item: ListItem) => {
-    // Optimistic update
-    setListItems((prevItems) =>
-      prevItems.map((prevItem) =>
-        prevItem.id === item.id ? { ...prevItem, completed: !prevItem.completed } : prevItem
-      )
-    );
+    // For grocery lists, completing an item will delete it and save to history
+    if (isGroceryList && !item.completed) {
+      // Optimistic update - remove item immediately
+      setListItems((prevItems) => prevItems.filter((prevItem) => prevItem.id !== item.id));
 
-    try {
-      await ListService.toggleItemComplete(item.id, !item.completed);
-    } catch (err) {
-      console.error('Error updating item:', err);
-      // Revert on error
+      try {
+        await ListService.toggleItemComplete(item.id, true);
+        // Refresh list items to ensure sync
+        await fetchListItems(true);
+      } catch (err) {
+        console.error('Error completing grocery item:', err);
+        // Revert on error - re-add the item
+        setListItems((prevItems) => {
+          const newItems = [...prevItems, item];
+          // Sort by order to maintain position
+          return newItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+        });
+      }
+    } else {
+      // For non-grocery lists or uncompleting items, use normal toggle
+      // Optimistic update
       setListItems((prevItems) =>
         prevItems.map((prevItem) =>
-          prevItem.id === item.id ? { ...prevItem, completed: item.completed } : prevItem
+          prevItem.id === item.id ? { ...prevItem, completed: !prevItem.completed } : prevItem
         )
       );
+
+      try {
+        await ListService.toggleItemComplete(item.id, !item.completed);
+      } catch (err) {
+        console.error('Error updating item:', err);
+        // Revert on error
+        setListItems((prevItems) =>
+          prevItems.map((prevItem) =>
+            prevItem.id === item.id ? { ...prevItem, completed: item.completed } : prevItem
+          )
+        );
+      }
     }
   };
 
@@ -750,6 +822,65 @@ export default function ListDetailScreen() {
   };
 
   // Simple move functions for mobile when DraggableFlatList is not available
+  const handleOpenMoveModal = async (item: ListItem) => {
+    if (!selectedFamily) return;
+    
+    try {
+      // Fetch all lists for the family (excluding the current list)
+      const allLists = await ListService.getLists(selectedFamily.id);
+      const otherLists = allLists.filter((l) => l.id !== list?.id);
+      setAvailableLists(otherLists);
+      setSelectedTargetListId(null);
+      setMoveItemModal({ isOpen: true, item });
+    } catch (err) {
+      console.error('Error fetching lists for move:', err);
+      setMoveItemResultModal({
+        visible: true,
+        message: 'Failed to load lists. Please try again.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleMoveItemToList = async () => {
+    if (!moveItemModal.item || !selectedTargetListId) return;
+
+    setMovingItem(true);
+    try {
+      // Update the item's list property - backend serializer includes 'list' in fields
+      await apiClient.patch(`/list-items/${moveItemModal.item.id}/`, {
+        list: selectedTargetListId,
+      });
+      
+      // Refresh list items to remove the moved item
+      await fetchListItems();
+      
+      // Get the target list name for the success message
+      const targetList = availableLists.find((l) => l.id === selectedTargetListId);
+      const targetListName = targetList?.name || 'the selected list';
+      
+      // Close move modal
+      setMoveItemModal({ isOpen: false, item: null });
+      setSelectedTargetListId(null);
+      
+      // Show success message in modal
+      setMoveItemResultModal({
+        visible: true,
+        message: `"${moveItemModal.item.name}" has been moved to "${targetListName}" successfully.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      console.error('Error moving item:', err);
+      setMoveItemResultModal({
+        visible: true,
+        message: err?.message || 'Failed to move item. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setMovingItem(false);
+    }
+  };
+
   const handleMoveItem = async (itemId: number, direction: 'up' | 'down') => {
     const sortedItems = [...filteredItems].sort((a, b) => {
       if (a.order !== b.order) {
@@ -809,6 +940,7 @@ export default function ListDetailScreen() {
           setEditingItem(item);
         }}
         onDelete={() => handleDeleteItem(item)}
+        onMove={() => handleOpenMoveModal(item)}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
         onDrag={drag ? () => {
@@ -1093,7 +1225,7 @@ export default function ListDetailScreen() {
             {selectedRecipeFilter ? `No items found for recipe "${selectedRecipeFilter}".` : 'No items yet. Add your first item!'}
           </Text>
         </View>
-      ) : isGroceryList ? (
+      ) : isGroceryList && listColor ? (
         <ScrollView 
           style={styles.scrollView}
           refreshControl={
@@ -1110,6 +1242,9 @@ export default function ListDetailScreen() {
             const isCollapsed = collapsedCategories.has(categoryId);
             const isUncategorized = categoryId === 'uncategorized';
 
+            // Only render if we have a valid listColor to prevent flashing
+            if (!listColor) return null;
+            
             return (
               <CategoryGroup
                 key={categoryId}
@@ -1117,12 +1252,14 @@ export default function ListDetailScreen() {
                 categoryName={categoryName}
                 items={categoryItems}
                 isCollapsed={isCollapsed}
+                listColor={listColor}
                 onToggleCollapse={() => toggleCategory(categoryId)}
                 onToggleItemComplete={toggleItemComplete}
                 onEditItem={(item) => {
                   setEditingItem(item);
                 }}
                 onDeleteItem={handleDeleteItem}
+                onMoveItem={handleOpenMoveModal}
                 isUncategorized={isUncategorized}
               />
             );
@@ -1176,6 +1313,7 @@ export default function ListDetailScreen() {
                     setEditingItem(item);
                   }}
                   onDelete={() => handleDeleteItem(item)}
+                  onMove={() => handleOpenMoveModal(item)}
                   isGroceryList={isGroceryList}
                   isTodoList={isTodoList}
                 />
@@ -1225,6 +1363,93 @@ export default function ListDetailScreen() {
         onConfirm={confirmDeleteRecipeItems}
         confirmText="Delete All"
         cancelText="Cancel"
+      />
+      <Modal
+        visible={moveItemModal.isOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setMoveItemModal({ isOpen: false, item: null })}
+      >
+        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Move Item</Text>
+              <TouchableOpacity
+                onPress={() => setMoveItemModal({ isOpen: false, item: null })}
+                style={styles.modalCloseButton}
+              >
+                <FontAwesome name="times" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            
+            {moveItemModal.item && (
+              <>
+                <View style={[styles.itemPreview, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  <Text style={[styles.itemPreviewName, { color: colors.text }]}>
+                    {moveItemModal.item.name}
+                  </Text>
+                  {moveItemModal.item.quantity && (
+                    <Text style={[styles.itemPreviewQuantity, { color: colors.textSecondary }]}>
+                      Quantity: {moveItemModal.item.quantity}
+                    </Text>
+                  )}
+                  {moveItemModal.item.notes && !moveItemModal.item.notes.startsWith('From recipe:') && (
+                    <Text style={[styles.itemPreviewNotes, { color: colors.textSecondary }]}>
+                      {moveItemModal.item.notes}
+                    </Text>
+                  )}
+                </View>
+                
+                <View style={styles.pickerContainer}>
+                  <Text style={[styles.pickerLabel, { color: colors.text }]}>Move to list:</Text>
+                  <ThemeAwarePicker
+                    selectedValue={selectedTargetListId}
+                    onValueChange={(value) => setSelectedTargetListId(value as number)}
+                    options={availableLists.map((l) => ({
+                      label: l.name,
+                      value: l.id,
+                    }))}
+                    placeholder="Select a list"
+                    enabled={true}
+                  />
+                </View>
+                
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    onPress={() => setMoveItemModal({ isOpen: false, item: null })}
+                    style={[styles.modalButton, styles.cancelButton, { borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleMoveItemToList}
+                    disabled={!selectedTargetListId || movingItem}
+                    style={[
+                      styles.modalButton,
+                      styles.confirmButton,
+                      { backgroundColor: colors.primary },
+                      (!selectedTargetListId || movingItem) && styles.disabledButton,
+                    ]}
+                  >
+                    {movingItem ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.modalButtonTextWhite}>Move</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+      <AlertModal
+        visible={moveItemResultModal.visible}
+        title={moveItemResultModal.type === 'success' ? 'Item Moved' : 'Error'}
+        message={moveItemResultModal.message}
+        type={moveItemResultModal.type}
+        onClose={() => setMoveItemResultModal({ visible: false, message: '', type: 'success' })}
+        confirmText="OK"
       />
     </View>
   );
@@ -1517,6 +1742,100 @@ const styles = StyleSheet.create({
   expandCollapseButtonText: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        elevation: 8,
+      },
+    }),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  itemPreview: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 20,
+  },
+  itemPreviewName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  itemPreviewQuantity: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  itemPreviewNotes: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  pickerContainer: {
+    marginBottom: 20,
+  },
+  pickerLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  modalButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    borderWidth: 1,
+  },
+  confirmButton: {
+    // backgroundColor set inline
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonTextWhite: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

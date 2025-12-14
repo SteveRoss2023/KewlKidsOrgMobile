@@ -2,8 +2,11 @@
 List and ListItem models for shopping and todo lists with encrypted fields.
 """
 from django.db import models
+from django.contrib.auth import get_user_model
 from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
 from families.models import Family, Member
+
+User = get_user_model()
 
 
 class GroceryCategory(models.Model):
@@ -105,6 +108,35 @@ class ListItem(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.list.name}"
+
+
+class CompletedGroceryItem(models.Model):
+    """History of completed grocery list items."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='completed_grocery_items')
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='completed_grocery_items')
+    
+    # Encrypted fields
+    list_name = EncryptedCharField(max_length=200)
+    item_name = EncryptedCharField(max_length=200)
+    quantity = EncryptedCharField(max_length=50, blank=True, null=True)
+    recipe_name = EncryptedCharField(max_length=200, blank=True, null=True)
+    
+    # Public fields
+    category_name = models.CharField(max_length=100, blank=True, null=True)
+    completed_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-completed_date']
+        indexes = [
+            models.Index(fields=['user', 'completed_date']),
+            models.Index(fields=['family', 'completed_date']),
+            models.Index(fields=['completed_date']),
+        ]
+        verbose_name = "Completed Grocery Item"
+        verbose_name_plural = "Completed Grocery Items"
+    
+    def __str__(self):
+        return f"{self.item_name} - {self.completed_date.date()}"
 
 
 

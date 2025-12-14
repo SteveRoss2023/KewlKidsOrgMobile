@@ -393,29 +393,65 @@ export default function ListsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.text }]}>
-          Lists - {selectedFamily.name}
-        </Text>
         <View style={styles.headerActions}>
+          <View style={styles.iconButtonContainer}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              accessibilityLabel="Go back"
+              accessibilityHint="Returns to the previous screen"
+            >
+              <FontAwesome name="arrow-left" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
+            </TouchableOpacity>
+            <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>Back</Text>
+          </View>
           {isSupported && (
-            <VoiceButton
-              onPress={handleVoiceClick}
-              isListening={isListening}
-              disabled={creating || updating}
-            />
+            <View style={styles.iconButtonContainer}>
+              <View style={[styles.iconButton, { backgroundColor: isListening ? colors.error : colors.primary }]}>
+                <TouchableOpacity
+                  onPress={handleVoiceClick}
+                  disabled={creating || updating}
+                  style={styles.iconButtonInner}
+                  accessibilityLabel="Voice Command"
+                  accessibilityHint="Press to start or stop voice recognition"
+                >
+                  <FontAwesome
+                    name="microphone"
+                    size={Platform.OS === 'web' ? 20 : 18}
+                    color="#fff"
+                  />
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>Mic</Text>
+            </View>
           )}
-          <TouchableOpacity
-            onPress={() => {
-              setEditingList(null);
-              setShowCreateForm(!showCreateForm);
-            }}
-            style={[styles.createButton, { backgroundColor: colors.primary }]}
-          >
-            <FontAwesome name={showCreateForm ? 'times' : 'plus'} size={16} color="#fff" />
-            <Text style={styles.createButtonText}>
-              {showCreateForm ? 'Cancel' : 'Create List'}
+          <View style={styles.iconButtonContainer}>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/lists/completed')}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              accessibilityLabel="View completed items history"
+              accessibilityHint="Opens the history of completed grocery items"
+            >
+              <FontAwesome name="history" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
+            </TouchableOpacity>
+            <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>History</Text>
+          </View>
+          <View style={styles.iconButtonContainer}>
+            <TouchableOpacity
+              onPress={() => {
+                setEditingList(null);
+                setShowCreateForm(!showCreateForm);
+              }}
+              style={[styles.iconButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              accessibilityLabel={showCreateForm ? 'Cancel' : 'Create List'}
+              accessibilityHint={showCreateForm ? 'Cancels creating a new list' : 'Opens form to create a new list'}
+            >
+              <FontAwesome name={showCreateForm ? 'times' : 'plus'} size={Platform.OS === 'web' ? 20 : 18} color="#fff" />
+            </TouchableOpacity>
+            <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>
+              {showCreateForm ? 'Cancel' : 'Add Item'}
             </Text>
-          </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -542,33 +578,51 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    flex: 1,
-  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 20,
   },
-  createButton: {
-    flexDirection: 'row',
+  iconButtonContainer: {
     alignItems: 'center',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
+    gap: 4,
   },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+  iconButton: {
+    width: Platform.OS === 'web' ? 44 : 40,
+    height: Platform.OS === 'web' ? 44 : 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+      },
+    }),
+  },
+  iconButtonInner: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   errorContainer: {
     padding: 12,

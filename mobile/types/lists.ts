@@ -53,6 +53,18 @@ export interface GroceryCategory {
   updated_at: string;
 }
 
+export interface CompletedGroceryItem {
+  id: number;
+  user: number;
+  family: number;
+  list_name: string;
+  item_name: string;
+  category_name: string | null;
+  quantity: string | null;
+  recipe_name: string | null;
+  completed_date: string;
+}
+
 export interface CreateListData {
   name: string;
   description?: string;

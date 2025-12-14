@@ -3,6 +3,7 @@ import {
   List,
   ListItem,
   GroceryCategory,
+  CompletedGroceryItem,
   CreateListData,
   UpdateListData,
   CreateListItemData,
@@ -183,11 +184,46 @@ class ListService {
 
   /**
    * Toggle item completion status
+   * For grocery lists, completing an item will delete it and save to history
    */
-  async toggleItemComplete(itemId: number, completed: boolean): Promise<ListItem> {
+  async toggleItemComplete(itemId: number, completed: boolean): Promise<ListItem | null> {
     try {
       const response = await apiClient.patch<ListItem>(`/list-items/${itemId}/`, { completed });
+      // For grocery lists, the item is deleted, so response will be 204 No Content
+      // Axios returns empty data for 204, so check status or if data is missing
+      if (response.status === 204 || !response.data) {
+        return null; // Item was deleted (grocery list completion)
+      }
       return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Get completed grocery items history
+   */
+  async getCompletedGroceryItems(familyId?: number, startDate?: string, endDate?: string): Promise<CompletedGroceryItem[]> {
+    try {
+      const params: any = {};
+      if (familyId) {
+        params.family = familyId;
+      }
+      if (startDate) {
+        params.start_date = startDate;
+      }
+      if (endDate) {
+        params.end_date = endDate;
+      }
+      const response = await apiClient.get('/completed-grocery-items/', { params });
+      // Handle pagination
+      if (response.data && Array.isArray(response.data.results)) {
+        return response.data.results;
+      }
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+      return [];
     } catch (error) {
       throw handleAPIError(error as any);
     }

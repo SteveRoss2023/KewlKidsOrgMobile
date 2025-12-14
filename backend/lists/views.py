@@ -8,9 +8,13 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Max, F
-from .models import List, ListItem, GroceryCategory
-from .serializers import ListSerializer, ListItemSerializer, GroceryCategorySerializer
+from .models import List, ListItem, GroceryCategory, CompletedGroceryItem
+from .serializers import ListSerializer, ListItemSerializer, GroceryCategorySerializer, CompletedGroceryItemSerializer
 from families.models import Family, Member
+from django.contrib.auth import get_user_model
+from datetime import datetime, timedelta
+
+User = get_user_model()
 
 
 class ListViewSet(viewsets.ModelViewSet):
@@ -187,6 +191,85 @@ class ListItemViewSet(viewsets.ModelViewSet):
         if list_obj.list_type == 'grocery':
             from .utils import assign_category_to_item
             assign_category_to_item(item, list_obj.family)
+
+    def update(self, request, *args, **kwargs):
+        """Update item - special handling for grocery list completion."""
+        instance = self.get_object()
+        list_obj = instance.list
+        
+        # Check if this is a grocery list item being completed
+        if list_obj.list_type == 'grocery' and request.data.get('completed') is True and not instance.completed:
+            # Get the member for the current user
+            member = get_object_or_404(Member, user=request.user, family=list_obj.family)
+            
+            # Extract recipe name from notes if present
+            recipe_name = None
+            if instance.notes and instance.notes.startswith('From recipe: '):
+                recipe_name = instance.notes.replace('From recipe: ', '').strip()
+            
+            # Get category name
+            category_name = instance.category.name if instance.category else None
+            
+            # Create CompletedGroceryItem
+            CompletedGroceryItem.objects.create(
+                user=request.user,
+                family=list_obj.family,
+                list_name=list_obj.name,
+                item_name=instance.name,
+                category_name=category_name,
+                quantity=instance.quantity,
+                recipe_name=recipe_name,
+            )
+            
+            # Delete the item instead of marking as completed
+            instance.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        
+            # For non-grocery lists or uncompleting items, use default behavior
+        return super().update(request, *args, **kwargs)
+
+
+class CompletedGroceryItemViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing completed grocery items history."""
+    serializer_class = CompletedGroceryItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return completed items for the current user."""
+        user = self.request.user
+        queryset = CompletedGroceryItem.objects.filter(user=user)
+
+        # Filter by family if provided
+        family_id = self.request.query_params.get('family')
+        if family_id:
+            try:
+                # Verify user has access to this family
+                family = get_object_or_404(Family, id=int(family_id), members__user=user)
+                queryset = queryset.filter(family=family)
+            except (ValueError, TypeError):
+                pass
+
+        # Filter by date range if provided
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                queryset = queryset.filter(completed_date__gte=start_dt)
+            except (ValueError, TypeError):
+                pass
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                # Add one day to include the entire end date
+                end_dt = end_dt + timedelta(days=1)
+                queryset = queryset.filter(completed_date__lt=end_dt)
+            except (ValueError, TypeError):
+                pass
+
+        return queryset.order_by('-completed_date')
 
 
 

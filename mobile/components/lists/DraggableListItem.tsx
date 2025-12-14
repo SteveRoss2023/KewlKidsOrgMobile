@@ -16,6 +16,7 @@ interface DraggableListItemProps {
   onToggleComplete: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onMove?: () => void;
   isGroceryList: boolean;
   isTodoList: boolean;
 }
@@ -33,6 +34,7 @@ export default function DraggableListItem({
   onToggleComplete,
   onEdit,
   onDelete,
+  onMove,
   isGroceryList,
   isTodoList,
 }: DraggableListItemProps) {
@@ -200,6 +202,7 @@ export default function DraggableListItem({
         onToggleComplete={onToggleComplete}
         onEdit={onEdit}
         onDelete={onDelete}
+        onMove={onMove}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
       />

@@ -2,7 +2,7 @@
 Serializers for lists app.
 """
 from rest_framework import serializers
-from .models import List, ListItem, GroceryCategory
+from .models import List, ListItem, GroceryCategory, CompletedGroceryItem
 
 
 class GroceryCategorySerializer(serializers.ModelSerializer):
@@ -66,6 +66,18 @@ class ListItemSerializer(serializers.ModelSerializer):
             'due_date', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'completed_at', 'category_name']
+
+
+class CompletedGroceryItemSerializer(serializers.ModelSerializer):
+    """CompletedGroceryItem serializer."""
+    
+    class Meta:
+        model = CompletedGroceryItem
+        fields = [
+            'id', 'user', 'family', 'list_name', 'item_name', 'category_name',
+            'quantity', 'recipe_name', 'completed_date'
+        ]
+        read_only_fields = ['id', 'completed_date']
 
 
 
