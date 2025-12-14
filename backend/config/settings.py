@@ -49,15 +49,18 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    
+
     # Local apps (must come before staticfiles to override runserver)
     'api',
     'families',
     'lists',
     'meals',
-    
+    'encryption',
+    'documents',
+    'events',
+
     'django.contrib.staticfiles',
-    
+
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
@@ -280,3 +283,74 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 #         'BACKEND': 'channels.layers.InMemoryChannelLayer',
 #     },
 # }
+
+# Cache Configuration (for OAuth state management)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'oauth-cache',
+    }
+}
+
+# OAuth Settings
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8900/api/googledrive/oauth/callback/')
+
+MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '')
+MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '')
+MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', 'http://localhost:8900/api/calendar/outlook/oauth/callback/')
+
+# OneDrive OAuth Settings (can reuse Microsoft settings if same app)
+ONEDRIVE_CLIENT_ID = os.getenv('ONEDRIVE_CLIENT_ID', '') or MICROSOFT_CLIENT_ID
+ONEDRIVE_CLIENT_SECRET = os.getenv('ONEDRIVE_CLIENT_SECRET', '') or MICROSOFT_CLIENT_SECRET
+
+# Support both development and production redirect URIs
+ONEDRIVE_REDIRECT_URI_DEV = os.getenv('ONEDRIVE_REDIRECT_URI_DEV', 'http://localhost:8900/api/onedrive/oauth/callback/')
+ONEDRIVE_REDIRECT_URI_PROD = os.getenv('ONEDRIVE_REDIRECT_URI_PROD', '')
+ONEDRIVE_REDIRECT_URI_FALLBACK = os.getenv('ONEDRIVE_REDIRECT_URI', 'http://localhost:8900/api/onedrive/oauth/callback/')
+
+# Use PROD URI if available (for ngrok), otherwise use DEV if in DEBUG mode, otherwise fallback
+if ONEDRIVE_REDIRECT_URI_PROD:
+    ONEDRIVE_REDIRECT_URI = ONEDRIVE_REDIRECT_URI_PROD
+elif ONEDRIVE_REDIRECT_URI_DEV and DEBUG:
+    ONEDRIVE_REDIRECT_URI = ONEDRIVE_REDIRECT_URI_DEV
+else:
+    ONEDRIVE_REDIRECT_URI = ONEDRIVE_REDIRECT_URI_FALLBACK
+
+# Google Drive OAuth Settings (can reuse Google settings if same app)
+GOOGLEDRIVE_CLIENT_ID = os.getenv('GOOGLEDRIVE_CLIENT_ID', '') or GOOGLE_CLIENT_ID
+GOOGLEDRIVE_CLIENT_SECRET = os.getenv('GOOGLEDRIVE_CLIENT_SECRET', '') or GOOGLE_CLIENT_SECRET
+
+# Support both development and production redirect URIs
+GOOGLEDRIVE_REDIRECT_URI_DEV = os.getenv('GOOGLEDRIVE_REDIRECT_URI_DEV', 'http://localhost:8900/api/googledrive/oauth/callback/')
+GOOGLEDRIVE_REDIRECT_URI_PROD = os.getenv('GOOGLEDRIVE_REDIRECT_URI_PROD', '')
+GOOGLEDRIVE_REDIRECT_URI_FALLBACK = os.getenv('GOOGLEDRIVE_REDIRECT_URI', 'http://localhost:8900/api/googledrive/oauth/callback/')
+
+# Use PROD URI if available (for ngrok), otherwise use DEV if in DEBUG mode, otherwise fallback
+if GOOGLEDRIVE_REDIRECT_URI_PROD:
+    GOOGLEDRIVE_REDIRECT_URI = GOOGLEDRIVE_REDIRECT_URI_PROD
+elif GOOGLEDRIVE_REDIRECT_URI_DEV and DEBUG:
+    GOOGLEDRIVE_REDIRECT_URI = GOOGLEDRIVE_REDIRECT_URI_DEV
+else:
+    GOOGLEDRIVE_REDIRECT_URI = GOOGLEDRIVE_REDIRECT_URI_FALLBACK
+
+# Google Photos OAuth Settings (can reuse Google settings if same app)
+GOOGLE_PHOTOS_CLIENT_ID = os.getenv('GOOGLE_PHOTOS_CLIENT_ID', '') or GOOGLE_CLIENT_ID
+GOOGLE_PHOTOS_CLIENT_SECRET = os.getenv('GOOGLE_PHOTOS_CLIENT_SECRET', '') or GOOGLE_CLIENT_SECRET
+
+# Support both development and production redirect URIs
+GOOGLE_PHOTOS_REDIRECT_URI_DEV = os.getenv('GOOGLE_PHOTOS_REDIRECT_URI_DEV', 'http://localhost:8900/api/googlephotos/oauth/callback/')
+GOOGLE_PHOTOS_REDIRECT_URI_PROD = os.getenv('GOOGLE_PHOTOS_REDIRECT_URI_PROD', '')
+GOOGLE_PHOTOS_REDIRECT_URI_FALLBACK = os.getenv('GOOGLE_PHOTOS_REDIRECT_URI', 'http://localhost:8900/api/googlephotos/oauth/callback/')
+
+# Use PROD URI if available (for ngrok), otherwise use DEV if in DEBUG mode, otherwise fallback
+if GOOGLE_PHOTOS_REDIRECT_URI_PROD:
+    GOOGLE_PHOTOS_REDIRECT_URI = GOOGLE_PHOTOS_REDIRECT_URI_PROD
+elif GOOGLE_PHOTOS_REDIRECT_URI_DEV and DEBUG:
+    GOOGLE_PHOTOS_REDIRECT_URI = GOOGLE_PHOTOS_REDIRECT_URI_DEV
+else:
+    GOOGLE_PHOTOS_REDIRECT_URI = GOOGLE_PHOTOS_REDIRECT_URI_FALLBACK
+
+# OAuth Session Key Lifetime (for caching user encryption keys)
+OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '2592000'))  # Default 30 days to match refresh token lifetime

@@ -12,6 +12,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AuthService from '../services/authService';
 import { useTheme } from '../contexts/ThemeContext';
+import oauthService from '../services/oauthService';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -32,6 +33,7 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
     const [onedriveConnected, setOnedriveConnected] = useState(false);
     const [googledriveConnected, setGoogledriveConnected] = useState(false);
     const [outlookConnected, setOutlookConnected] = useState(false);
+    const [googlephotosConnected, setGooglephotosConnected] = useState(false);
 
     useImperativeHandle(ref, () => ({
       openModal: () => {
@@ -52,11 +54,27 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
     }, [modalVisible]);
 
     const checkOAuthConnections = async () => {
-      // TODO: Implement OAuth connection checks when backend endpoints are available
-      // For now, set to false
-      setOnedriveConnected(false);
-      setGoogledriveConnected(false);
-      setOutlookConnected(false);
+      try {
+        // Check all OAuth connections in parallel
+        const [outlookStatus, onedriveStatus, googledriveStatus, googlephotosStatus] = await Promise.all([
+          oauthService.checkConnection('outlook').catch(() => ({ connected: false })),
+          oauthService.checkConnection('onedrive').catch(() => ({ connected: false })),
+          oauthService.checkConnection('googledrive').catch(() => ({ connected: false })),
+          oauthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
+        ]);
+
+        setOutlookConnected(outlookStatus.connected);
+        setOnedriveConnected(onedriveStatus.connected);
+        setGoogledriveConnected(googledriveStatus.connected);
+        setGooglephotosConnected(googlephotosStatus.connected);
+      } catch (error) {
+        console.error('Error checking OAuth connections:', error);
+        // On error, assume not connected
+        setOutlookConnected(false);
+        setOnedriveConnected(false);
+        setGoogledriveConnected(false);
+        setGooglephotosConnected(false);
+      }
     };
 
     const handleClose = () => {
@@ -140,7 +158,7 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
         label: 'Google Photos Connect',
         icon: 'photo',
         route: '/(tabs)/googlephotos-connect',
-        connected: false,
+        connected: googlephotosConnected,
       },
     ];
 
@@ -174,7 +192,7 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
                 </TouchableOpacity>
               </View>
 
-              <ScrollView 
+              <ScrollView
                 style={styles.menuList}
                 contentContainerStyle={styles.menuListContent}
                 showsVerticalScrollIndicator={true}

@@ -4,7 +4,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
-  
+
   return (
     <Tabs
       screenOptions={{
@@ -108,6 +108,36 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="map"
+        options={{
+          href: null, // Hide from tab bar - accessible via Home card
+        }}
+      />
+      <Tabs.Screen
+        name="outlook-sync"
+        options={{
+          href: null, // Hide from tab bar - accessible via Settings > Services
+        }}
+      />
+      <Tabs.Screen
+        name="onedrive-connect"
+        options={{
+          href: null, // Hide from tab bar - accessible via Settings > Services
+        }}
+      />
+      <Tabs.Screen
+        name="googledrive-connect"
+        options={{
+          href: null, // Hide from tab bar - accessible via Settings > Services
+        }}
+      />
+      <Tabs.Screen
+        name="googlephotos-connect"
+        options={{
+          href: null, // Hide from tab bar - accessible via Settings > Services
+        }}
+      />
+      <Tabs.Screen
+        name="documents"
         options={{
           href: null, // Hide from tab bar - accessible via Home card
         }}

@@ -23,8 +23,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { refreshFamilies } = useFamily();
-  const params = useLocalSearchParams<{ 
-    verified?: string; 
+  const params = useLocalSearchParams<{
+    verified?: string;
     email?: string;
     message?: string;
     message_type?: 'success' | 'error' | 'info' | 'warning';
@@ -124,7 +124,7 @@ export default function HomeScreen() {
       }, 100);
       return () => clearTimeout(timer);
     }
-    
+
     // Check for other messages (e.g., invitation already accepted)
     if (params.message && params.message_type) {
       setShowMessageModal(true);
@@ -146,7 +146,7 @@ export default function HomeScreen() {
           setEmailVerified(userData.email_verified);
         }
       }
-      
+
       // Also check profile to get latest verification status
       try {
         const profile = await ProfileService.getProfile();
@@ -197,7 +197,7 @@ export default function HomeScreen() {
         router.push('/(tabs)/meals');
         break;
       case 'documents':
-        // TODO: Navigate to documents when implemented
+        router.push('/(tabs)/documents');
         break;
       case 'finance':
         // TODO: Navigate to finance when implemented
@@ -237,15 +237,15 @@ export default function HomeScreen() {
           <View style={styles.titleContainer}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
           </View>
-          <TouchableOpacity 
-            onPress={handleRefresh} 
+          <TouchableOpacity
+            onPress={handleRefresh}
             style={[styles.refreshButton, { borderColor: colors.border }]}
             disabled={refreshing || loading}
           >
-            <FontAwesome 
-              name="refresh" 
-              size={16} 
-              color={refreshing || loading ? colors.textSecondary : colors.text} 
+            <FontAwesome
+              name="refresh"
+              size={16}
+              color={refreshing || loading ? colors.textSecondary : colors.text}
             />
           </TouchableOpacity>
         </View>
@@ -256,8 +256,8 @@ export default function HomeScreen() {
           <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{userEmail}</Text>
         )}
       </View>
-      <ScrollView 
-        style={styles.scrollView} 
+      <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
           <RefreshControl
