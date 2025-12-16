@@ -1801,23 +1801,25 @@ function FileItem({
       </View>
       <View style={styles.fileInfo}>
         <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
-          {file.name}
+          {file.name || 'Unnamed'}
         </Text>
-        <View style={styles.fileMeta}>
-          {!isFolder && fileSize && (
-            <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-              {DocumentService.formatFileSize(fileSize)}
-            </Text>
-          )}
-          {!isFolder && mimeType && (
-            <>
-              {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>}
+        {(!isFolder && (fileSize || mimeType)) && (
+          <View style={styles.fileMeta}>
+            {fileSize && (
               <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-                {DocumentService.getFileTypeName(mimeType, file.name)}
+                {DocumentService.formatFileSize(fileSize)}
               </Text>
-            </>
-          )}
-        </View>
+            )}
+            {mimeType && (
+              <>
+                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>}
+                <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+                  {DocumentService.getFileTypeName(mimeType, file.name || '')}
+                </Text>
+              </>
+            )}
+          </View>
+        )}
       </View>
       {!isFolder && (
         <TouchableOpacity
@@ -2172,6 +2174,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 });
+
 
 
 

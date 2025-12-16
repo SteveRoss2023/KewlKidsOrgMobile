@@ -23,7 +23,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       type: 'empty',
     };
   }
-  
+
   // Use default resolver
   if (originalResolveRequest) {
     return originalResolveRequest(context, moduleName, platform);

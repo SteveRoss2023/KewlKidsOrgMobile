@@ -1,9 +1,8 @@
 # Auto-activation script for backend virtual environment
 # This script activates the virtual environment when you navigate to the backend directory
 
-# Get the directory where this script is located
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$VenvPath = Join-Path $ScriptDir "venv\Scripts\Activate.ps1"
+# Point to venv outside OneDrive
+$VenvPath = "C:\Users\steve_80f2z1j\Development\project-deps\KewlKidsOrganizerMobile-backend-venv\Scripts\Activate.ps1"
 
 if (Test-Path $VenvPath) {
     & $VenvPath

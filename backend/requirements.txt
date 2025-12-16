@@ -1,39 +1,39 @@
 # Core Django
 # Installed: Django==5.2.8, djangorestframework==3.16.1, django-cors-headers==4.9.0
-Django>=5.2.8,<6.0
-djangorestframework>=3.14.0
-django-cors-headers>=4.3.0
+Django==5.2.8
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
 
 # Authentication
 # Installed: djangorestframework-simplejwt==5.5.1
-djangorestframework-simplejwt>=5.3.0
+djangorestframework-simplejwt==5.5.1
 
 # WebSockets
 # Installed: channels==4.3.2, channels-redis==4.3.0, daphne==4.2.1
-channels>=4.0.0
-channels-redis>=4.1.0
-daphne>=4.0.0
+channels==4.3.2
+channels-redis==4.3.0
+daphne==4.2.1
 
 # Database
 # Installed: psycopg2-binary==2.9.11
 # Note: PostgreSQL is REQUIRED for development (not optional)
-psycopg2-binary>=2.9.9  # PostgreSQL (required)
+psycopg2-binary==2.9.11  # PostgreSQL (required)
 
 # Encryption
 # Installed: django-encrypted-model-fields==0.6.5, cryptography==46.0.3
-django-encrypted-model-fields>=0.6.5
-cryptography>=41.0.0
+django-encrypted-model-fields==0.6.5
+cryptography==46.0.3
 
 # Utilities
 # Installed: python-dotenv==1.2.1, Pillow==12.0.0, requests==2.32.5, beautifulsoup4==4.14.3, recipe-scrapers==15.11.0
-python-dotenv>=1.0.0
-Pillow>=10.0.0
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-recipe-scrapers>=14.0.0
+python-dotenv==1.2.1
+Pillow==12.0.0
+requests==2.32.5
+beautifulsoup4==4.14.3
+recipe-scrapers==15.11.0
 
 # Background Tasks (optional)
 # Installed: celery==5.6.0, redis==7.1.0
-celery>=5.3.0
-redis>=5.0.0
+celery==5.6.0
+redis==7.1.0
 
