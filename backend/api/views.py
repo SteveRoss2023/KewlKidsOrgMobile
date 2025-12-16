@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.generics import CreateAPIView
 from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -380,7 +380,7 @@ class EmailTokenObtainPairView(TokenObtainPairView):
                                 user_key_obj.encrypted_key = encrypt_user_key(user_key, password, user.id)
                                 user_key_obj.save()
 
-                        # Cache the key for OAuth use (24 hour lifetime)
+                        # Cache the key for OAuth use (24 hour lifetime to match JWT refresh token)
                         set_session_user_key(user.id, user_key)
                     except Exception as e:
                         # If key caching fails, log but don't fail login
@@ -389,6 +389,46 @@ class EmailTokenObtainPairView(TokenObtainPairView):
                         logger.warning(f'Failed to cache user encryption key during login: {e}')
             except User.DoesNotExist:
                 pass
+
+        return response
+
+
+class CustomTokenRefreshView(TokenRefreshView):
+    """
+    Custom token refresh view that also refreshes/extends the session key.
+    This ensures the session key stays alive when JWT tokens are refreshed.
+    """
+    def post(self, request, *args, **kwargs):
+        # Extract user_id from refresh token before calling super()
+        user_id = None
+        refresh_token_str = request.data.get('refresh')
+        if refresh_token_str:
+            try:
+                from rest_framework_simplejwt.tokens import RefreshToken
+                refresh_token = RefreshToken(refresh_token_str)
+                # RefreshToken.payload is a dict containing the token claims including 'user_id'
+                user_id = refresh_token.payload.get('user_id')
+            except Exception:
+                # If we can't extract user_id, that's okay - we'll skip session key refresh
+                pass
+
+        response = super().post(request, *args, **kwargs)
+
+        # If token refresh was successful and we have user_id, also refresh session key if it exists
+        if response.status_code == 200 and user_id:
+            try:
+                from encryption.utils import get_session_user_key, set_session_user_key
+
+                # Try to get existing session key
+                existing_key = get_session_user_key(user_id, auto_refresh=False)
+                if existing_key:
+                    # Re-store with extended timeout (24 hours)
+                    set_session_user_key(user_id, existing_key)
+            except Exception as e:
+                # Log error but don't fail token refresh
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to refresh session key during token refresh: {e}')
 
         return response
 

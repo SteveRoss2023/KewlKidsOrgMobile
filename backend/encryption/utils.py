@@ -282,7 +282,7 @@ def get_session_user_key(user_id: int, jwt_token: str = None, auto_refresh: bool
 
         # Auto-refresh: extend the timeout when accessed
         if auto_refresh:
-            timeout = getattr(settings, 'OAUTH_SESSION_KEY_LIFETIME', 2592000)  # Default 30 days to match refresh token lifetime
+            timeout = getattr(settings, 'OAUTH_SESSION_KEY_LIFETIME', 86400)  # Default 24 hours to match refresh token lifetime
             # Re-store with extended timeout
             encoded_key = base64.b64encode(user_key).decode()
             cache.set(cache_key, encoded_key, timeout=timeout)
@@ -300,14 +300,14 @@ def set_session_user_key(user_id: int, user_key: bytes, jwt_token: str = None, t
         user_id: User ID
         user_key: User encryption key (bytes)
         jwt_token: JWT token string (optional, ignored - kept for backward compatibility)
-        timeout: Cache timeout in seconds (default: 30 days to match JWT refresh token)
+        timeout: Cache timeout in seconds (default: 24 hours to match JWT refresh token)
     """
     from django.core.cache import cache
 
     if timeout is None:
-        # Default to 30 days (2592000 seconds) to match JWT refresh token lifetime
+        # Default to 24 hours (86400 seconds) to match JWT refresh token lifetime
         # This ensures the session key lasts as long as the refresh token
-        timeout = getattr(settings, 'OAUTH_SESSION_KEY_LIFETIME', 2592000)
+        timeout = getattr(settings, 'OAUTH_SESSION_KEY_LIFETIME', 86400)
 
     # Use user-specific cache key (not JWT-specific) so it persists across JWT refreshes
     cache_key = f"oauth_user_key_{user_id}"

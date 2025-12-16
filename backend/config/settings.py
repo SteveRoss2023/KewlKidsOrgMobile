@@ -179,8 +179,8 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME', '60'))),
-    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME', '1440'))),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME', '1'))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME', '1'))),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'ALGORITHM': os.getenv('JWT_ALGORITHM', 'HS256'),
@@ -353,4 +353,6 @@ else:
     GOOGLE_PHOTOS_REDIRECT_URI = GOOGLE_PHOTOS_REDIRECT_URI_FALLBACK
 
 # OAuth Session Key Lifetime (for caching user encryption keys)
-OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '2592000'))  # Default 30 days to match refresh token lifetime
+# Session key lifetime: 24 hours (86400 seconds) to match JWT refresh token lifetime
+# This ensures the session key persists across JWT refreshes and auto-refreshes on access
+OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '86400'))  # 24 hours default
