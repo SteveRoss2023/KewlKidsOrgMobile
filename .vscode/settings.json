@@ -24,6 +24,29 @@
   "python.terminal.activateEnvInCurrentTerminal": true,
   "files.eol": "\n",
   "files.insertFinalNewline": true,
-  "files.trimTrailingWhitespace": true
+  "files.trimTrailingWhitespace": true,
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  "files.eol": "\n",
+  "[typescript]": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true
+  },
+  "[typescriptreact]": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true
+  },
+  "[javascript]": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true
+  },
+  "[javascriptreact]": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true
+  },
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit"
+  }
 }
 

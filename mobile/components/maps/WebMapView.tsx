@@ -1,17 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 
-// Only import react-leaflet on web
+// Only import react-leaflet on web - use lazy loading to avoid SSR issues
 let MapContainer: any = null;
 let TileLayer: any = null;
 let Marker: any = null;
 let Popup: any = null;
 let useMap: any = null;
 let useMapEvents: any = null;
+let leafletLoaded = false;
 
-if (Platform.OS === 'web') {
+function loadLeaflet() {
+  if (leafletLoaded || Platform.OS !== 'web') return;
+
   try {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     const Leaflet = require('react-leaflet');
     MapContainer = Leaflet.MapContainer;
     TileLayer = Leaflet.TileLayer;
@@ -19,10 +27,20 @@ if (Platform.OS === 'web') {
     Popup = Leaflet.Popup;
     useMap = Leaflet.useMap;
     useMapEvents = Leaflet.useMapEvents;
-    
-    // Import Leaflet CSS
-    require('leaflet/dist/leaflet.css');
-    
+
+    // Import Leaflet CSS only in browser
+    if (typeof document !== 'undefined') {
+      // Dynamically inject CSS to avoid Metro bundler issues
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+      link.crossOrigin = '';
+      if (!document.querySelector(`link[href="${link.href}"]`)) {
+        document.head.appendChild(link);
+      }
+    }
+
     // Fix Leaflet default icon paths
     const L = require('leaflet');
     delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -31,6 +49,8 @@ if (Platform.OS === 'web') {
       iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
     });
+
+    leafletLoaded = true;
   } catch (error) {
     console.warn('react-leaflet not available:', error);
   }
@@ -53,26 +73,26 @@ interface WebMapViewProps {
 }
 
 // Component to expose map instance and handle center/zoom updates
-function MapCenter({ 
-  onMapReady, 
-  center, 
-  zoom 
-}: { 
+function MapCenter({
+  onMapReady,
+  center,
+  zoom
+}: {
   onMapReady?: (map: any) => void;
   center: [number, number];
   zoom: number;
 }) {
   if (Platform.OS !== 'web' || !useMap) return null;
-  
+
   const map = useMap();
   const isInitialMount = useRef(true);
-  
+
   useEffect(() => {
     if (onMapReady) {
       onMapReady(map);
     }
   }, [map, onMapReady]);
-  
+
   // Only set initial view on mount - don't auto-center after user interactions
   // (matches reference project behavior - map stays where user leaves it)
   useEffect(() => {
@@ -82,7 +102,7 @@ function MapCenter({
       map.setView(center, zoom);
     }
   }, [map]); // Only run once when map is ready
-  
+
   return null;
 }
 
@@ -97,9 +117,22 @@ export default function WebMapView({
 }: WebMapViewProps) {
   const { colors } = useTheme();
   const mapInstanceRef = useRef<any>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  if (Platform.OS !== 'web' || !MapContainer) {
-    return null;
+  // Load leaflet only when component mounts in browser
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      loadLeaflet();
+      setIsLoaded(true);
+    }
+  }, []);
+
+  if (Platform.OS !== 'web' || !isLoaded || !MapContainer) {
+    return (
+      <View style={[styles.container, style, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
   }
 
   const handleMapReady = (map: any) => {
@@ -185,7 +218,7 @@ export default function WebMapView({
             />
           )}
 
-          <MapCenter 
+          <MapCenter
             onMapReady={handleMapReady}
             center={center}
             zoom={zoom}
@@ -195,7 +228,7 @@ export default function WebMapView({
           {markers.map((marker) => (
             <Marker key={marker.id} position={marker.position}>
               <Popup>
-                <div style={{ 
+                <div style={{
                   padding: '8px',
                   minWidth: '200px',
                   backgroundColor: colors.surface,
