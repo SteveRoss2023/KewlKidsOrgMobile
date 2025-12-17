@@ -186,3 +186,4 @@ class Document(models.Model):
         if self.file:
             self.file.delete(save=False)
         super().delete(*args, **kwargs)
+

@@ -47,3 +47,4 @@ class CalendarSync(JWTOAuthTokenMixin, models.Model):
 
     def __str__(self):
         return f"{self.member.user.email} - {self.get_sync_type_display()} - {self.calendar_name}"
+

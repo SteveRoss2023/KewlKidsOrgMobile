@@ -29,3 +29,4 @@ application = ProtocolTypeRouter({
     #     )
     # ),  # Uncomment when you create WebSocket routing
 })
+

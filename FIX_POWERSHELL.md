@@ -38,3 +38,4 @@ Then run the setup script again:
 cd "C:\Users\steve_80f2z1j\OneDrive\Documents\Development\Projects\Cursor Projects\KewlKidsOrganizerMobile"
 powershell -ExecutionPolicy Bypass -File setup_powershell_profile.ps1
 ```
+

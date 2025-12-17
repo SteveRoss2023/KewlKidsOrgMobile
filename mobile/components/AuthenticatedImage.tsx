@@ -162,3 +162,4 @@ export default function AuthenticatedImage({
 
   return <Image source={{ uri: imageUri }} style={style} {...props} />;
 }
+

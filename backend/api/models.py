@@ -138,3 +138,4 @@ class UserProfile(models.Model):
         """Get or create a user profile."""
         profile, created = cls.objects.get_or_create(user=user)
         return profile
+

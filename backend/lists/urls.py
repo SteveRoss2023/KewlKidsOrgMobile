@@ -14,3 +14,4 @@ router.register(r'completed-grocery-items', views.CompletedGroceryItemViewSet, b
 urlpatterns = [
     path('', include(router.urls)),
 ]
+

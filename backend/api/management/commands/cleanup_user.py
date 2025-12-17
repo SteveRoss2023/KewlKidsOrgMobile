@@ -57,3 +57,4 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS("Orphaned invitations deleted!"))
 
         self.stdout.write(self.style.SUCCESS("\nCleanup complete!"))
+

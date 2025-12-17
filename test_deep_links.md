@@ -126,3 +126,4 @@ Common mobile user-agents to test:
 - [ ] After build: Click link opens native app
 - [ ] After build: App navigates to correct screen
 - [ ] After build: Parameters are passed correctly
+

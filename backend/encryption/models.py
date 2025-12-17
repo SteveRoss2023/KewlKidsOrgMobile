@@ -165,3 +165,4 @@ class JWTOAuthTokenMixin(models.Model):
             user_key: Pre-decrypted user encryption key (optional, if already available)
         """
         self.encrypt_tokens(access_token, refresh_token, password, user_key)
+

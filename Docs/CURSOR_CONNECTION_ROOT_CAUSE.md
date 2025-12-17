@@ -180,3 +180,4 @@ If fixes don't work, contact Cursor support with:
 ---
 
 **Most Likely Fix**: Disable HTTP/2 in Cursor settings. This solves 80% of connection issues on networks with HTTP/2 problems.
+

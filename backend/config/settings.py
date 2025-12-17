@@ -356,3 +356,4 @@ else:
 # Session key lifetime: 24 hours (86400 seconds) to match JWT refresh token lifetime
 # This ensures the session key persists across JWT refreshes and auto-refreshes on access
 OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '86400'))  # 24 hours default
+

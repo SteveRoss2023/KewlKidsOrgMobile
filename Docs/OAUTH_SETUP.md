@@ -151,3 +151,4 @@ The OAuth token encryption requires the user's encryption key, which is cached d
 3. Try logging out and logging back in, then reconnect the OAuth service
 
 This is a security feature - OAuth tokens are encrypted with a key derived from the user's password, ensuring only the user can decrypt their tokens.
+

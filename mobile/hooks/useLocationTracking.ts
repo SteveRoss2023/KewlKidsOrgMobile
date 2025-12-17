@@ -198,3 +198,4 @@ export function useLocationTracking({
     permissionStatus,
   };
 }
+

@@ -1355,3 +1355,4 @@ def extract_ingredients_for_shopping_list(recipe_data: Dict) -> List[Dict]:
             })
 
     return shopping_items
+

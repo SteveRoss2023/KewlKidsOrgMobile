@@ -890,3 +890,4 @@ class AcceptInvitationView(APIView):
             'family_name': str(invitation.family.name),
             'accepted': True,
         }, status=status.HTTP_200_OK)
+

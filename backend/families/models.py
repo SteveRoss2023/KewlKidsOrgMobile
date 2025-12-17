@@ -126,3 +126,4 @@ class Invitation(models.Model):
             expires_at=expires_at
         )
         return invitation
+

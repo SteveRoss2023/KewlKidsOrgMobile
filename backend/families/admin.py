@@ -47,3 +47,4 @@ class InvitationAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+

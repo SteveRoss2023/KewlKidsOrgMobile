@@ -137,3 +137,4 @@ class CompletedGroceryItem(models.Model):
     
     def __str__(self):
         return f"{self.item_name} - {self.completed_date.date()}"
+

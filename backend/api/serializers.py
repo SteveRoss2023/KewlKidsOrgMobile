@@ -272,3 +272,4 @@ class MealPlanSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+

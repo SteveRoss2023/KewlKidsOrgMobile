@@ -36,3 +36,4 @@ class CompletedGroceryItemAdmin(admin.ModelAdmin):
     search_fields = ['item_name', 'list_name']
     readonly_fields = ['completed_date']
     date_hierarchy = 'completed_date'
+

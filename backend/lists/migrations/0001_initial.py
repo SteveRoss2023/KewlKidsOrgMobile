@@ -91,3 +91,4 @@ class Migration(migrations.Migration):
             index=models.Index(fields=['category'], name='lists_listi_categor_fba31e_idx'),
         ),
     ]
+

@@ -135,3 +135,4 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(f'\n[OK] Fixed {len(orphaned_invitations)} invitation(s)')
             )
+

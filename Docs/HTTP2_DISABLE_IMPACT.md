@@ -109,3 +109,4 @@ Only re-enable HTTP/2 if:
 ---
 
 **TL;DR**: Disable HTTP/2. You'll get stability with zero noticeable performance impact.
+

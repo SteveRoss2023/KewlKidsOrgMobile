@@ -36,3 +36,4 @@ export default function Logo({ width = 32, height = 32, color = '#007AFF' }: Log
     </Svg>
   );
 }
+

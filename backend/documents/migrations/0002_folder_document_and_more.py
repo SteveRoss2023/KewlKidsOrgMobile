@@ -62,3 +62,4 @@ class Migration(migrations.Migration):
             index=models.Index(fields=['family', 'created_at'], name='documents_d_family__7fd378_idx'),
         ),
     ]
+
