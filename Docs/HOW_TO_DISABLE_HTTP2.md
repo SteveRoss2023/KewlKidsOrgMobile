@@ -145,3 +145,4 @@ After restarting Cursor:
 Need help? Check `Docs/CURSOR_CONNECTION_ROOT_CAUSE.md` for more troubleshooting steps.
 
 
+

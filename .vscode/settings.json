@@ -23,7 +23,7 @@
   "python.terminal.activateEnvironment": true,
   "python.terminal.activateEnvInCurrentTerminal": true,
   "files.eol": "\n",
-  "files.insertFinalNewline": true,
+  "files.insertFinalNewline": false,
   "files.trimTrailingWhitespace": true,
   "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 1000,
