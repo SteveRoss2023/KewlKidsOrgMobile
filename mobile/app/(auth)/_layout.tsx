@@ -14,18 +14,3 @@ export default function AuthLayout() {
   );
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

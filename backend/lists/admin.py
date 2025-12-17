@@ -37,5 +37,3 @@ class CompletedGroceryItemAdmin(admin.ModelAdmin):
     readonly_fields = ['completed_date']
     date_hierarchy = 'completed_date'
 
-
-

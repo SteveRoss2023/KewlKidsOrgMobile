@@ -37,8 +37,8 @@ The application uses the following ports:
 | **Expo Web** | `19000` | Web development server (alternate) |
 | **Expo Web (Alternate)** | `19006` | Web development server (alternate) |
 | **PostgreSQL** | `5432` | Database server (default) |
-| **ngrok API Tunnel** | `8900` → Public URL | Tunnels backend API |
-| **ngrok Web Tunnel** | `8081` → Public URL | Tunnels web app (optional) |
+| **ngrok API Tunnel** | `8900` â†’ Public URL | Tunnels backend API |
+| **ngrok Web Tunnel** | `8081` â†’ Public URL | Tunnels web app (optional) |
 
 ### Finding Your Local IP Address
 
@@ -517,15 +517,4 @@ Use this checklist for a quick startup:
 
 **Last Updated**: 2024
 **Maintained By**: Development Team
-
-
-
-
-
-
-
-
-
-
-
 

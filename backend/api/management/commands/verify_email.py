@@ -24,15 +24,3 @@ class Command(BaseCommand):
         except User.DoesNotExist:
             self.stdout.write(self.style.ERROR(f'User with email {email} not found.'))
 
-
-
-
-
-
-
-
-
-
-
-
-

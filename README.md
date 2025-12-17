@@ -34,33 +34,33 @@ This mobile app is a migration of the KewlKidsOrganizer web application to React
 
 ```
 KewlKidsOrganizerMobile/
-├── mobile/                    # React Native app (Expo)
-│   ├── app/                   # App router (Expo Router)
-│   ├── components/            # React Native components
-│   ├── screens/               # Screen components
-│   ├── services/              # API services
-│   ├── utils/                 # Utilities
-│   ├── contexts/              # React contexts
-│   ├── hooks/                 # Custom hooks
-│   └── app.json               # Expo configuration
-├── backend/                   # Django backend
-│   ├── config/                # Django settings
-│   ├── api/                   # API endpoints
-│   ├── families/              # Family management
-│   ├── events/                # Calendar events
-│   ├── lists/                 # Lists & shopping
-│   ├── chat/                  # Chat with E2EE
-│   ├── meals/                 # Meal planning
-│   ├── documents/             # Document sharing
-│   ├── finance/               # Finance tracking
-│   └── manage.py
-├── Docs/                      # Documentation
-│   ├── MOBILE_APP_PLAN.md     # Complete migration plan
-│   ├── SETUP.md               # Setup instructions
-│   ├── TESTING.md             # Testing guide
-│   ├── DEPLOYMENT.md          # Store deployment guide
-│   └── MIGRATION.md           # Feature migration guide
-└── README.md
+â”œâ”€â”€ mobile/                    # React Native app (Expo)
+â”‚   â”œâ”€â”€ app/                   # App router (Expo Router)
+â”‚   â”œâ”€â”€ components/            # React Native components
+â”‚   â”œâ”€â”€ screens/               # Screen components
+â”‚   â”œâ”€â”€ services/              # API services
+â”‚   â”œâ”€â”€ utils/                 # Utilities
+â”‚   â”œâ”€â”€ contexts/              # React contexts
+â”‚   â”œâ”€â”€ hooks/                 # Custom hooks
+â”‚   â””â”€â”€ app.json               # Expo configuration
+â”œâ”€â”€ backend/                   # Django backend
+â”‚   â”œâ”€â”€ config/                # Django settings
+â”‚   â”œâ”€â”€ api/                   # API endpoints
+â”‚   â”œâ”€â”€ families/              # Family management
+â”‚   â”œâ”€â”€ events/                # Calendar events
+â”‚   â”œâ”€â”€ lists/                 # Lists & shopping
+â”‚   â”œâ”€â”€ chat/                  # Chat with E2EE
+â”‚   â”œâ”€â”€ meals/                 # Meal planning
+â”‚   â”œâ”€â”€ documents/             # Document sharing
+â”‚   â”œâ”€â”€ finance/               # Finance tracking
+â”‚   â””â”€â”€ manage.py
+â”œâ”€â”€ Docs/                      # Documentation
+â”‚   â”œâ”€â”€ MOBILE_APP_PLAN.md     # Complete migration plan
+â”‚   â”œâ”€â”€ SETUP.md               # Setup instructions
+â”‚   â”œâ”€â”€ TESTING.md             # Testing guide
+â”‚   â”œâ”€â”€ DEPLOYMENT.md          # Store deployment guide
+â”‚   â””â”€â”€ MIGRATION.md           # Feature migration guide
+â””â”€â”€ README.md
 ```
 
 ## Getting Started
@@ -150,5 +150,4 @@ This project is in active development. See [Docs/MOBILE_APP_PLAN.md](Docs/MOBILE
 ## Contributing
 
 [Add contributing guidelines here]
-
 

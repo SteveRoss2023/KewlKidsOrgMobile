@@ -40,11 +40,11 @@ Common causes:
 ### 5. Check Firewall/Antivirus
 - Temporarily disable firewall/antivirus
 - If it works, add Cursor to your firewall exceptions
-- Windows: Settings → Firewall → Allow an app through firewall
+- Windows: Settings â†’ Firewall â†’ Allow an app through firewall
 
 ## Preventing Work Loss
 
-### ✅ Best Practices
+### âœ… Best Practices
 
 1. **Save Files Frequently**
    - Use `Ctrl+S` (Windows) or `Cmd+S` (Mac) regularly
@@ -104,7 +104,7 @@ If issues persist:
 
 ### Check Proxy Settings
 If you're behind a corporate proxy:
-1. Cursor Settings → Network/Proxy
+1. Cursor Settings â†’ Network/Proxy
 2. Configure proxy settings if needed
 3. Contact IT if corporate proxy is blocking
 
@@ -148,7 +148,4 @@ When you see the connection error:
 ---
 
 **Note**: This error is with Cursor IDE itself, not your KewlKidsOrganizerMobile project. Your project files and code are safe - this is just a temporary connection issue with Cursor's AI service.
-
-
-
 

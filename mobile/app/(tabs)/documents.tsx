@@ -829,7 +829,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                     onPress={() => setFoldersSortOrder(foldersSortOrder === 'asc' ? 'desc' : 'asc')}
                   >
                     <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {foldersSortOrder === 'asc' ? '↑' : '↓'}
+                      {foldersSortOrder === 'asc' ? 'â†‘' : 'â†“'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -862,7 +862,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                     onPress={() => setDocumentsSortOrder(documentsSortOrder === 'asc' ? 'desc' : 'asc')}
                   >
                     <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {documentsSortOrder === 'asc' ? '↑' : '↓'}
+                      {documentsSortOrder === 'asc' ? 'â†‘' : 'â†“'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -977,7 +977,7 @@ function AppFolderItem({
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
             {folder.subfolders_count || 0} {(folder.subfolders_count || 0) !== 1 ? 'subfolders' : 'subfolder'}
           </Text>
-          <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>
+          <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
             {folder.documents_count || 0} {(folder.documents_count || 0) !== 1 ? 'documents' : 'document'}
           </Text>
@@ -1030,7 +1030,7 @@ function AppDocumentItem({
               <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                 {AppDocumentsService.formatFileSize(document.file_size)}
               </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>
+              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
             </>
           )}
           {document.mime_type && (
@@ -1038,7 +1038,7 @@ function AppDocumentItem({
               <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                 {AppDocumentsService.getFileTypeName(document.mime_type, document.name)}
               </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>
+              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
             </>
           )}
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
@@ -1797,7 +1797,7 @@ function FileItem({
       disabled={!isFolder}
     >
       <View style={styles.fileIcon}>
-        <Text style={styles.fileIconText}>{isFolder ? '📁' : '📄'}</Text>
+        <Text style={styles.fileIconText}>{isFolder ? 'ðŸ“' : 'ðŸ“„'}</Text>
       </View>
       <View style={styles.fileInfo}>
         <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
@@ -1812,7 +1812,7 @@ function FileItem({
             )}
             {mimeType && (
               <>
-                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> • </Text>}
+                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>}
                 <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                   {DocumentService.getFileTypeName(mimeType, file.name || '')}
                 </Text>
@@ -2174,7 +2174,4 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 });
-
-
-
 

@@ -4,8 +4,8 @@
 
 ### Step 1: Open Settings
 - **Press**: `Ctrl + ,` (Control + Comma)
-- **OR**: Click **File** → **Preferences** → **Settings**
-- **OR**: Click the gear icon (⚙️) in the bottom left, then click "Settings"
+- **OR**: Click **File** â†’ **Preferences** â†’ **Settings**
+- **OR**: Click the gear icon (âš™ï¸) in the bottom left, then click "Settings"
 
 ### Step 2: Search for HTTP/2 Setting
 1. In the settings search box at the top, type: **`http2`** or **`HTTP/2`**
@@ -143,7 +143,4 @@ After restarting Cursor:
 ---
 
 Need help? Check `Docs/CURSOR_CONNECTION_ROOT_CAUSE.md` for more troubleshooting steps.
-
-
-
 

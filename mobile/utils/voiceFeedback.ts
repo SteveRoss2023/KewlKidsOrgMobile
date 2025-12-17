@@ -19,22 +19,22 @@ export function speak(text: string, callback?: () => void): void {
     pitch: 1.0,
     rate: 1.2,
     onDone: () => {
-      console.log('🎤 [VOICE] Speech completed');
+      console.log('ðŸŽ¤ [VOICE] Speech completed');
       if (callback) callback();
     },
     onStopped: () => {
-      console.log('🎤 [VOICE] Speech stopped');
+      console.log('ðŸŽ¤ [VOICE] Speech stopped');
       if (callback) callback();
     },
     onError: (error) => {
-      console.error('🎤 [VOICE] Speech error:', error);
+      console.error('ðŸŽ¤ [VOICE] Speech error:', error);
       if (callback) callback();
     },
   };
 
   try {
     Speech.speak(text, options);
-    console.log('🎤 [VOICE] Speaking:', text.substring(0, 50) + '...');
+    console.log('ðŸŽ¤ [VOICE] Speaking:', text.substring(0, 50) + '...');
   } catch (error) {
     console.error('Error speaking:', error);
     if (callback) callback();
@@ -47,15 +47,4 @@ export function speak(text: string, callback?: () => void): void {
 export function stopSpeaking(): void {
   Speech.stop();
 }
-
-
-
-
-
-
-
-
-
-
-
 

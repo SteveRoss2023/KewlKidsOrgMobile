@@ -74,7 +74,7 @@ export default function CreateFamilyScreen() {
               onPress={() => setSelectedColor(color)}
             >
               {selectedColor === color && (
-                <Text style={styles.checkmark}>✓</Text>
+                <Text style={styles.checkmark}>âœ“</Text>
               )}
             </TouchableOpacity>
           ))}
@@ -156,6 +156,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-
 

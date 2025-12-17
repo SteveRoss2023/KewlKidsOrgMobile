@@ -25,7 +25,7 @@ Disabling HTTP/2 will make Cursor **more stable** with **minimal performance imp
 
 ## What You GAIN by Disabling HTTP/2
 
-### 1. **Stability** ⭐ (Most Important)
+### 1. **Stability** â­ (Most Important)
 - HTTP/1.1 is more compatible with:
   - Corporate networks
   - ISPs with HTTP/2 issues (like Shaw Cable)
@@ -59,14 +59,14 @@ Disabling HTTP/2 will make Cursor **more stable** with **minimal performance imp
 ## Real-World Impact for Cursor
 
 ### What You'll Notice:
-- ✅ **Fewer connection errors** (the main problem you're having)
-- ✅ **More stable AI responses**
-- ✅ **Less frustration from dropped connections**
+- âœ… **Fewer connection errors** (the main problem you're having)
+- âœ… **More stable AI responses**
+- âœ… **Less frustration from dropped connections**
 
 ### What You Won't Notice:
-- ❌ **No noticeable speed difference** - AI requests take 5-30 seconds anyway, a 50ms difference is imperceptible
-- ❌ **No feature loss** - All Cursor features work identically
-- ❌ **No functionality change** - Everything works the same, just more reliably
+- âŒ **No noticeable speed difference** - AI requests take 5-30 seconds anyway, a 50ms difference is imperceptible
+- âŒ **No feature loss** - All Cursor features work identically
+- âŒ **No functionality change** - Everything works the same, just more reliably
 
 ## Why HTTP/2 Causes Your Problems
 
@@ -77,7 +77,7 @@ Disabling HTTP/2 will make Cursor **more stable** with **minimal performance imp
 
 ## Recommendation
 
-**✅ Disable HTTP/2** - The stability benefits far outweigh the tiny performance cost.
+**âœ… Disable HTTP/2** - The stability benefits far outweigh the tiny performance cost.
 
 ### The Trade-Off:
 - **Lose**: ~50-100ms per request (imperceptible)
@@ -91,10 +91,10 @@ Disabling HTTP/2 will make Cursor **more stable** with **minimal performance imp
 ## When You Might Want HTTP/2 Back
 
 Only re-enable HTTP/2 if:
-1. ✅ You're on a different network (not Shaw Cable)
-2. ✅ You've confirmed your network fully supports HTTP/2
-3. ✅ You're not experiencing connection issues
-4. ✅ You're making many small, parallel requests (unlikely with Cursor)
+1. âœ… You're on a different network (not Shaw Cable)
+2. âœ… You've confirmed your network fully supports HTTP/2
+3. âœ… You're not experiencing connection issues
+4. âœ… You're making many small, parallel requests (unlikely with Cursor)
 
 ## Bottom Line
 
@@ -109,7 +109,4 @@ Only re-enable HTTP/2 if:
 ---
 
 **TL;DR**: Disable HTTP/2. You'll get stability with zero noticeable performance impact.
-
-
-
 

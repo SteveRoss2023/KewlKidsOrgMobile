@@ -81,7 +81,7 @@ export default function AlertModal({
                 <View key={index} style={styles.detailSection}>
                   <Text style={styles.detailLabel}>{detail.label}:</Text>
                   {detail.items.map((item, itemIndex) => (
-                    <Text key={itemIndex} style={styles.detailItem}>• {item}</Text>
+                    <Text key={itemIndex} style={styles.detailItem}>â€¢ {item}</Text>
                   ))}
                 </View>
               ))}
@@ -223,8 +223,4 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 });
-
-
-
-
 

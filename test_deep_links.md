@@ -35,10 +35,10 @@ curl -I "http://localhost:8900/api/invitations/accept/?token=YOUR_TOKEN&email=te
 3. **Verify web app works** - Should show login/register with pre-filled email
 
 ### Expected Behavior:
-- ✅ Email link opens in browser
-- ✅ Browser redirects to web app (localhost:8081 or ngrok URL)
-- ✅ Web app shows correct screen with parameters
-- ❌ Deep link won't open app (Expo Go limitation - this is expected)
+- âœ… Email link opens in browser
+- âœ… Browser redirects to web app (localhost:8081 or ngrok URL)
+- âœ… Web app shows correct screen with parameters
+- âŒ Deep link won't open app (Expo Go limitation - this is expected)
 
 ## 3. Test Deep Link Format (Manual)
 
@@ -74,26 +74,26 @@ adb shell am start -W -a android.intent.action.VIEW -d "kewlkids:///(auth)/login
 5. **Verify app opens** and navigates to correct screen
 
 ### What to Verify:
-- ✅ App opens when clicking email link
-- ✅ Navigates to correct screen (login/register/home)
-- ✅ URL parameters are passed correctly (email pre-filled, etc.)
-- ✅ Modals/messages display correctly
+- âœ… App opens when clicking email link
+- âœ… Navigates to correct screen (login/register/home)
+- âœ… URL parameters are passed correctly (email pre-filled, etc.)
+- âœ… Modals/messages display correctly
 
 ## 5. Test Different Scenarios
 
 ### Invitation Scenarios:
-- [ ] New user (doesn't exist) → Should go to register
-- [ ] Existing user (not logged in) → Should go to login
-- [ ] Existing user (logged in) → Should auto-accept
-- [ ] Expired invitation → Should show error
-- [ ] Already accepted → Should show info message
-- [ ] Cancelled invitation → Should show error
+- [ ] New user (doesn't exist) â†’ Should go to register
+- [ ] Existing user (not logged in) â†’ Should go to login
+- [ ] Existing user (logged in) â†’ Should auto-accept
+- [ ] Expired invitation â†’ Should show error
+- [ ] Already accepted â†’ Should show info message
+- [ ] Cancelled invitation â†’ Should show error
 
 ### Email Verification Scenarios:
-- [ ] Valid token → Should verify and redirect to home
-- [ ] Already verified → Should show success message
-- [ ] Invalid token → Should show error
-- [ ] Expired token → Should show error
+- [ ] Valid token â†’ Should verify and redirect to home
+- [ ] Already verified â†’ Should show success message
+- [ ] Invalid token â†’ Should show error
+- [ ] Expired token â†’ Should show error
 
 ## 6. Debugging Tips
 
@@ -120,21 +120,10 @@ Common mobile user-agents to test:
 ## 7. Quick Test Checklist
 
 - [ ] Send invitation email
-- [ ] Click link on desktop → Opens web app
-- [ ] Click link on mobile → Redirects to deep link (check URL)
+- [ ] Click link on desktop â†’ Opens web app
+- [ ] Click link on mobile â†’ Redirects to deep link (check URL)
 - [ ] Verify deep link format is correct: `kewlkids:///(auth)/...`
 - [ ] After build: Click link opens native app
 - [ ] After build: App navigates to correct screen
 - [ ] After build: Parameters are passed correctly
-
-
-
-
-
-
-
-
-
-
-
 

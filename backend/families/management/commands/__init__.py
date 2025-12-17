@@ -1,13 +1,2 @@
 # Management commands package
 
-
-
-
-
-
-
-
-
-
-
-

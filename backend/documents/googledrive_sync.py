@@ -404,11 +404,3 @@ class GoogleDriveSync:
             )
         response.raise_for_status()
 
-
-
-
-
-
-
-
-

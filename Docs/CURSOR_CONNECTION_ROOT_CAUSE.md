@@ -45,7 +45,7 @@ Based on diagnostics, here's what's causing your connection errors:
 
 1. Open Cursor Settings:
    - Press `Ctrl + ,` (or `Cmd + ,` on Mac)
-   - Or: File → Preferences → Settings
+   - Or: File â†’ Preferences â†’ Settings
 
 2. Search for "HTTP/2" or "http2"
 
@@ -60,7 +60,7 @@ This forces Cursor to use HTTP/1.1, which is more compatible with networks that 
 ### Fix #2: Check Windows Firewall
 
 1. Open Windows Security:
-   - Press `Win + I` → Update & Security → Windows Security → Firewall & network protection
+   - Press `Win + I` â†’ Update & Security â†’ Windows Security â†’ Firewall & network protection
 
 2. Click "Allow an app through firewall"
 
@@ -68,7 +68,7 @@ This forces Cursor to use HTTP/1.1, which is more compatible with networks that 
 
 4. Make sure both **Private** and **Public** are checked
 
-5. If Cursor isn't listed, click "Change settings" → "Allow another app" → Browse to Cursor's executable
+5. If Cursor isn't listed, click "Change settings" â†’ "Allow another app" â†’ Browse to Cursor's executable
 
 ### Fix #3: Disable Antivirus Temporarily (Test)
 
@@ -77,7 +77,7 @@ This forces Cursor to use HTTP/1.1, which is more compatible with networks that 
 3. If it works, add Cursor to your antivirus exceptions
 
 **Common Antivirus Locations:**
-- Windows Defender: Settings → Virus & threat protection → Manage settings → Exclusions
+- Windows Defender: Settings â†’ Virus & threat protection â†’ Manage settings â†’ Exclusions
 - Norton/McAfee/etc.: Check their settings for application exceptions
 
 ### Fix #4: Move Project Out of OneDrive (If Possible)
@@ -90,9 +90,9 @@ Then test if connection issues persist. If they stop, OneDrive sync is interferi
 ### Fix #5: Network Adapter Settings
 
 1. Open Network Connections:
-   - Press `Win + R` → Type `ncpa.cpl` → Enter
+   - Press `Win + R` â†’ Type `ncpa.cpl` â†’ Enter
 
-2. Right-click your active network adapter → Properties
+2. Right-click your active network adapter â†’ Properties
 
 3. Uncheck **"QoS Packet Scheduler"** if checked
 
@@ -180,7 +180,4 @@ If fixes don't work, contact Cursor support with:
 ---
 
 **Most Likely Fix**: Disable HTTP/2 in Cursor settings. This solves 80% of connection issues on networks with HTTP/2 problems.
-
-
-
 

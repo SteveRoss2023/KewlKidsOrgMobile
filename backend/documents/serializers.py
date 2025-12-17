@@ -115,11 +115,3 @@ class DocumentSerializer(serializers.ModelSerializer):
 
         return super().update(instance, validated_data)
 
-
-
-
-
-
-
-
-
