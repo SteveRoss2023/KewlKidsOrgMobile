@@ -68,4 +68,3 @@ urlpatterns = [
     # Router URLs (includes /users/me/profile/ and /users/me/profile/photo/)
     path('', include(router.urls)),
 ]
-

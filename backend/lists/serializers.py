@@ -78,4 +78,3 @@ class CompletedGroceryItemSerializer(serializers.ModelSerializer):
             'quantity', 'recipe_name', 'completed_date'
         ]
         read_only_fields = ['id', 'completed_date']
-

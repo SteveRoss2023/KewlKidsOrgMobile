@@ -72,4 +72,3 @@ class Command(BaseCommand):
                 )
 
         self.stdout.write(self.style.SUCCESS('All families with grocery lists already have default categories with keywords.'))
-

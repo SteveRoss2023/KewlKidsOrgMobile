@@ -302,4 +302,3 @@ class DocumentService {
 }
 
 export default new DocumentService();
-

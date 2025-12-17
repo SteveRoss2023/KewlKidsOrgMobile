@@ -316,4 +316,3 @@ export const healthCheck = async (): Promise<{ status: string; message: string }
 };
 
 export default apiClient;
-

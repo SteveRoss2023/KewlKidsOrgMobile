@@ -114,4 +114,3 @@ class DocumentSerializer(serializers.ModelSerializer):
                 validated_data['folder'] = None
 
         return super().update(instance, validated_data)
-

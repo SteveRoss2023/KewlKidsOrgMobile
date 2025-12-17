@@ -23,4 +23,3 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'Successfully verified email for {email}'))
         except User.DoesNotExist:
             self.stdout.write(self.style.ERROR(f'User with email {email} not found.'))
-

@@ -270,4 +270,3 @@ class CompletedGroceryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 pass
 
         return queryset.order_by('-completed_date')
-

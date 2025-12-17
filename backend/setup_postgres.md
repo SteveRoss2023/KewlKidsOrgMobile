@@ -123,4 +123,3 @@ python manage.py migrate
 ### Extension error
 - Ensure you're connected to the correct database
 - Check that the user has CREATE privileges
-

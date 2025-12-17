@@ -47,4 +47,3 @@ export function speak(text: string, callback?: () => void): void {
 export function stopSpeaking(): void {
   Speech.stop();
 }
-

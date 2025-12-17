@@ -22,4 +22,3 @@ const LocationMarker = React.memo(function LocationMarker(_props: LocationMarker
 });
 
 export default LocationMarker;
-

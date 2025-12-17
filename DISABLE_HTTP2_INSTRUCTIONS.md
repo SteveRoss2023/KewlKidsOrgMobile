@@ -1,17 +1,17 @@
 # Quick Guide: Disable HTTP/2 in Cursor
 
-## âš¡ FASTEST METHOD (I can do this for you)
+## Ã¢Å¡Â¡ FASTEST METHOD (I can do this for you)
 
 **Just close Cursor completely, then tell me "go ahead" and I'll add the setting automatically.**
 
 ---
 
-## ðŸ“ MANUAL METHOD (Do it yourself)
+## Ã°Å¸â€œÂ MANUAL METHOD (Do it yourself)
 
 ### Step 1: Close Cursor
 - **Important**: Close Cursor completely (not just the window)
-- Right-click Cursor in taskbar â†’ Quit
-- Or: File â†’ Exit
+- Right-click Cursor in taskbar Ã¢â€ â€™ Quit
+- Or: File Ã¢â€ â€™ Exit
 
 ### Step 2: Open Settings File
 Press `Win + R`, then type:
@@ -45,11 +45,10 @@ Find the opening `{` and add this line (with a comma):
 
 ---
 
-## âœ… VERIFY IT WORKED
+## Ã¢Å“â€¦ VERIFY IT WORKED
 
 After restarting, test by asking me a question. If you don't get connection errors, it worked!
 
 ---
 
 **Want me to do it? Just close Cursor and say "go ahead".**
-

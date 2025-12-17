@@ -69,4 +69,3 @@ const styles = StyleSheet.create({
     // Animation would be handled by Animated API if needed
   },
 });
-

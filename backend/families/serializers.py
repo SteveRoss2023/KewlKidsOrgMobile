@@ -128,4 +128,3 @@ class InvitationSerializer(serializers.ModelSerializer):
             logger = logging.getLogger(__name__)
             logger.error(f'Error decrypting family name for invitation {obj.id}: {str(e)}', exc_info=True)
             return '[Error decrypting name]'
-

@@ -279,4 +279,3 @@ class MealsService {
 }
 
 export default new MealsService();
-

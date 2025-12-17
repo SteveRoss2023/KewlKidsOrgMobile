@@ -154,4 +154,3 @@ class MealPlan(models.Model):
 
     def __str__(self):
         return f"Meal Plan for week of {self.week_start_date}"
-

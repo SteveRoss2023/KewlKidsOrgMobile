@@ -115,4 +115,3 @@ export interface UpdateGroceryCategoryData {
   order?: number;
   keywords?: string[];
 }
-

@@ -259,4 +259,3 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
     reset,
   };
 }
-

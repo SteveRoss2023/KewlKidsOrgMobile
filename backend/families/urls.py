@@ -13,4 +13,3 @@ urlpatterns = [
     path('invitations/accept/', views.AcceptInvitationView.as_view(), name='accept_invitation'),
     path('', include(router.urls)),
 ]
-
