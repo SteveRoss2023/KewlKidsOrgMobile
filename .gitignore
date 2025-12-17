@@ -83,6 +83,7 @@ eas.json
 *.tmp
 *.temp
 .cache/
+.wip/
 
 # OS
 Thumbs.db
