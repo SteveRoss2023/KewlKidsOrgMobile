@@ -11,11 +11,12 @@ import {
   Modal,
   Alert,
   Platform,
+  Image,
 } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import GlobalNavBar from '../../components/GlobalNavBar';
-import DocumentService, { CloudFile } from '../../services/documentService';
+import DocumentService, { CloudFile, GooglePhotoItem } from '../../services/documentService';
 import OAuthService from '../../services/oauthService';
 import AppDocumentsService, { AppDocument, AppFolder } from '../../services/appDocumentsService';
 import { useFocusEffect } from '@react-navigation/native';
@@ -23,7 +24,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import ConfirmModal from '../../components/ConfirmModal';
 
-type TabType = 'app' | 'onedrive' | 'googledrive';
+type TabType = 'app' | 'onedrive' | 'googledrive' | 'googlephotos';
 
 export default function DocumentsScreen() {
   const { colors } = useTheme();
@@ -31,6 +32,7 @@ export default function DocumentsScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('app');
   const [onedriveConnected, setOnedriveConnected] = useState(false);
   const [googledriveConnected, setGoogledriveConnected] = useState(false);
+  const [googlephotosConnected, setGooglephotosConnected] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -40,12 +42,14 @@ export default function DocumentsScreen() {
 
   const checkConnections = async () => {
     try {
-      const [onedriveStatus, googledriveStatus] = await Promise.all([
+      const [onedriveStatus, googledriveStatus, googlephotosStatus] = await Promise.all([
         OAuthService.checkConnection('onedrive'),
         OAuthService.checkConnection('googledrive'),
+        OAuthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
       ]);
       setOnedriveConnected(onedriveStatus.connected);
       setGoogledriveConnected(googledriveStatus.connected);
+      setGooglephotosConnected(googlephotosStatus.connected);
     } catch (error) {
       console.error('Error checking connections:', error);
     }
@@ -86,6 +90,12 @@ export default function DocumentsScreen() {
         >
           <Text style={[styles.tabText, { color: activeTab === 'googledrive' ? colors.primary : colors.textSecondary }]}>Google Drive</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'googlephotos' && [styles.activeTab, { borderBottomColor: colors.primary }]]}
+          onPress={() => handleTabChange('googlephotos')}
+        >
+          <Text style={[styles.tabText, { color: activeTab === 'googlephotos' ? colors.primary : colors.textSecondary }]}>Google Photos</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Tab Content */}
@@ -98,6 +108,12 @@ export default function DocumentsScreen() {
           <GoogleDriveTab
             connected={googledriveConnected}
             onConnectionChange={setGoogledriveConnected}
+            colors={colors}
+          />
+        )}
+        {activeTab === 'googlephotos' && (
+          <GooglePhotosTab
+            connected={googlephotosConnected}
             colors={colors}
           />
         )}
@@ -1112,6 +1128,28 @@ function GoogleDriveTab({
   return <GoogleDriveBrowser colors={colors} />;
 }
 
+function GooglePhotosTab({
+  connected,
+  colors,
+}: {
+  connected: boolean;
+  colors: any;
+}) {
+  if (!connected) {
+    return (
+      <ScrollView style={[styles.tabContent, { backgroundColor: colors.background }]}>
+        <View style={styles.placeholder}>
+          <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
+            Google Photos is not connected. Please connect your Google Photos account from the settings or connection screen.
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  return <GooglePhotosBrowser colors={colors} />;
+}
+
 function OneDriveBrowser({ colors }: { colors: any }) {
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
@@ -1766,6 +1804,152 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
   );
 }
 
+function GooglePhotosBrowser({ colors }: { colors: any }) {
+  const [items, setItems] = useState<GooglePhotoItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string>('');
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const loadItems = useCallback(
+    async (skipLoading = false, pageToken?: string, append: boolean = false) => {
+      try {
+        if (!skipLoading && !append) {
+          setLoading(true);
+        } else if (append) {
+          setLoadingMore(true);
+        }
+        setError('');
+        const response = await DocumentService.listGooglePhotosMediaItems(pageToken);
+        setNextPageToken(response.nextPageToken || null);
+        if (append) {
+          setItems((prev) => [...prev, ...(response.items || [])]);
+        } else {
+          setItems(response.items || []);
+        }
+      } catch (err: any) {
+        console.error('Error loading Google Photos media items:', err);
+        const errorData = err?.response?.data;
+        const errorMessage = errorData?.error || err?.message || 'Failed to load photos. Please try again.';
+
+        if (errorData?.requires_refresh) {
+          setError(
+            'Session expired. Your Google Photos connection is still valid, but you need to refresh your session. Please log out and log back in.'
+          );
+        } else if (errorData?.requires_reconnect) {
+          setError('Unable to decrypt Google Photos tokens. Please disconnect and reconnect in Settings.');
+        } else {
+          setError(errorMessage);
+        }
+      } finally {
+        if (!skipLoading && !append) {
+          setLoading(false);
+        }
+        if (append) {
+          setLoadingMore(false);
+        }
+      }
+    },
+    []
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadItems(false, undefined, false);
+      return () => { };
+    }, [loadItems])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setNextPageToken(null);
+    await loadItems(true, undefined, false);
+    setRefreshing(false);
+  }, [loadItems]);
+
+  if (loading && !refreshing) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading photos...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
+      {error && (
+        <View style={[styles.errorContainer, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
+          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+        </View>
+      )}
+
+      <ScrollView
+        style={styles.filesScrollView}
+        contentContainerStyle={styles.photosGridContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
+      >
+        {items.length === 0 ? (
+          <View style={styles.placeholder}>
+            <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
+              No photos found in your Google Photos library.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.photosGrid}>
+              {items.map((item) => {
+                const uri = item.baseUrl || undefined;
+                return (
+                  <View key={item.id} style={[styles.photoItem, { backgroundColor: colors.surface }]}>
+                    {uri ? (
+                      <Image
+                        source={{ uri }}
+                        style={styles.photoImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.photoPlaceholder}>
+                        <FontAwesome name="photo" size={24} color={colors.textSecondary} />
+                      </View>
+                    )}
+                    {item.filename && (
+                      <Text
+                        style={[styles.photoFilename, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {item.filename}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+            {nextPageToken && (
+              <View style={styles.loadMoreContainer}>
+                <TouchableOpacity
+                  style={[styles.loadMoreButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={() => loadItems(true, nextPageToken, true)}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={[styles.loadMoreText, { color: colors.primary }]}>
+                      Load more photos
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
 function FileItem({
   file,
   colors,
@@ -2204,6 +2388,51 @@ const styles = StyleSheet.create({
   },
   fileActionButton: {
     padding: 8,
+  },
+  photosGridContainer: {
+    padding: 8,
+  },
+  photosGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+  },
+  photoItem: {
+    // ~15 columns depending on screen width
+    width: '6%',
+    marginRight: '1%',
+    marginBottom: 6,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  photoImage: {
+    width: '100%',
+    aspectRatio: 1,
+  },
+  photoPlaceholder: {
+    width: '100%',
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoFilename: {
+    fontSize: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  loadMoreContainer: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  loadMoreButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  loadMoreText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
 

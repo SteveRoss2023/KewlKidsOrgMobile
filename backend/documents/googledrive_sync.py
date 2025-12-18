@@ -141,6 +141,48 @@ class GoogleDriveSync:
             })
         return result
 
+    def list_photos(self, page_size: int = 100, page_token: Optional[str] = None) -> Dict:
+        """
+        List photo and video files from Google Drive.
+
+        We search the regular Drive space and filter by image/video MIME types so that
+        any photos or videos stored in Drive (including shared items) are returned,
+        not just items in the legacy “photos” space.
+        """
+        headers = self._get_headers()
+
+        # Only images and videos, ignore trashed items
+        query = (
+            "(mimeType contains 'image/' or mimeType contains 'video/') "
+            "and trashed = false"
+        )
+
+        params: Dict[str, str] = {
+            'spaces': 'drive',
+            # Include nextPageToken so the caller can paginate through all results
+            'fields': 'nextPageToken,files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink)',
+            'pageSize': str(page_size),
+            'q': query,
+        }
+        if page_token:
+            params['pageToken'] = page_token
+
+        response = requests.get(
+            f'{self.base_url}/files',
+            headers=headers,
+            params=params,
+        )
+        if response.status_code == 401:
+            self.refresh_access_token()
+            headers = self._get_headers()
+            response = requests.get(
+                f'{self.base_url}/files',
+                headers=headers,
+                params=params,
+            )
+        response.raise_for_status()
+        return response.json()
+
     def get_file(self, item_id: str) -> Dict:
         """Get file/folder metadata."""
         headers = self._get_headers()

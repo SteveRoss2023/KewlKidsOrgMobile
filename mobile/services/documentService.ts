@@ -24,6 +24,23 @@ export interface CloudFilesResponse {
   files: CloudFile[];
 }
 
+export interface GooglePhotoItem {
+  id: string;
+  baseUrl: string;
+  mimeType?: string;
+  filename?: string;
+  mediaMetadata?: {
+    width?: string;
+    height?: string;
+    creationTime?: string;
+  };
+}
+
+export interface GooglePhotosResponse {
+  items: GooglePhotoItem[];
+  nextPageToken?: string;
+}
+
 class DocumentService {
   /**
    * List files from OneDrive
@@ -55,6 +72,23 @@ class DocumentService {
       return response.data.files || [];
     } catch (error: any) {
       console.error('Error listing Google Drive files:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * List media items from Google Photos (Drive-backed)
+   */
+  async listGooglePhotosMediaItems(pageToken?: string): Promise<GooglePhotosResponse> {
+    try {
+      const params: any = {};
+      if (pageToken) {
+        params.page_token = pageToken;
+      }
+      const response = await apiClient.get<GooglePhotosResponse>('/googlephotos/media-items/', { params });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error listing Google Photos media items:', error);
       throw error;
     }
   }

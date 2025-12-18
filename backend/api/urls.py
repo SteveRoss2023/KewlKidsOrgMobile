@@ -54,6 +54,7 @@ urlpatterns = [
     path('googlephotos/oauth/callback/', views.GooglePhotosOAuthCallbackView, name='googlephotos-oauth-callback'),
     path('googlephotos/connection/', views.GooglePhotosConnectionView, name='googlephotos-connection'),
     path('googlephotos/disconnect/', views.GooglePhotosDisconnectView, name='googlephotos-disconnect'),
+    path('googlephotos/media-items/', views.GooglePhotosListMediaItemsView, name='googlephotos-list-media-items'),
 
     # App Documents endpoints
     path('documents/', views.DocumentListView, name='document-list'),
