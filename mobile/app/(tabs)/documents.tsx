@@ -20,7 +20,7 @@ import OAuthService from '../../services/oauthService';
 import AppDocumentsService, { AppDocument, AppFolder } from '../../services/appDocumentsService';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import ConfirmModal from '../../components/ConfirmModal';
 
 type TabType = 'app' | 'onedrive' | 'googledrive';
@@ -829,7 +829,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                     onPress={() => setFoldersSortOrder(foldersSortOrder === 'asc' ? 'desc' : 'asc')}
                   >
                     <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {foldersSortOrder === 'asc' ? 'â†‘' : 'â†“'}
+                      {foldersSortOrder === 'asc' ? '\u2191' : '\u2193'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -862,7 +862,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                     onPress={() => setDocumentsSortOrder(documentsSortOrder === 'asc' ? 'desc' : 'asc')}
                   >
                     <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {documentsSortOrder === 'asc' ? 'â†‘' : 'â†“'}
+                      {documentsSortOrder === 'asc' ? '\u2191' : '\u2193'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -977,7 +977,7 @@ function AppFolderItem({
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
             {folder.subfolders_count || 0} {(folder.subfolders_count || 0) !== 1 ? 'subfolders' : 'subfolder'}
           </Text>
-          <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
+          <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
             {folder.documents_count || 0} {(folder.documents_count || 0) !== 1 ? 'documents' : 'document'}
           </Text>
@@ -1030,7 +1030,7 @@ function AppDocumentItem({
               <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                 {AppDocumentsService.formatFileSize(document.file_size)}
               </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
+              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
             </>
           )}
           {document.mime_type && (
@@ -1038,7 +1038,7 @@ function AppDocumentItem({
               <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                 {AppDocumentsService.getFileTypeName(document.mime_type, document.name)}
               </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>
+              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
             </>
           )}
           <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
@@ -1797,7 +1797,39 @@ function FileItem({
       disabled={!isFolder}
     >
       <View style={styles.fileIcon}>
-        <Text style={styles.fileIconText}>{isFolder ? 'ðŸ“' : 'ðŸ“„'}</Text>
+        {/* Folder uses emoji; files use Material Design file-type icons (PDF, Word, Excel, etc.) */}
+        {isFolder ? (
+          <Text style={styles.fileIconText}>{'\uD83D\uDCC1'}</Text>
+        ) : (
+          (() => {
+            const ext = (file.name || '').split('.').pop()?.toLowerCase() || '';
+            let iconName: React.ComponentProps<typeof MaterialCommunityIcons>['name'] = 'file';
+            let iconColor = colors.primary;
+
+            if (ext === 'pdf' || mimeType?.includes('pdf')) {
+              iconName = 'file-pdf-box';
+              iconColor = '#E53E3E'; // red for PDF
+            } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || mimeType?.startsWith('image/')) {
+              iconName = 'file-image';
+            } else if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v'].includes(ext) || mimeType?.startsWith('video/')) {
+              iconName = 'file-video';
+            } else if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma'].includes(ext) || mimeType?.startsWith('audio/')) {
+              iconName = 'file-music';
+            } else if (['xlsx', 'xls'].includes(ext)) {
+              iconName = 'file-excel-box';
+            } else if (['doc', 'docx'].includes(ext)) {
+              iconName = 'file-word-box';
+            } else if (['ppt', 'pptx'].includes(ext)) {
+              iconName = 'file-powerpoint-box';
+            } else if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) {
+              iconName = 'folder-zip';
+            } else if (['txt', 'md', 'rtf', 'csv'].includes(ext) || mimeType?.startsWith('text/')) {
+              iconName = 'file-document-outline';
+            }
+
+            return <MaterialCommunityIcons name={iconName} size={24} color={iconColor} />;
+          })()
+        )}
       </View>
       <View style={styles.fileInfo}>
         <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
@@ -1812,7 +1844,7 @@ function FileItem({
             )}
             {mimeType && (
               <>
-                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> â€¢ </Text>}
+                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>}
                 <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
                   {DocumentService.getFileTypeName(mimeType, file.name || '')}
                 </Text>

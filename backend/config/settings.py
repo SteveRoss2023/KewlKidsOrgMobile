@@ -284,13 +284,26 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 #     },
 # }
 
-# Cache Configuration (for OAuth state management)
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'oauth-cache',
+# Cache Configuration (for OAuth state management and encryption keys)
+# Use Redis if available so session keys and encrypted OAuth tokens
+# survive server restarts and work across multiple processes.
+USE_REDIS = os.getenv('USE_REDIS', 'True').lower() == 'true'
+
+if USE_REDIS:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            # Use DB 1 for cache (DB 0 is often used by Channels)
+            'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        }
     }
-}
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'oauth-cache',
+        }
+    }
 
 # OAuth Settings
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')

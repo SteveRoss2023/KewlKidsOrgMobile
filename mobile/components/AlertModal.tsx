@@ -72,22 +72,22 @@ export default function AlertModal({
             </View>
             <Text style={styles.title}>{title}</Text>
           </View>
-          
+
           <Text style={styles.message}>{message}</Text>
-          
+
           {details && details.length > 0 && (
             <View style={styles.detailsContainer}>
               {details.map((detail, index) => (
                 <View key={index} style={styles.detailSection}>
                   <Text style={styles.detailLabel}>{detail.label}:</Text>
                   {detail.items.map((item, itemIndex) => (
-                    <Text key={itemIndex} style={styles.detailItem}>â€¢ {item}</Text>
+                    <Text key={itemIndex} style={styles.detailItem}>{'\u2022'} {item}</Text>
                   ))}
                 </View>
               ))}
             </View>
           )}
-          
+
           <View style={styles.buttonContainer}>
             {showCancel && (
               <TouchableOpacity

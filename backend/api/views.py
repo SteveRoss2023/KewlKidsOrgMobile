@@ -2406,6 +2406,9 @@ def GoogleDriveOAuthInitiateView(request):
     is_mobile = 'Mobile' in user_agent or 'Expo' in user_agent or request.GET.get('mobile') == 'true'
     cache.set(f'googledrive_oauth_mobile_{state}', is_mobile, timeout=600)
 
+    # Request offline access so we get a long-lived refresh token.
+    # Also include prompt=consent so Google will actually send a refresh token
+    # even if the user has previously granted access.
     auth_url = (
         f"https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={client_id}&"
@@ -2413,6 +2416,7 @@ def GoogleDriveOAuthInitiateView(request):
         f"response_type=code&"
         f"scope=https://www.googleapis.com/auth/drive&"
         f"access_type=offline&"
+        f"prompt=consent&"
         f"state={state}"
     )
 
@@ -2518,6 +2522,19 @@ def GoogleDriveOAuthCallbackView(request):
             'is_active': True,
         }
     )
+
+    # Google will often omit refresh_token on subsequent consents.
+    # If we already have a stored refresh token and Google didn't send a new one,
+    # keep the existing token instead of overwriting it with None.
+    if not refresh_token and not created and sync_record.refresh_token_encrypted:
+        try:
+            _old_access, old_refresh = sync_record.decrypt_tokens(user_key=user_key)
+            if old_refresh:
+                refresh_token = old_refresh
+        except ValueError:
+            # If decryption fails, fall back to whatever we got from Google
+            pass
+
     sync_record.encrypt_tokens(access_token, refresh_token, user_key=user_key)
 
     # Clean up cache
