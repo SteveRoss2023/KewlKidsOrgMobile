@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from .models import UserProfile
 from meals.models import Recipe, MealPlan
+from events.models import Event
 
 User = get_user_model()
 
@@ -15,8 +16,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = ['id', 'email', 'display_name', 'photo', 'photo_url', 'email_verified', 
-                  'date_joined', 'location_sharing_enabled', 'latitude', 'longitude', 
+        fields = ['id', 'email', 'display_name', 'photo', 'photo_url', 'email_verified',
+                  'date_joined', 'location_sharing_enabled', 'latitude', 'longitude',
                   'last_location_update', 'created_at', 'updated_at']
         read_only_fields = ['id', 'email', 'email_verified', 'date_joined', 'created_at', 'updated_at']
 
@@ -93,7 +94,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             try:
                 # Refresh the instance to get the latest photo field
                 updated_instance.refresh_from_db()
-                
+
                 # Get the storage - try multiple methods
                 storage = None
                 if updated_instance.photo and hasattr(updated_instance.photo, 'storage'):
@@ -103,11 +104,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
                 else:
                     from django.core.files.storage import default_storage
                     storage = default_storage
-                
+
                 logger.info(f'Attempting to delete old photo: {old_photo_path} for user {updated_instance.user.id}')
                 logger.info(f'Storage type: {type(storage)}')
                 logger.info(f'Storage exists check: {storage.exists(old_photo_path) if storage else "No storage"}')
-                
+
                 if storage and storage.exists(old_photo_path):
                     storage.delete(old_photo_path)
                     logger.info(f'Successfully deleted old photo file: {old_photo_path} for user {updated_instance.user.id}')
@@ -163,7 +164,7 @@ class RecipeSerializer(serializers.ModelSerializer):
                 # request.get_host() returns the Host header, which should be correct
                 host = request.get_host()
                 scheme = request.scheme
-                
+
                 # Build the media URL manually to ensure we use the correct host
                 media_path = obj.image.url
                 # Ensure media_path starts with /media/
@@ -171,14 +172,14 @@ class RecipeSerializer(serializers.ModelSerializer):
                     media_path = '/' + media_path
                 if not media_path.startswith('/media/'):
                     media_path = '/media/' + media_path.lstrip('/')
-                
+
                 image_url = f'{scheme}://{host}{media_path}'
-                
+
                 # Log for debugging
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.debug(f"Built image URL: {image_url} from request host: {host}, scheme: {scheme}")
-                
+
                 return image_url
             else:
                 # Fallback: construct URL from settings
@@ -272,4 +273,22 @@ class MealPlanSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+
+
+class EventSerializer(serializers.ModelSerializer):
+    """Event serializer."""
+    created_by_username = serializers.SerializerMethodField()
+
+    def get_created_by_username(self, obj):
+        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
+            return obj.created_by.user.profile.display_name or obj.created_by.user.email
+        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+
+    class Meta:
+        model = Event
+        fields = [
+            'id', 'family', 'created_by', 'created_by_username', 'title', 'notes', 'location',
+            'starts_at', 'ends_at', 'is_all_day', 'color', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 

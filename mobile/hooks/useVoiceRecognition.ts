@@ -4,12 +4,12 @@ import Voice from '@react-native-voice/voice';
 
 /**
  * Custom hook for speech recognition in React Native
- * 
+ *
  * Note: This is a simplified implementation that provides the interface.
  * For actual speech recognition, you'll need to install and configure:
  * - @react-native-voice/voice (for native speech recognition)
  * - Or use a cloud-based solution like Google Cloud Speech-to-Text
- * 
+ *
  * This hook provides the same interface as the web version for consistency.
  */
 export function useVoiceRecognition(options: { continuous?: boolean; interimResults?: boolean } = {}) {
@@ -27,7 +27,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
   // On native, we'll show the button but speech recognition needs to be implemented
   // For now, we'll return true so the button shows, but actual recognition will need
   // a library like @react-native-voice/voice to be installed
-  const isSupported = Platform.OS === 'web' 
+  const isSupported = Platform.OS === 'web'
     ? typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
     : true; // Show button on mobile - actual recognition needs implementation
 
@@ -111,7 +111,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
       };
     } else {
       // Native implementation using @react-native-voice/voice
-      Voice.onSpeechStart = () => {
+      const onSpeechStartHandler = () => {
         console.log('🎤 [VOICE RECOGNITION] onSpeechStart fired');
         setIsListening(true);
         setError(null);
@@ -119,7 +119,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         shouldRestartRef.current = true;
       };
 
-      Voice.onSpeechResults = (e: any) => {
+      const onSpeechResultsHandler = (e: any) => {
         if (e.value && e.value.length > 0) {
           const transcript = e.value[0];
           // Ignore transcripts if we're still waiting for instruction to finish
@@ -131,7 +131,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         }
       };
 
-      Voice.onSpeechError = (e: any) => {
+      const onSpeechErrorHandler = (e: any) => {
         console.log('🎤 [VOICE RECOGNITION] onSpeechError fired:', e.error);
         setError(e.error?.message || 'Speech recognition error');
         lastErrorRef.current = e.error?.code || 'error';
@@ -143,7 +143,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         }
       };
 
-      Voice.onSpeechEnd = () => {
+      const onSpeechEndHandler = () => {
         console.log('🎤 [VOICE RECOGNITION] onSpeechEnd fired');
         setIsListening(false);
 
@@ -153,7 +153,10 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
           setTimeout(() => {
             if (shouldRestartRef.current) {
               try {
-                Voice.start('en-US');
+                Voice.start('en-US').catch((err) => {
+                  console.error('Error restarting recognition:', err);
+                  shouldRestartRef.current = false;
+                });
               } catch (err) {
                 console.error('Error restarting recognition:', err);
                 shouldRestartRef.current = false;
@@ -163,14 +166,48 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         }
       };
 
+      // Set up event listeners
+      try {
+        if (Voice) {
+          Voice.onSpeechStart = onSpeechStartHandler;
+          Voice.onSpeechResults = onSpeechResultsHandler;
+          Voice.onSpeechError = onSpeechErrorHandler;
+          Voice.onSpeechEnd = onSpeechEndHandler;
+        }
+      } catch (err) {
+        console.error('Error setting up voice listeners:', err);
+      }
+
       // Cleanup on unmount
       return () => {
+        shouldRestartRef.current = false;
         try {
-          Voice.destroy().then(() => {
-            Voice.removeAllListeners();
-          });
+          // First remove all listeners (this is safe even if Voice is null)
+          if (Voice && typeof Voice.removeAllListeners === 'function') {
+            Voice.removeAllListeners().catch((removeErr: any) => {
+              // Ignore errors if Voice is already destroyed or null
+              if (removeErr?.message?.includes('null') || removeErr?.message?.includes('destroyed')) {
+                console.debug('Voice already destroyed, ignoring removeAllListeners error');
+              } else {
+                console.debug('Error removing voice listeners (non-fatal):', removeErr);
+              }
+            });
+          }
+
+          // Then destroy if it's still available
+          if (Voice && typeof Voice.destroy === 'function') {
+            Voice.destroy().catch((destroyErr: any) => {
+              // Ignore errors if already destroyed
+              if (destroyErr?.message?.includes('null') || destroyErr?.message?.includes('destroyed')) {
+                console.debug('Voice already destroyed, ignoring destroy error');
+              } else {
+                console.debug('Error destroying voice recognition (non-fatal):', destroyErr);
+              }
+            });
+          }
         } catch (err) {
-          console.error('Error cleaning up voice recognition:', err);
+          // Ignore cleanup errors - component is unmounting anyway
+          console.debug('Error in voice cleanup (ignored):', err);
         }
       };
     }
@@ -224,7 +261,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
     console.log('🎤 [VOICE RECOGNITION] stop() called');
     shouldRestartRef.current = false;
     lastErrorRef.current = null;
-    
+
     if (Platform.OS === 'web' && recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -240,7 +277,7 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         console.error('Error stopping voice recognition:', err);
       }
     }
-    
+
     setIsListening(false);
   }, []);
 

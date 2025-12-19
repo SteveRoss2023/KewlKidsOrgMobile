@@ -2,8 +2,47 @@
 Calendar event and sync models.
 """
 from django.db import models
-from encrypted_model_fields.fields import EncryptedCharField
+from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
 from encryption.models import JWTOAuthTokenMixin
+from families.models import Family, Member
+
+
+class Event(models.Model):
+    """Calendar event with encrypted sensitive fields."""
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='events')
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name='created_events')
+
+    # Encrypted fields
+    title = EncryptedCharField(max_length=200)
+    notes = EncryptedTextField(blank=True, null=True)
+    location = EncryptedTextField(blank=True, null=True)
+
+    # Public fields
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField(blank=True, null=True)
+    is_all_day = models.BooleanField(default=False)
+    color = models.CharField(max_length=7, default='#3b82f6')  # Hex color code
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # External calendar sync fields
+    external_calendar_id = models.CharField(max_length=255, blank=True, null=True, help_text="ID from external calendar (Outlook/Google)")
+    external_calendar_type = models.CharField(max_length=20, blank=True, null=True, choices=[('outlook', 'Outlook'), ('google', 'Google')])
+    external_calendar_etag = models.CharField(max_length=255, blank=True, null=True, help_text="ETag for conflict detection")
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['starts_at']
+        indexes = [
+            models.Index(fields=['family', 'starts_at']),
+            models.Index(fields=['starts_at', 'ends_at']),
+            models.Index(fields=['external_calendar_id', 'external_calendar_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} - {self.starts_at}"
 
 
 class CalendarSync(JWTOAuthTokenMixin, models.Model):

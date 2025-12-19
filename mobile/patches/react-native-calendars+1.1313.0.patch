@@ -1,0 +1,56 @@
+diff --git a/node_modules/react-native-calendars/src/Profiler.tsx b/node_modules/react-native-calendars/src/Profiler.tsx
+new file mode 100644
+index 0000000..975fc00
+--- /dev/null
++++ b/node_modules/react-native-calendars/src/Profiler.tsx
+@@ -0,0 +1,50 @@
++import React, { ProfilerProps as RProfilerProps, PropsWithChildren, Profiler as ReactProfiler } from 'react';
++
++export type ProfilerProps = Pick<RProfilerProps, 'id'>;
++
++interface ProfilerComponentProps extends PropsWithChildren<ProfilerProps> {
++  onRender?: (...profileData: any[]) => void;
++}
++
++export default class Profiler extends React.Component<ProfilerComponentProps> {
++  onRender: (...profileData: any[]) => void;
++
++  constructor(props: ProfilerComponentProps) {
++    super(props);
++    this.onRender = props.onRender || (() => {});
++  }
++
++  render() {
++    const { id, children } = this.props;
++    return (
++      <ReactProfiler id={id || 'calendar-profiler'} onRender={this.onRender}>
++        {children}
++      </ReactProfiler>
++    );
++  }
++}
++
++export const getProfileData = ([id, phase, actualDuration, baseDuration, startTime, commitTime, interactions]: [any, any, any, any, any, any, any]) => {
++  return {
++    id,
++    interactions,
++    phase,
++    actualDuration,
++    baseDuration,
++    commitTime,
++    cumulativeDuration: `${actualDuration.toFixed(2)}ms`,
++    startTime,
++  };
++};
++
++export const logProfileData = ({ id, actualDuration, cumulativeDuration, phase }: {
++  id: any;
++  actualDuration: any;
++  cumulativeDuration: any;
++  phase: any;
++}) => {
++  if (__DEV__) {
++    console.log(`[Profiler] ${id}: ${phase} - ${cumulativeDuration}`);
++  }
++};
++

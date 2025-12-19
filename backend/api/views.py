@@ -12,9 +12,10 @@ from django.core.signing import TimestampSigner
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from .models import UserProfile
-from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer
+from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer, EventSerializer
 from meals.models import Recipe, MealPlan
 from families.models import Family, Member
+from events.models import Event
 
 User = get_user_model()
 
@@ -1030,6 +1031,35 @@ class ExchangeTempTokenView(APIView):
 
 
 # Add more views here as you migrate features from the reference project
+
+
+class EventViewSet(viewsets.ModelViewSet):
+    """Event viewset."""
+    serializer_class = EventSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return events for families the user belongs to."""
+        user = self.request.user
+        queryset = Event.objects.filter(family__members__user=user)
+
+        # Filter by family if provided
+        family_id = self.request.query_params.get('family')
+        if family_id:
+            try:
+                family_id = int(family_id)
+                queryset = queryset.filter(family_id=family_id)
+            except (ValueError, TypeError):
+                pass  # Invalid family ID, ignore filter
+
+        # Ensure consistent ordering
+        return queryset.order_by('-starts_at')
+
+    def perform_create(self, serializer):
+        """Create event with creator as created_by."""
+        family = get_object_or_404(Family, id=self.request.data.get('family'))
+        member = get_object_or_404(Member, user=self.request.user, family=family)
+        serializer.save(created_by=member)
 
 
 class RecipeViewSet(viewsets.ModelViewSet):

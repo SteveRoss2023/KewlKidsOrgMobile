@@ -5,6 +5,7 @@ from . import views
 # Create router and register viewsets
 router = DefaultRouter()
 router.register(r'users', views.UserViewSet, basename='user')
+router.register(r'events', views.EventViewSet, basename='event')
 router.register(r'recipes', views.RecipeViewSet, basename='recipe')
 router.register(r'meal-plans', views.MealPlanViewSet, basename='mealplan')
 

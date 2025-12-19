@@ -17,6 +17,7 @@ export interface UserProfile {
   latitude?: string | null;
   longitude?: string | null;
   last_location_update?: string | null;
+  calendar_view_preference?: string;
   created_at: string;
   updated_at: string;
 }
@@ -80,17 +81,17 @@ class ProfileService {
 
       // If updating photo, use FormData
       const formData = new FormData();
-      
+
       if (data.display_name !== undefined) {
         formData.append('display_name', data.display_name);
       }
-      
+
       if (data.photo) {
         const { Platform } = require('react-native');
         let photoUri = data.photo.uri || data.photo;
         const photoType = data.photo.type || 'image/jpeg';
         const photoName = data.photo.fileName || 'photo.jpg';
-        
+
         if (__DEV__) {
           console.log('Photo upload details:', {
             platform: Platform.OS,
@@ -100,7 +101,7 @@ class ProfileService {
             apiUrl: (apiClient.defaults.baseURL || '') + '/users/me/profile/',
           });
         }
-        
+
         if (Platform.OS === 'web') {
           // On web, we need to convert the URI to a File object
           try {
@@ -139,11 +140,11 @@ class ProfileService {
             // If no protocol, assume it's a file path
             photoUri = `file://${photoUri}`;
           }
-          
+
           if (__DEV__) {
             console.log('Normalized photo URI:', photoUri.substring(0, 100) + (photoUri.length > 100 ? '...' : ''));
           }
-          
+
           // React Native FormData format for file uploads
           formData.append('photo', {
             uri: photoUri,
@@ -168,19 +169,19 @@ class ProfileService {
         return new Promise<UserProfile>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           const url = `${apiClient.defaults.baseURL}/users/me/profile/`;
-          
+
           xhr.open('PATCH', url, true);
           xhr.timeout = 120000; // 2 minutes
-          
+
           // Get token and set headers
           tokenStorage.getAccessToken().then((token) => {
             if (token) {
               xhr.setRequestHeader('Authorization', `Bearer ${token}`);
             }
-            
+
             // Don't set Content-Type - let the browser set it with boundary for FormData
             // React Native FormData requires the browser to automatically set Content-Type
-            
+
             xhr.onload = () => {
               if (xhr.status >= 200 && xhr.status < 300) {
                 try {
@@ -213,15 +214,15 @@ class ProfileService {
                 }
               }
             };
-            
+
             xhr.onerror = () => {
               reject(new APIError('Network error - unable to reach server. Please check your internet connection and ensure the server is running.', 0));
             };
-            
+
             xhr.ontimeout = () => {
               reject(new APIError('Request timeout - the server took too long to respond. This may happen with large file uploads.', 0));
             };
-            
+
             if (__DEV__) {
               console.log('Sending XMLHttpRequest:', {
                 method: 'PATCH',
@@ -229,7 +230,7 @@ class ProfileService {
                 hasFormData: true,
               });
             }
-            
+
             // Send the FormData
             xhr.send(formData as any);
           }).catch((tokenError) => {
@@ -251,7 +252,7 @@ class ProfileService {
     } catch (error) {
       // Provide more context for photo upload errors
       const apiError = handleAPIError(error as any);
-      
+
       if (__DEV__) {
         console.error('Photo upload error details:', {
           error: apiError.message,
@@ -264,7 +265,7 @@ class ProfileService {
           originalError: error,
         });
       }
-      
+
       throw apiError;
     }
   }
@@ -316,15 +317,29 @@ class ProfileService {
       const updateData: any = {
         location_sharing_enabled: enabled,
       };
-      
+
       // If disabling, clear location data
       if (!enabled) {
         updateData.latitude = null;
         updateData.longitude = null;
         updateData.last_location_update = null;
       }
-      
+
       const response = await apiClient.patch<UserProfile>('/users/me/profile/', updateData);
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Update calendar view preference
+   */
+  async updateCalendarViewPreference(view: string): Promise<UserProfile> {
+    try {
+      const response = await apiClient.patch<UserProfile>('/users/me/profile/', {
+        calendar_view_preference: view,
+      });
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);

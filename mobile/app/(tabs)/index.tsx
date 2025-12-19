@@ -185,7 +185,7 @@ export default function HomeScreen() {
         router.push('/(tabs)/today');
         break;
       case 'calendar':
-        // TODO: Navigate to calendar when implemented
+        router.push('/(tabs)/calendar');
         break;
       case 'lists':
         router.push('/(tabs)/lists');
