@@ -13,7 +13,15 @@ import {
   Alert,
 } from 'react-native';
 import { FontAwesome, Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+// Conditionally import expo-image-picker only on native platforms to avoid Jimp errors on web
+let ImagePicker: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    ImagePicker = require('expo-image-picker');
+  } catch (error) {
+    console.warn('expo-image-picker not available:', error);
+  }
+}
 import ProfileService, { UserProfile } from '../../services/profileService';
 import { APIError } from '../../services/api';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -44,7 +52,7 @@ export default function ProfileScreen() {
   }, []);
 
   const requestImagePickerPermission = async () => {
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && ImagePicker) {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'Permission to access camera roll is required!');
@@ -63,7 +71,7 @@ export default function ProfileScreen() {
       setError(null);
     } catch (err) {
       const apiError = err as APIError;
-      
+
       // If unauthorized (401), user needs to log in again
       if (apiError.status === 401) {
         console.error('Authentication failed. Redirecting to login.');
@@ -73,7 +81,7 @@ export default function ProfileScreen() {
         router.replace('/(auth)/login');
         return;
       }
-      
+
       // If endpoint doesn't exist (404), use fallback data from AuthService
       if (apiError.status === 404) {
         // Don't log 404 errors - endpoint may not be implemented yet
@@ -127,6 +135,10 @@ export default function ProfileScreen() {
   };
 
   const handleChoosePhoto = async () => {
+    if (!ImagePicker) {
+      Alert.alert('Not available', 'Image picker is not available on this platform.');
+      return;
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -145,6 +157,10 @@ export default function ProfileScreen() {
   };
 
   const handleTakePhoto = async () => {
+    if (!ImagePicker) {
+      Alert.alert('Not available', 'Camera is not available on this platform.');
+      return;
+    }
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
@@ -167,7 +183,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const uploadPhoto = async (image: ImagePicker.ImagePickerAsset) => {
+  const uploadPhoto = async (image: { uri: string; type?: string; name?: string }) => {
     setUploadingPhoto(true);
     setError(null);
 
@@ -208,20 +224,20 @@ export default function ProfileScreen() {
           fileName: fileName,
         },
       });
-      
+
       if (__DEV__) {
         console.log('Profile updated after photo upload:', {
           hasPhotoUrl: !!updatedProfile.photo_url,
           photoUrl: updatedProfile.photo_url,
         });
       }
-      
+
       setProfile(updatedProfile);
       // Force image reload by updating cache buster
       setPhotoCacheBuster(Date.now());
       setSuccess('Photo uploaded successfully!');
       setTimeout(() => setSuccess(null), 3000);
-      
+
       // Reload profile to get the updated photo_url (in case it wasn't in the response)
       await fetchProfile();
       // Update cache buster again after fetch to ensure fresh image
@@ -379,8 +395,8 @@ export default function ProfileScreen() {
             style={styles.photoContainer}
           >
             {getPhotoUrl() ? (
-              <AuthenticatedImage 
-                source={{ uri: getPhotoUrl()! }} 
+              <AuthenticatedImage
+                source={{ uri: getPhotoUrl()! }}
                 style={styles.photo}
                 placeholder={
                   <View style={[styles.photoPlaceholder, { backgroundColor: colors.border }]}>
@@ -552,19 +568,19 @@ export default function ProfileScreen() {
               activeOpacity={1}
               onPress={() => setShowPhotoViewer(false)}
             >
-              <View 
+              <View
                 style={styles.photoViewerContent}
                 onStartShouldSetResponder={() => true}
                 onResponderTerminationRequest={() => false}
               >
-                <View 
+                <View
                   style={styles.photoViewerImageContainer}
                   onStartShouldSetResponder={() => true}
                   onResponderTerminationRequest={() => false}
                 >
-                  <AuthenticatedImage 
-                    source={{ uri: getPhotoUrl()! }} 
-                    style={styles.photoViewerImage} 
+                  <AuthenticatedImage
+                    source={{ uri: getPhotoUrl()! }}
+                    style={styles.photoViewerImage}
                     resizeMode="contain"
                     placeholder={
                       <View style={styles.photoViewerPlaceholder}>

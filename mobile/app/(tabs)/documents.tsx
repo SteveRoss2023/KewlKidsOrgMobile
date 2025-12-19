@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,15 @@ import {
   Alert,
   Platform,
   Image,
+  useWindowDimensions,
+  Animated,
 } from 'react-native';
+import {
+  PinchGestureHandler,
+  PanGestureHandler,
+  State,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import GlobalNavBar from '../../components/GlobalNavBar';
@@ -1805,12 +1813,96 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
 }
 
 function GooglePhotosBrowser({ colors }: { colors: any }) {
+  const { width, height } = useWindowDimensions();
+  const isMobileView = Platform.OS !== 'web' || width < 768;
   const [items, setItems] = useState<GooglePhotoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>('');
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<GooglePhotoItem | null>(null);
+
+  // Zoom state
+  const baseScale = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const currentScale = useRef(1);
+  const accumulatedTranslateX = useRef(0);
+  const accumulatedTranslateY = useRef(0);
+
+  // Web zoom state
+  const [webScale, setWebScale] = useState(1);
+  const [webTranslateX, setWebTranslateX] = useState(0);
+  const [webTranslateY, setWebTranslateY] = useState(0);
+  const webIsDragging = useRef(false);
+  const webLastMousePos = useRef({ x: 0, y: 0 });
+
+  // Combined scale for display
+  const scale = Animated.multiply(baseScale, pinchScale);
+
+  // Reset zoom when photo changes
+  useEffect(() => {
+    if (selectedPhoto) {
+      currentScale.current = 1;
+      accumulatedTranslateX.current = 0;
+      accumulatedTranslateY.current = 0;
+      baseScale.setValue(1);
+      pinchScale.setValue(1);
+      translateX.setValue(0);
+      translateY.setValue(0);
+      setWebScale(1);
+      setWebTranslateX(0);
+      setWebTranslateY(0);
+    }
+  }, [selectedPhoto]);
+
+  // Web zoom handlers
+  const handleWebWheel = useCallback((e: any) => {
+    if (Platform.OS !== 'web') return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setWebScale((prev) => {
+      const newScale = Math.max(1, Math.min(5, prev * delta));
+      return newScale;
+    });
+  }, []);
+
+  const handleWebMouseDown = useCallback((e: any) => {
+    if (Platform.OS !== 'web' || webScale <= 1) return;
+    e.preventDefault();
+    webIsDragging.current = true;
+    webLastMousePos.current = { x: e.clientX, y: e.clientY };
+  }, [webScale]);
+
+  const handleWebMouseMove = useCallback((e: any) => {
+    if (Platform.OS !== 'web' || !webIsDragging.current || webScale <= 1) return;
+    e.preventDefault();
+    const deltaX = e.clientX - webLastMousePos.current.x;
+    const deltaY = e.clientY - webLastMousePos.current.y;
+    setWebTranslateX((prev) => prev + deltaX);
+    setWebTranslateY((prev) => prev + deltaY);
+    webLastMousePos.current = { x: e.clientX, y: e.clientY };
+  }, [webScale]);
+
+  const handleWebMouseUp = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+    webIsDragging.current = false;
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && selectedPhoto) {
+      document.addEventListener('mousemove', handleWebMouseMove);
+      document.addEventListener('mouseup', handleWebMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleWebMouseMove);
+        document.removeEventListener('mouseup', handleWebMouseUp);
+      };
+    }
+  }, [selectedPhoto, handleWebMouseMove, handleWebMouseUp]);
 
   const loadItems = useCallback(
     async (skipLoading = false, pageToken?: string, append: boolean = false) => {
@@ -1902,7 +1994,16 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
               {items.map((item) => {
                 const uri = item.baseUrl || undefined;
                 return (
-                  <View key={item.id} style={[styles.photoItem, { backgroundColor: colors.surface }]}>
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.photoItem,
+                      isMobileView && styles.photoItemMobile,
+                      { backgroundColor: colors.surface },
+                    ]}
+                    onPress={() => setSelectedPhoto(item)}
+                    activeOpacity={0.8}
+                  >
                     {uri ? (
                       <Image
                         source={{ uri }}
@@ -1922,7 +2023,7 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
                         {item.filename}
                       </Text>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -1946,6 +2047,142 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
           </>
         )}
       </ScrollView>
+
+      {/* Fullscreen photo viewer */}
+      <Modal
+        visible={!!selectedPhoto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedPhoto(null)}
+      >
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={styles.viewerOverlay}>
+            <TouchableOpacity
+              style={styles.viewerBackdrop}
+              activeOpacity={1}
+              onPress={() => setSelectedPhoto(null)}
+            />
+            <View
+              style={[
+                styles.viewerContent,
+                {
+                  backgroundColor: colors.surface,
+                  width: width * 0.95,
+                  height: height * 0.95,
+                  maxWidth: width * 0.95,
+                  maxHeight: height * 0.95,
+                },
+              ]}
+            >
+              <View style={[styles.viewerImageContainer, { height: height * 0.75 }]}>
+                {selectedPhoto?.baseUrl && (
+                  Platform.OS === 'web' ? (
+                    <View
+                      // @ts-ignore - web-specific props
+                      onWheel={handleWebWheel}
+                      // @ts-ignore
+                      onMouseDown={handleWebMouseDown}
+                      style={[
+                        styles.viewerImageContainer,
+                        { height: height * 0.75 },
+                        Platform.OS === 'web' && webScale > 1 && { cursor: 'move' as any },
+                      ]}
+                    >
+                      <View
+                        style={{
+                          transform: [
+                            { scale: webScale },
+                            { translateX: webTranslateX },
+                            { translateY: webTranslateY },
+                          ],
+                          width: width * 0.9,
+                          height: height * 0.7,
+                        }}
+                      >
+                        <Image
+                          source={{ uri: selectedPhoto.baseUrl }}
+                          style={[styles.viewerImage, { width: width * 0.9, height: height * 0.7 }]}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <PinchGestureHandler
+                      onGestureEvent={Animated.event(
+                        [{ nativeEvent: { scale: pinchScale } }],
+                        { useNativeDriver: true }
+                      )}
+                      onHandlerStateChange={(event) => {
+                        if (event.nativeEvent.oldState === State.ACTIVE) {
+                          const newScale = currentScale.current * event.nativeEvent.scale;
+                          const clampedScale = Math.max(1, Math.min(5, newScale));
+                          currentScale.current = clampedScale;
+                          baseScale.setValue(clampedScale);
+                          pinchScale.setValue(1);
+                        }
+                      }}
+                    >
+                      <Animated.View
+                        style={[
+                          styles.viewerImageWrapper,
+                          {
+                            transform: [{ scale }],
+                          },
+                        ]}
+                      >
+                        <PanGestureHandler
+                          onGestureEvent={Animated.event(
+                            [{ nativeEvent: { translationX: translateX, translationY: translateY } }],
+                            { useNativeDriver: true }
+                          )}
+                          onHandlerStateChange={(event) => {
+                            if (event.nativeEvent.oldState === State.ACTIVE) {
+                              accumulatedTranslateX.current += event.nativeEvent.translationX;
+                              accumulatedTranslateY.current += event.nativeEvent.translationY;
+                              translateX.setValue(accumulatedTranslateX.current);
+                              translateY.setValue(accumulatedTranslateY.current);
+                            }
+                          }}
+                          minPointers={1}
+                          maxPointers={1}
+                          avgTouches
+                          enabled={currentScale.current > 1}
+                        >
+                          <Animated.View
+                            style={{
+                              transform: [
+                                { translateX },
+                                { translateY },
+                              ],
+                            }}
+                          >
+                            <Image
+                              source={{ uri: selectedPhoto.baseUrl }}
+                              style={[styles.viewerImage, { width: width * 0.9, height: height * 0.7 }]}
+                              resizeMode="contain"
+                            />
+                          </Animated.View>
+                        </PanGestureHandler>
+                      </Animated.View>
+                    </PinchGestureHandler>
+                  )
+                )}
+              </View>
+              {selectedPhoto?.filename && (
+                <Text style={[styles.viewerCaption, { color: colors.text }]}>
+                  {selectedPhoto.filename}
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[styles.viewerCloseButton, { backgroundColor: colors.primary }]}
+                onPress={() => setSelectedPhoto(null)}
+              >
+                <Text style={styles.viewerCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
@@ -2405,6 +2642,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
+  photoItemMobile: {
+    // Fewer columns on mobile for larger touch targets
+    width: '22%',
+    marginRight: '2%',
+    marginBottom: 8,
+  },
   photoImage: {
     width: '100%',
     aspectRatio: 1,
@@ -2433,6 +2676,55 @@ const styles = StyleSheet.create({
   loadMoreText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  viewerContent: {
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  viewerImageContainer: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  viewerImageContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100%',
+    width: '100%',
+  },
+  viewerImageWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  viewerCaption: {
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  viewerCloseButton: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  viewerCloseText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 
