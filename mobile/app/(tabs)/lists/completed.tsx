@@ -89,7 +89,7 @@ export default function CompletedItemsScreen() {
 
     completedItems.forEach((item) => {
       let groupKey: string;
-      
+
       if (groupBy === 'date') {
         const date = new Date(item.completed_date);
         groupKey = date.toLocaleDateString('en-US', {
@@ -115,7 +115,7 @@ export default function CompletedItemsScreen() {
 
   const sortedGroupKeys = React.useMemo(() => {
     const keys = Object.keys(groupedItems);
-    
+
     if (groupBy === 'date') {
       // Sort dates descending (newest first)
       return keys.sort((a, b) => {
@@ -158,7 +158,7 @@ export default function CompletedItemsScreen() {
     try {
       // Get all lists for the family to find if the list exists
       const allLists = await ListService.getLists(selectedFamily.id);
-      
+
       // Find list by name (case-insensitive comparison)
       let targetList = allLists.find(
         (list) => list.name.toLowerCase() === item.list_name.toLowerCase() && list.list_type === 'grocery'
@@ -308,7 +308,7 @@ export default function CompletedItemsScreen() {
           <View style={styles.content}>
             {groupBy === 'none' ? (
               // For 'none', show all items without accordions
-              groupedItems['All Items']?.map((item) => (
+              (groupedItems['All Items'] || []).map((item) => (
                 <View
                   key={item.id}
                   style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}

@@ -161,3 +161,5 @@ Once you have a development build installed:
 
 The app will work in Expo Go, but voice recognition will be disabled (no crashes, just won't work).
 
+
+

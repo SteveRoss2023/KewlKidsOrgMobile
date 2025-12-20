@@ -4,6 +4,9 @@
 
 **Source Web App Location**: `C:\Users\steve_80f2z1j\OneDrive\Documents\Development\Projects\Cursor Projects\KewlKidsOrganizer`
 
+**Source Web Application 2 Location**:
+`C:\Users\steve_80f2z1j\OneDrive\Documents\Development\Projects\Cursor Projects\KewlKidsOrganizerMobile`
+
 **Key Source Directories**:
 - React Components: `KewlKidsOrganizer/frontend/react/src/components/`
 - React Utils: `KewlKidsOrganizer/frontend/react/src/utils/`
@@ -193,13 +196,13 @@ django-admin startproject config .
    ```sql
    -- Connect to PostgreSQL as superuser (usually 'postgres')
    psql -U postgres
-   
+
    -- Create database
    CREATE DATABASE kewlkidsorganizer_mobile;
-   
+
    -- Create user
    CREATE USER kewlkids_user WITH PASSWORD 'your_password';
-   
+
    -- Grant privileges
    GRANT ALL PRIVILEGES ON DATABASE kewlkidsorganizer_mobile TO kewlkids_user;
    ALTER DATABASE kewlkidsorganizer_mobile OWNER TO kewlkids_user;
@@ -209,7 +212,7 @@ django-admin startproject config .
    ```sql
    -- Connect to the new database
    \c kewlkidsorganizer_mobile
-   
+
    -- Enable extension
    CREATE EXTENSION IF NOT EXISTS pgcrypto;
    ```

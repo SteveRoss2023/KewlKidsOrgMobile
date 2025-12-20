@@ -29,7 +29,7 @@ if (Platform.OS !== 'web') {
     DraggableFlatList = DraggableFlatListModule.default;
     ScaleDecorator = DraggableFlatListModule.ScaleDecorator;
     RenderItemParams = DraggableFlatListModule.RenderItemParams;
-    
+
     const GestureHandlerModule = require('react-native-gesture-handler');
     GestureHandlerRootView = GestureHandlerModule.GestureHandlerRootView;
   } catch (error) {
@@ -148,7 +148,7 @@ export default function ListDetailScreen() {
   useEffect(() => {
     if (isGroceryList && listItems.length > 0) {
       const currentListId = list?.id;
-      
+
       // Only reset collapsed categories if this is a new list
       if (currentListId !== lastListIdRef.current) {
         lastListIdRef.current = currentListId || null;
@@ -167,7 +167,7 @@ export default function ListDetailScreen() {
             const categoryId = item.category ? String(item.category) : 'uncategorized';
             currentCategoryIds.add(categoryId);
           });
-          
+
           // Remove categories that no longer exist, but keep the rest
           const newSet = new Set(prev);
           prev.forEach((categoryId) => {
@@ -462,7 +462,7 @@ export default function ListDetailScreen() {
 
   const handleRefresh = useCallback(async () => {
     if (!listId || !selectedFamily) return;
-    
+
     setRefreshing(true);
     try {
       // Refresh list, categories, and items in parallel
@@ -495,19 +495,19 @@ export default function ListDetailScreen() {
   // Filter items by selected recipe and exclude editing item (for non-draggable lists)
   const filteredItems = useMemo(() => {
     let items = listItems;
-    
+
     // Filter by recipe if selected
     if (selectedRecipeFilter) {
       items = items.filter(
         (item) => item.notes && item.notes === `From recipe: ${selectedRecipeFilter}`
       );
     }
-    
+
     // Filter out editing item when using the main edit form (not inline in draggable list)
     if (editingItem && (Platform.OS === 'web' || !isTodoList || !DraggableFlatList || !GestureHandlerRootView)) {
       items = items.filter((item) => item.id !== editingItem.id);
     }
-    
+
     return items;
   }, [listItems, selectedRecipeFilter, editingItem, isTodoList, DraggableFlatList, GestureHandlerRootView, Platform.OS]);
 
@@ -693,12 +693,12 @@ export default function ListDetailScreen() {
 
   const handleDeleteRecipeItems = () => {
     if (!selectedRecipeFilter) return;
-    
+
     // Count items that match the recipe filter
     const recipeItems = listItems.filter(
       (item) => item.notes && item.notes === `From recipe: ${selectedRecipeFilter}`
     );
-    
+
     setDeleteRecipeConfirm({
       isOpen: true,
       recipeName: selectedRecipeFilter,
@@ -711,17 +711,17 @@ export default function ListDetailScreen() {
 
     try {
       setDeletingRecipeItems(true);
-      
+
       // Get all items that match the recipe filter
       const recipeItems = listItems.filter(
         (item) => item.notes && item.notes === `From recipe: ${selectedRecipeFilter}`
       );
-      
+
       // Delete all items in parallel
       await Promise.all(
         recipeItems.map((item) => ListService.deleteListItem(item.id))
       );
-      
+
       // Refresh the list and clear the filter
       await fetchListItems();
       setSelectedRecipeFilter('');
@@ -824,7 +824,7 @@ export default function ListDetailScreen() {
   // Simple move functions for mobile when DraggableFlatList is not available
   const handleOpenMoveModal = async (item: ListItem) => {
     if (!selectedFamily) return;
-    
+
     try {
       // Fetch all lists for the family (excluding the current list)
       const allLists = await ListService.getLists(selectedFamily.id);
@@ -851,18 +851,18 @@ export default function ListDetailScreen() {
       await apiClient.patch(`/list-items/${moveItemModal.item.id}/`, {
         list: selectedTargetListId,
       });
-      
+
       // Refresh list items to remove the moved item
       await fetchListItems();
-      
+
       // Get the target list name for the success message
       const targetList = availableLists.find((l) => l.id === selectedTargetListId);
       const targetListName = targetList?.name || 'the selected list';
-      
+
       // Close move modal
       setMoveItemModal({ isOpen: false, item: null });
       setSelectedTargetListId(null);
-      
+
       // Show success message in modal
       setMoveItemResultModal({
         visible: true,
@@ -1025,15 +1025,28 @@ export default function ListDetailScreen() {
               />
             )}
             {!showAddItem && !editingItem ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setShowAddItem(true);
-                }}
-                style={[styles.addButton, { backgroundColor: colors.primary }]}
-              >
-                <FontAwesome name="plus" size={16} color="#fff" />
-                <Text style={styles.addButtonText}>Add Item</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowAddItem(true);
+                  }}
+                  style={[styles.addButton, { backgroundColor: colors.primary }]}
+                >
+                  <FontAwesome name="plus" size={16} color="#fff" />
+                  <Text style={styles.addButtonText}>Add Item</Text>
+                </TouchableOpacity>
+                {isGroceryList && (
+                  <TouchableOpacity
+                    onPress={() => router.push('/(tabs)/lists/completed')}
+                    style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    accessibilityLabel="View completed items history"
+                    accessibilityHint="Opens the history of completed grocery items"
+                  >
+                    <FontAwesome name="history" size={16} color={colors.primary} />
+                    <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : showAddItem && !editingItem ? (
               <TouchableOpacity
                 onPress={() => {
@@ -1061,10 +1074,10 @@ export default function ListDetailScreen() {
               onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
               style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
             >
-              <FontAwesome 
-                name={areAllCollapsed ? 'chevron-down' : 'chevron-up'} 
-                size={14} 
-                color={colors.textSecondary} 
+              <FontAwesome
+                name={areAllCollapsed ? 'chevron-down' : 'chevron-up'}
+                size={14}
+                color={colors.textSecondary}
               />
               <Text style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}>
                 {areAllCollapsed ? 'Expand All' : 'Collapse All'}
@@ -1107,7 +1120,7 @@ export default function ListDetailScreen() {
       </View>
 
       {showAddItem && !editingItem && (
-        <ScrollView 
+        <ScrollView
           style={[styles.addItemFormContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
           keyboardShouldPersistTaps="handled"
         >
@@ -1155,7 +1168,7 @@ export default function ListDetailScreen() {
                     <FontAwesome name="times" size={24} color={colors.text} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView 
+                <ScrollView
                   style={styles.modalContent}
                   keyboardShouldPersistTaps="handled"
                   contentContainerStyle={styles.modalContentContainer}
@@ -1188,7 +1201,7 @@ export default function ListDetailScreen() {
                   <FontAwesome name="times" size={24} color={colors.text} />
                 </TouchableOpacity>
               </View>
-              <ScrollView 
+              <ScrollView
                 style={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.modalContentContainer}
@@ -1226,7 +1239,7 @@ export default function ListDetailScreen() {
           </Text>
         </View>
       ) : isGroceryList && listColor ? (
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           refreshControl={
             <RefreshControl
@@ -1244,7 +1257,7 @@ export default function ListDetailScreen() {
 
             // Only render if we have a valid listColor to prevent flashing
             if (!listColor) return null;
-            
+
             return (
               <CategoryGroup
                 key={categoryId}
@@ -1319,7 +1332,7 @@ export default function ListDetailScreen() {
                 />
               );
             }
-            
+
             return (
               <ListItemComponent
                 item={item}
@@ -1381,7 +1394,7 @@ export default function ListDetailScreen() {
                 <FontAwesome name="times" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            
+
             {moveItemModal.item && (
               <>
                 <View style={[styles.itemPreview, { backgroundColor: colors.background, borderColor: colors.border }]}>
@@ -1399,7 +1412,7 @@ export default function ListDetailScreen() {
                     </Text>
                   )}
                 </View>
-                
+
                 <View style={styles.pickerContainer}>
                   <Text style={[styles.pickerLabel, { color: colors.text }]}>Move to list:</Text>
                   <ThemeAwarePicker
@@ -1413,7 +1426,7 @@ export default function ListDetailScreen() {
                     enabled={true}
                   />
                 </View>
-                
+
                 <View style={styles.modalButtons}>
                   <TouchableOpacity
                     onPress={() => setMoveItemModal({ isOpen: false, item: null })}
@@ -1508,16 +1521,16 @@ const styles = StyleSheet.create({
   filterLabel: {
     fontSize: 14,
     fontWeight: '500',
-    ...(Platform.OS === 'web' 
-      ? { minWidth: 120, flexShrink: 0 } 
-      : { 
+    ...(Platform.OS === 'web'
+      ? { minWidth: 120, flexShrink: 0 }
+      : {
           width: '100%',
           marginBottom: 4,
         }
     ),
   },
   pickerWrapper: {
-    ...(Platform.OS === 'web' 
+    ...(Platform.OS === 'web'
       ? { flex: 1, minWidth: 150 }
       : { width: '100%' }
     ),
@@ -1530,9 +1543,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     gap: 6,
-    ...(Platform.OS === 'web' 
-      ? { flexShrink: 0 } 
-      : { 
+    ...(Platform.OS === 'web'
+      ? { flexShrink: 0 }
+      : {
           width: '100%',
           marginTop: 12, // Reduced spacing
           zIndex: 0,
@@ -1563,6 +1576,33 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#fff',
+    fontSize: Platform.OS === 'web' ? 14 : 13,
+    fontWeight: '600',
+  },
+  historyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 12,
+    paddingVertical: Platform.OS === 'web' ? 10 : 8,
+    gap: 6,
+    flexShrink: 0,
+    borderWidth: 1,
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+      },
+    }),
+  },
+  historyButtonText: {
     fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },
