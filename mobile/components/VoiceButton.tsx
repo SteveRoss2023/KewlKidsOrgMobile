@@ -45,9 +45,9 @@ export default function VoiceButton({
 
 const styles = StyleSheet.create({
   button: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
     ...Platform.select({

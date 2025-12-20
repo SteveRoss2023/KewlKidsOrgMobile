@@ -13,6 +13,7 @@ import {
   RefreshControl,
   Dimensions,
 } from 'react-native';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Calendar } from 'react-native-calendars';
 import { FontAwesome } from '@expo/vector-icons';
@@ -27,6 +28,7 @@ import WeekView from '../../components/calendar/WeekView';
 import DayView from '../../components/calendar/DayView';
 import CalendarToolbar from '../../components/calendar/CalendarToolbar';
 import { useVoiceRecognition } from '../../hooks/useVoiceRecognition';
+import { useCalendarVoiceCommands } from '../../hooks/useCalendarVoiceCommands';
 import VoiceButton from '../../components/VoiceButton';
 import { speak } from '../../utils/voiceFeedback';
 
@@ -62,6 +64,17 @@ export default function CalendarScreen() {
   };
   const [currentDate, setCurrentDate] = useState<Date>(getTodayLocal());
   const [view, setView] = useState<ViewType>('month');
+  const currentDateRef = useRef(currentDate);
+  const viewRef = useRef<ViewType>(view);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    currentDateRef.current = currentDate;
+  }, [currentDate]);
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -201,6 +214,52 @@ export default function CalendarScreen() {
       setCurrentDate(newDate);
     }
   };
+
+  // Swipe gesture handler for mobile navigation
+  const swipeGesture = useMemo(() => {
+    if (Platform.OS === 'web') return null;
+
+    return Gesture.Pan()
+      .minDistance(30) // Require more distance before activating
+      .activeOffsetX([-30, 30]) // Only activate on clear horizontal movement
+      .failOffsetY([-5, 5]) // Fail immediately on any vertical movement
+      .maxPointers(1) // Only allow single finger
+      .runOnJS(true)
+      .onEnd((event) => {
+        const swipeThreshold = 100; // Higher threshold for more intentional swipes
+        const horizontalMovement = Math.abs(event.translationX);
+        const verticalMovement = Math.abs(event.translationY);
+
+        // Only trigger if horizontal movement is very significant and much greater than vertical
+        if (horizontalMovement > swipeThreshold && horizontalMovement > verticalMovement * 3) {
+          const currentView = viewRef.current;
+          const currentDateValue = currentDateRef.current;
+          const newDate = new Date(currentDateValue);
+
+          if (event.translationX > 0) {
+            // Swipe right = previous
+            if (currentView === 'month') {
+              newDate.setMonth(newDate.getMonth() - 1);
+            } else if (currentView === 'week') {
+              newDate.setDate(newDate.getDate() - 7);
+            } else if (currentView === 'day') {
+              newDate.setDate(newDate.getDate() - 1);
+            }
+            setCurrentDate(newDate);
+          } else {
+            // Swipe left = next
+            if (currentView === 'month') {
+              newDate.setMonth(newDate.getMonth() + 1);
+            } else if (currentView === 'week') {
+              newDate.setDate(newDate.getDate() + 7);
+            } else if (currentView === 'day') {
+              newDate.setDate(newDate.getDate() + 1);
+            }
+            setCurrentDate(newDate);
+          }
+        }
+      });
+  }, [view]);
 
   // Handle view change
   const handleViewChange = (newView: string) => {
@@ -528,15 +587,71 @@ export default function CalendarScreen() {
     return dates;
   }, [agendaItems]);
 
-  // Handle voice button click
-  const handleVoiceClick = () => {
-    if (isListening) {
+  // Create event directly (from voice)
+  const handleCreateEventDirectly = async (eventData: any) => {
+    if (!selectedFamily) return;
+
+    setCreating(true);
+    try {
+      const startsAtISO = convertLocalDateTimeToISO(eventData.starts_at);
+      const endsAtISO = convertLocalDateTimeToISO(eventData.ends_at);
+
+      const response = await CalendarService.createEvent({
+        ...eventData,
+        family: selectedFamily.id,
+        starts_at: startsAtISO || eventData.starts_at,
+        ends_at: endsAtISO || eventData.ends_at,
+      });
+
+      // Refresh from server
+      setTimeout(async () => {
+        await fetchEvents();
+      }, 1000);
+
+      speak(`Event "${eventData.title}" added to calendar successfully!`);
       stop();
       reset();
-    } else {
-      start();
+    } catch (err: any) {
+      console.error('Error creating event:', err);
+      speak('Failed to create event. Please try again.');
+      stop();
+      reset();
+      throw err;
+    } finally {
+      setCreating(false);
     }
   };
+
+  // Voice commands using shared hook
+  const { handleVoiceClick } = useCalendarVoiceCommands({
+    transcript,
+    isSupported,
+    selectedFamily,
+    events,
+    isListening,
+    start,
+    stop,
+    reset,
+    showDeleteModal,
+    showCreateForm: showEventForm,
+    selectedEvent,
+    onOpenCreateForm: (open: boolean) => setShowEventForm(open),
+    onSetFormData: setFormData,
+    onSetSelectedEvent: setSelectedEvent,
+    onShowDeleteModal: (show: boolean) => {
+      setShowDeleteModal(show);
+      if (!show) {
+        setSelectedEvent(null);
+      }
+    },
+    onDeleteConfirm: handleDeleteConfirm,
+    onCreateEventDirectly: handleCreateEventDirectly,
+    convertLocalDateTimeToISO,
+    onSubmitForm: () => {
+      // Trigger form submission
+      handleCreateEvent();
+    },
+  });
 
   // Handle create new event button
   const handleCreateNewEvent = () => {
@@ -574,8 +689,8 @@ export default function CalendarScreen() {
   const markedDates = getMarkedDates();
   const selectedDateStr = getLocalDateString(currentDate);
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+  const content = (
+    <>
       <GlobalNavBar />
       {error ? (
         <View style={[styles.errorContainer, { backgroundColor: '#FF3B3020' }]}>
@@ -597,6 +712,8 @@ export default function CalendarScreen() {
             isListening={isListening}
             onVoicePress={handleVoiceClick}
             voiceDisabled={!selectedFamily || creating || deleting}
+            onCreateEvent={handleCreateNewEvent}
+            showEventForm={showEventForm}
           />
 
           {view === 'agenda' ? (
@@ -711,9 +828,14 @@ export default function CalendarScreen() {
                 key={`calendar-${events.length}-${view}-${calendarKey}`}
                 current={selectedDateStr}
                 onDayPress={(day) => {
-                  handleDayPress(day);
-                  // Also allow creating event by clicking day
-                  handleMonthDayPress(day);
+                  // On mobile, just select the day to show events below
+                  // Use + button to add events
+                  if (Platform.OS === 'web') {
+                    handleDayPress(day);
+                    handleMonthDayPress(day);
+                  } else {
+                    handleDayPress(day);
+                  }
                 }}
                 markedDates={{
                   ...markedDates,
@@ -770,29 +892,35 @@ export default function CalendarScreen() {
             )}
 
 
-            {view === 'month' && getEventsForDate(currentDate).length > 0 && (
+            {view === 'month' && (
               <View style={styles.eventsListContainer}>
                 <Text style={[styles.eventsListTitle, { color: colors.text }]}>
                   Events for {currentDate.toLocaleDateString()}
                 </Text>
-                {getEventsForDate(currentDate).map((event) => (
-                  <TouchableOpacity
-                    key={event.id}
-                    style={[styles.eventItem, { backgroundColor: colors.surface, borderLeftColor: event.color || '#3b82f6' }]}
-                    onPress={() => handleSelectEvent(event)}
-                  >
-                    <Text style={[styles.eventTitle, { color: colors.text }]}>{event.title}</Text>
-                    {event.location && (
-                      <Text style={[styles.eventLocation, { color: colors.textSecondary }]}>
-                        📍 {event.location}
+                {getEventsForDate(currentDate).length === 0 ? (
+                  <Text style={[styles.agendaEmptyText, { color: colors.textSecondary }]}>
+                    No events scheduled for this day
+                  </Text>
+                ) : (
+                  getEventsForDate(currentDate).map((event) => (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={[styles.eventItem, { backgroundColor: colors.surface, borderLeftColor: event.color || '#3b82f6' }]}
+                      onPress={() => handleSelectEvent(event)}
+                    >
+                      <Text style={[styles.eventTitle, { color: colors.text }]}>{event.title}</Text>
+                      {event.location && (
+                        <Text style={[styles.eventLocation, { color: colors.textSecondary }]}>
+                          📍 {event.location}
+                        </Text>
+                      )}
+                      <Text style={[styles.eventTime, { color: colors.textSecondary }]}>
+                        {new Date(event.starts_at).toLocaleString()}
+                        {event.ends_at && ` - ${new Date(event.ends_at).toLocaleString()}`}
                       </Text>
-                    )}
-                    <Text style={[styles.eventTime, { color: colors.textSecondary }]}>
-                      {new Date(event.starts_at).toLocaleString()}
-                      {event.ends_at && ` - ${new Date(event.ends_at).toLocaleString()}`}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  ))
+                )}
               </View>
             )}
           </ScrollView>
@@ -800,16 +928,7 @@ export default function CalendarScreen() {
         </>
       )}
 
-      {/* Floating Action Button */}
-      {!showEventForm && (
-        <TouchableOpacity
-          style={[styles.fab, { backgroundColor: colors.primary }]}
-          onPress={handleCreateNewEvent}
-          activeOpacity={0.8}
-        >
-          <FontAwesome name="plus" size={24} color="#fff" />
-        </TouchableOpacity>
-      )}
+      {/* Floating Action Button removed - + button is now in toolbar for both web and mobile */}
 
       {/* Event Form Modal */}
       <Modal
@@ -1440,7 +1559,26 @@ export default function CalendarScreen() {
         cancelText="Cancel"
         showCancel={true}
       />
-    </View>
+    </>
+  );
+
+  // Wrap with gesture handler on mobile for swipe navigation
+  if (Platform.OS === 'web' || !swipeGesture) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {content}
+      </View>
+    );
+  }
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureDetector gesture={swipeGesture}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+          {content}
+        </View>
+      </GestureDetector>
+    </GestureHandlerRootView>
   );
 }
 

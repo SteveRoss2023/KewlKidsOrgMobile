@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import Voice from '@react-native-voice/voice';
 
 /**
@@ -24,12 +25,15 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
 
   // Check if speech recognition is available
   // On web, we can use Web Speech API
-  // On native, we'll show the button but speech recognition needs to be implemented
-  // For now, we'll return true so the button shows, but actual recognition will need
-  // a library like @react-native-voice/voice to be installed
+  // On native, check if we're in Expo Go (which doesn't support native modules)
+  // Constants.executionEnvironment values:
+  // - 'storeClient' = Expo Go
+  // - 'standalone' = Standalone app (production)
+  // - 'bare' = Bare React Native
+  // - undefined = Development build
   const isSupported = Platform.OS === 'web'
     ? typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
-    : true; // Show button on mobile - actual recognition needs implementation
+    : Constants.executionEnvironment !== 'storeClient'; // Voice works in dev builds and standalone, not in Expo Go
 
   // Initialize recognition
   useEffect(() => {
@@ -246,14 +250,40 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
       }
     } else {
       // Native implementation using @react-native-voice/voice
-      try {
-        Voice.start('en-US');
-        console.log('🎤 [VOICE RECOGNITION] Voice.start() called successfully');
-      } catch (err: any) {
-        console.error('Error starting voice recognition:', err);
-        setError(err.message || 'Failed to start voice recognition');
+      if (!Voice) {
+        console.error('Voice module is not available');
+        setError('Voice recognition is not available on this device');
         setIsListening(false);
+        return;
       }
+
+      // Try to start directly - wrap in Promise to catch all errors
+      // The library internally calls isAvailable() which might fail if native module is null
+      Promise.resolve()
+        .then(() => {
+          return Voice.start('en-US');
+        })
+        .then(() => {
+          console.log('🎤 [VOICE RECOGNITION] Voice.start() called successfully');
+        })
+        .catch((err: any) => {
+          // Handle all error cases - including when native module is null
+          const errorMessage = err?.message || err?.toString() || String(err) || 'Unknown error';
+          console.error('Error starting voice recognition:', errorMessage, err);
+
+          // Check for common error patterns
+          if (errorMessage.includes('null') ||
+              errorMessage.includes('startSpeech') ||
+              errorMessage.includes('isSpeechAvailable') ||
+              errorMessage.includes('not available') ||
+              errorMessage.includes('Cannot read property')) {
+            console.warn('Voice module not properly initialized or not available');
+            setError('Voice recognition is not available on this device.');
+          } else {
+            setError('Failed to start voice recognition. Please try again.');
+          }
+          setIsListening(false);
+        });
     }
   }, [isSupported, continuous]);
 
@@ -271,11 +301,22 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
       }
     } else {
       // Native implementation
-      try {
-        Voice.stop();
-      } catch (err) {
-        console.error('Error stopping voice recognition:', err);
+      if (!Voice) {
+        console.debug('Voice module is not available, skipping stop');
+        setIsListening(false);
+        return;
       }
+
+      // Try to stop, but ignore errors (might already be stopped or module not initialized)
+      Voice.stop()
+        .catch((err: any) => {
+          // Ignore errors when stopping - might already be stopped or module not initialized
+          if (err?.message?.includes('null') || err?.message?.includes('stopSpeech')) {
+            console.debug('Voice module not properly initialized, ignoring stop error');
+          } else {
+            console.debug('Error stopping voice recognition (ignored):', err);
+          }
+        });
     }
 
     setIsListening(false);
