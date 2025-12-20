@@ -12,10 +12,11 @@ from django.core.signing import TimestampSigner
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from .models import UserProfile
-from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer, EventSerializer
+from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer, EventSerializer, ChatRoomSerializer, MessageSerializer
 from meals.models import Recipe, MealPlan
 from families.models import Family, Member
 from events.models import Event
+from chat.models import ChatRoom, Message
 
 User = get_user_model()
 
@@ -1060,6 +1061,141 @@ class EventViewSet(viewsets.ModelViewSet):
         family = get_object_or_404(Family, id=self.request.data.get('family'))
         member = get_object_or_404(Member, user=self.request.user, family=family)
         serializer.save(created_by=member)
+
+
+class ChatRoomViewSet(viewsets.ModelViewSet):
+    """ChatRoom viewset."""
+    serializer_class = ChatRoomSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return chat rooms where the user is a member."""
+        user = self.request.user
+        # Filter by rooms where the user is in the members ManyToMany field
+        # This ensures users only see rooms they're actually part of
+        return ChatRoom.objects.filter(members__user=user).distinct()
+
+    def perform_create(self, serializer):
+        """Create chat room with creator as created_by and invited members."""
+        family_id = self.request.data.get('family')
+        if not family_id:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'family': 'Family ID is required'})
+
+        family = get_object_or_404(Family, id=family_id)
+
+        # Check if user is a member of the family
+        try:
+            member = Member.objects.get(user=self.request.user, family=family)
+        except Member.DoesNotExist:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied(
+                f'You are not a member of this family. Please join the family first.'
+            )
+
+        # Get member IDs from request
+        member_ids = self.request.data.get('member_ids', [])
+
+        # Validate that all member IDs belong to the same family
+        if member_ids:
+            invalid_members = Member.objects.filter(
+                id__in=member_ids
+            ).exclude(family=family)
+            if invalid_members.exists():
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    'member_ids': 'All members must belong to the same family as the chat room.'
+                })
+
+        # Generate room name from all members (creator + invited) if not provided
+        room_name = (self.request.data.get('name') or '').strip()
+        if not room_name:
+            # Get all members that will be in the room (creator + invited)
+            all_member_ids = [member.id]
+            if member_ids:
+                all_member_ids.extend(member_ids)
+
+            all_members = Member.objects.filter(id__in=all_member_ids, family=family)
+            member_names = []
+            for room_member in all_members:
+                try:
+                    if hasattr(room_member.user, 'profile') and room_member.user.profile and room_member.user.profile.display_name:
+                        member_names.append(room_member.user.profile.display_name)
+                    else:
+                        # Use email username (part before @)
+                        email_username = room_member.user.email.split('@')[0]
+                        # Capitalize first letter
+                        member_names.append(email_username.capitalize())
+                except:
+                    # Fallback to email username
+                    email_username = room_member.user.email.split('@')[0]
+                    member_names.append(email_username.capitalize())
+
+            if len(member_names) == 1:
+                room_name = member_names[0]
+            elif len(member_names) == 2:
+                room_name = f"{member_names[0]} & {member_names[1]}"
+            else:
+                room_name = f"{member_names[0]} & {len(member_names) - 1} others"
+
+        # Save room with generated or provided name (or None if empty)
+        save_kwargs = {'created_by': member, 'family': family}
+        if room_name:
+            save_kwargs['name'] = room_name
+        room = serializer.save(**save_kwargs)
+
+        # Add creator to members (always included)
+        room.members.add(member)
+
+        # Add invited members
+        if member_ids:
+            invited_members = Member.objects.filter(id__in=member_ids, family=family)
+            room.members.add(*invited_members)
+
+    def perform_destroy(self, instance):
+        """Only allow deletion if user is the creator or is an admin/owner of the family."""
+        user = self.request.user
+        member = get_object_or_404(Member, user=user, family=instance.family)
+
+        # Allow deletion if user is the creator or is admin/owner
+        if instance.created_by == member or member.role in ['owner', 'admin']:
+            instance.delete()
+        else:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You can only delete rooms you created or must be an admin/owner.')
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """Message viewset (creation via WebSocket, deletion via API)."""
+    serializer_class = MessageSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None  # Disable pagination for messages - we want all messages in a room
+
+    def get_queryset(self):
+        """Return messages for rooms where the user is a member."""
+        user = self.request.user
+        # Filter by rooms where the user is in the members ManyToMany field
+        # This ensures users only see messages from rooms they're actually part of
+        queryset = Message.objects.filter(room__members__user=user).distinct()
+
+        # Filter by room if room_id is provided
+        room_id = self.request.query_params.get('room', None)
+        if room_id:
+            queryset = queryset.filter(room_id=room_id)
+
+        return queryset.order_by('created_at')
+
+    def perform_destroy(self, instance):
+        """Only allow deletion if user is the sender or is an admin/owner of the family."""
+        user = self.request.user
+        member = get_object_or_404(Member, user=user, family=instance.room.family)
+
+        # Allow deletion if user is the sender or is admin/owner
+        if instance.sender == member or member.role in ['owner', 'admin']:
+            instance.delete()
+        else:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You can only delete your own messages or must be an admin/owner.')
 
 
 class RecipeViewSet(viewsets.ModelViewSet):

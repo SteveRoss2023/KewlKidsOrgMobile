@@ -13,7 +13,31 @@ Quick reference for starting the app each day. Use this after logging in or rest
 
 ---
 
-### 1. Start Backend Server
+### 1. Start Redis (Required for WebSockets)
+
+**Windows:**
+```powershell
+# If Redis is installed
+redis-server
+# Or if using WSL:
+wsl redis-server
+```
+
+**Mac (Homebrew):**
+```bash
+brew services start redis
+```
+
+**Linux:**
+```bash
+sudo systemctl start redis
+```
+
+**✅ Verify:** Run `redis-cli ping` - should return `PONG`
+
+**Note:** If Redis is not available, the server will still start but WebSockets won't work properly.
+
+### 2. Start Backend Server
 
 **Windows:**
 ```powershell
@@ -31,9 +55,11 @@ python manage.py runserver
 
 **✅ Verify:** Open http://localhost:8900/api/ in browser - should see API response
 
+**Note:** With `daphne` in `INSTALLED_APPS`, `runserver` automatically uses Daphne for WebSocket support. Redis must be running for chat features.
+
 ---
 
-### 2. Start Mobile App
+### 3. Start Mobile App
 
 **Open a new terminal/command prompt:**
 
@@ -46,7 +72,7 @@ npx expo start
 
 ---
 
-### 3. Connect to App
+### 4. Connect to App
 
 **For Web Browser:**
 - Press `w` in the Expo terminal, or
@@ -59,7 +85,7 @@ npx expo start
 
 ---
 
-### 4. Start Ngrok Tunnels
+### 5. Start Ngrok Tunnels
 
 **⚠️ Required if you:**
 - Test email verification links
@@ -77,7 +103,7 @@ ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
 ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
 ```
 
-**✅ Verify:** 
+**✅ Verify:**
 - Check ngrok dashboard shows active tunnels
 - API accessible at: https://kewlkidsorganizermobile.ngrok.app/api/
 - Web app accessible at: https://kewlkidsorganizermobile-web.ngrok.app

@@ -1,3 +1,9 @@
+// Polyfill Web Crypto API for native platforms - must be imported and called first
+import { setupCryptoPolyfill } from '../utils/crypto-polyfill';
+
+// Set up the crypto polyfill
+setupCryptoPolyfill();
+
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform, Linking } from 'react-native';

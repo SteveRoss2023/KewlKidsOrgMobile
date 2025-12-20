@@ -44,6 +44,7 @@ AUTH_USER_MODEL = 'api.User'
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',  # Must be first to override runserver to use ASGI
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -58,6 +59,7 @@ INSTALLED_APPS = [
     'encryption',
     'documents',
     'events',
+    'chat',
 
     'django.contrib.staticfiles',
 
@@ -278,6 +280,8 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'qmkdlrdfljvlqojd')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # For development without Redis, use in-memory channel layer:
+# NOTE: In-memory layer only works with a single server instance and doesn't persist across restarts
+# Uncomment below and comment out the Redis configuration above if Redis is not available:
 # CHANNEL_LAYERS = {
 #     'default': {
 #         'BACKEND': 'channels.layers.InMemoryChannelLayer',
@@ -369,4 +373,53 @@ else:
 # Session key lifetime: 24 hours (86400 seconds) to match JWT refresh token lifetime
 # This ensures the session key persists across JWT refreshes and auto-refreshes on access
 OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '86400'))  # 24 hours default
+
+# Logging Configuration - Reduce verbosity
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'WARNING',  # Only show warnings and errors
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Only show warnings and errors
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'ERROR',  # Only show errors for server requests
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',  # Only show errors for requests
+            'propagate': False,
+        },
+        'channels': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'chat': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
+}
 

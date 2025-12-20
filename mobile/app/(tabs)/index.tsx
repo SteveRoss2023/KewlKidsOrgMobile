@@ -191,7 +191,7 @@ export default function HomeScreen() {
         router.push('/(tabs)/lists');
         break;
       case 'chat':
-        // TODO: Navigate to chat when implemented
+        router.push('/(tabs)/chat');
         break;
       case 'meals':
         router.push('/(tabs)/meals');

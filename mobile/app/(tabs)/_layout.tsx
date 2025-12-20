@@ -148,6 +148,22 @@ export default function TabsLayout() {
           href: null, // Hide from tab bar - accessible via Home card
         }}
       />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: 'Chat',
+          tabBarLabel: 'Chat',
+          tabBarIcon: ({ color, size }) => (
+            <FontAwesome name="comments" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="chat/[roomId]"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
     </Tabs>
   );
 }

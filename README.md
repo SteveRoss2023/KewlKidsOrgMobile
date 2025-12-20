@@ -107,10 +107,7 @@ cd backend
 python manage.py runserver
 ```
 
-For WebSocket support:
-```bash
-daphne config.asgi:application --port 8000
-```
+**Note:** With `daphne` in `INSTALLED_APPS` and `ASGI_APPLICATION` configured, `runserver` automatically uses Daphne for WebSocket support. Redis must be running for WebSocket features to work.
 
 ### Running the Mobile App
 

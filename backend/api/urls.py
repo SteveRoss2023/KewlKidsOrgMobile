@@ -8,6 +8,8 @@ router.register(r'users', views.UserViewSet, basename='user')
 router.register(r'events', views.EventViewSet, basename='event')
 router.register(r'recipes', views.RecipeViewSet, basename='recipe')
 router.register(r'meal-plans', views.MealPlanViewSet, basename='mealplan')
+router.register(r'chat-rooms', views.ChatRoomViewSet, basename='chatroom')
+router.register(r'messages', views.MessageViewSet, basename='message')
 
 urlpatterns = [
     # Health check

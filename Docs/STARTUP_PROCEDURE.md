@@ -132,12 +132,45 @@ python manage.py migrate
 python manage.py createsuperuser
 ```
 
+### Step 5.5: Start Redis (Required for WebSockets)
+
+**Windows:**
+```powershell
+# If Redis is installed via Chocolatey or Windows installer
+redis-server
+# Or if using WSL:
+wsl redis-server
+```
+
+**Mac (Homebrew):**
+```bash
+brew services start redis
+# Or run directly:
+redis-server
+```
+
+**Linux:**
+```bash
+sudo systemctl start redis
+# Or run directly:
+redis-server
+```
+
+**Verify Redis is running:**
+```bash
+redis-cli ping
+# Should return: PONG
+```
+
+**Note:** If Redis is not available, Channels will fall back to in-memory channel layer (not recommended for production, but works for development).
+
 ### Step 6: Start Django Server
 
 **Option A: Using the Custom Runserver Command (Recommended)**
 ```bash
 python manage.py runserver
 # Defaults to port 8900 and listens on all interfaces (0.0.0.0)
+# Automatically uses Daphne for WebSocket support when ASGI_APPLICATION is configured
 ```
 
 **Option B: Using the Batch Script (Windows)**
@@ -149,6 +182,8 @@ python manage.py runserver
 ```bash
 python manage.py runserver 0.0.0.0:8900
 ```
+
+**Note:** With `daphne` in `INSTALLED_APPS` and `ASGI_APPLICATION` configured, `runserver` automatically uses Daphne for WebSocket support. Redis must be running for chat features to work.
 
 ### Step 7: Verify Backend is Running
 
@@ -480,7 +515,7 @@ Use this checklist for a quick startup:
    ```bash
    # Terminal 1: Backend ngrok
    ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
-   
+
    # Terminal 2: Web app ngrok
    ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
    ```

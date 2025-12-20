@@ -4,6 +4,7 @@ from django.conf import settings
 from .models import UserProfile
 from meals.models import Recipe, MealPlan
 from events.models import Event
+from chat.models import ChatRoom, Message
 
 User = get_user_model()
 
@@ -291,4 +292,167 @@ class EventSerializer(serializers.ModelSerializer):
             'starts_at', 'ends_at', 'is_all_day', 'color', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ChatRoomSerializer(serializers.ModelSerializer):
+    """ChatRoom serializer."""
+    member_count = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+    family_name = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()  # Name showing other members, excluding current user
+    member_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of member IDs to invite to the chat room"
+    )
+    member_ids_list = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatRoom
+        fields = [
+            'id', 'family', 'family_name', 'name', 'display_name', 'members', 'created_by', 'created_at', 'updated_at',
+            'member_count', 'last_message', 'member_ids', 'member_ids_list'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'members', 'created_by', 'member_ids_list']
+
+    def get_family_name(self, obj):
+        """Get family name (handles encrypted field)."""
+        try:
+            return str(obj.family.name)
+        except Exception:
+            return None
+
+    def create(self, validated_data):
+        """Create ChatRoom instance, removing member_ids from validated_data."""
+        # Remove member_ids from validated_data since it's not a model field
+        validated_data.pop('member_ids', None)
+        return super().create(validated_data)
+
+    def get_member_count(self, obj):
+        return obj.members.count()
+
+    def get_last_message(self, obj):
+        # Only get messages where the sender is actually a member of this room
+        # This prevents showing messages from users who shouldn't be in this room
+        room_member_ids = set(obj.members.values_list('id', flat=True))
+        last_msg = obj.messages.filter(sender__in=obj.members.all()).last()
+
+        if last_msg:
+            # Double-check that the sender is actually a member
+            if last_msg.sender.id not in room_member_ids:
+                # This shouldn't happen, but if it does, return None
+                return None
+
+            sender_email = None
+            try:
+                if last_msg.sender and last_msg.sender.user:
+                    sender_email = last_msg.sender.user.email
+            except Exception:
+                # If we can't get email, leave it as None
+                pass
+
+            return {
+                'id': last_msg.id,
+                'sender_id': last_msg.sender.id,
+                'sender_email': sender_email,
+                'created_at': last_msg.created_at.isoformat(),
+            }
+        return None
+
+    def get_member_ids_list(self, obj):
+        """Return list of member IDs for easy comparison."""
+        return list(obj.members.values_list('id', flat=True))
+
+    def get_display_name(self, obj):
+        """Return room name showing other members, excluding the current user."""
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            # Fallback to stored name if no user context
+            return obj.name
+
+        # Get current user's member in this room's family
+        try:
+            current_user_member = obj.members.filter(user=request.user).first()
+            if not current_user_member:
+                # User not in room, return stored name
+                return obj.name
+        except:
+            return obj.name
+
+        # Get all other members (excluding current user)
+        other_members = obj.members.exclude(id=current_user_member.id)
+
+        if other_members.count() == 0:
+            # Only current user in room, return stored name or "You"
+            return obj.name or "You"
+
+        # Build display name from other members
+        member_names = []
+        for member in other_members:
+            try:
+                if hasattr(member.user, 'profile') and member.user.profile and member.user.profile.display_name:
+                    member_names.append(member.user.profile.display_name)
+                else:
+                    # Use email username (part before @)
+                    email_username = member.user.email.split('@')[0]
+                    # Capitalize first letter
+                    member_names.append(email_username.capitalize())
+            except:
+                # Fallback to email username
+                email_username = member.user.email.split('@')[0]
+                member_names.append(email_username.capitalize())
+
+        if len(member_names) == 1:
+            return member_names[0]
+        elif len(member_names) == 2:
+            return f"{member_names[0]} & {member_names[1]}"
+        else:
+            return f"{member_names[0]} & {len(member_names) - 1} others"
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    """Message serializer (ciphertext only, no decryption on server)."""
+    sender_username = serializers.SerializerMethodField()
+    sender_photo_url = serializers.SerializerMethodField()
+
+    def get_sender_username(self, obj):
+        if obj.sender and obj.sender.user and hasattr(obj.sender.user, 'profile') and obj.sender.user.profile:
+            return obj.sender.user.profile.display_name or obj.sender.user.email
+        return obj.sender.user.email if obj.sender and obj.sender.user else None
+
+    def get_sender_photo_url(self, obj):
+        """Return the photo URL for the sender."""
+        if obj.sender and obj.sender.user:
+            if hasattr(obj.sender.user, 'profile') and obj.sender.user.profile and obj.sender.user.profile.photo:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(f'/api/users/{obj.sender.user.id}/photo/')
+                return f'/api/users/{obj.sender.user.id}/photo/'
+        return None
+
+    body_ciphertext = serializers.SerializerMethodField()
+    iv = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Message
+        fields = [
+            'id', 'room', 'sender', 'sender_username', 'sender_photo_url', 'body_ciphertext', 'iv',
+            'created_at', 'edited_at', 'is_edited'
+        ]
+        read_only_fields = ['id', 'created_at', 'edited_at']
+
+    def get_body_ciphertext(self, obj):
+        """Encode binary ciphertext as base64 string."""
+        import base64
+        if obj.body_ciphertext:
+            return base64.b64encode(obj.body_ciphertext).decode('utf-8')
+        return None
+
+    def get_iv(self, obj):
+        """Encode binary IV as base64 string."""
+        import base64
+        if obj.iv:
+            return base64.b64encode(obj.iv).decode('utf-8')
+        return None
 
