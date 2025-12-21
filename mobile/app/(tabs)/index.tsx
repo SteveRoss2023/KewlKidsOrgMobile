@@ -105,6 +105,13 @@ export default function HomeScreen() {
       icon: '🗺️',
       color: '#a855f7',
     },
+    {
+      id: 'mapbox',
+      title: 'Map(MapBox)',
+      description: 'MapBox location sharing and tracking',
+      icon: '🗺️',
+      color: '#0066ff',
+    },
   ];
 
   const loadChatUnreadCount = useCallback(async () => {
@@ -385,6 +392,9 @@ export default function HomeScreen() {
         break;
       case 'map':
         router.push('/(tabs)/map');
+        break;
+      case 'mapbox':
+        router.push('/(tabs)/mapbox');
         break;
       default:
         console.log('Feature not yet implemented:', cardId);

@@ -113,6 +113,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="mapbox"
+        options={{
+          href: null, // Hide from tab bar - accessible via Home card
+        }}
+      />
+      <Tabs.Screen
         name="outlook-sync"
         options={{
           href: null, // Hide from tab bar - accessible via Settings > Services
