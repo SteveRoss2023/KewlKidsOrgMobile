@@ -1,6 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, RefreshControl } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import AuthService from '../../services/authService';
 import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
@@ -11,8 +11,10 @@ import EmailVerificationBanner from '../../components/EmailVerificationBanner';
 import ProfileService from '../../services/profileService';
 import chatService from '../../services/chatService';
 import FamilyService from '../../services/familyService';
-import { getTotalUnreadCount } from '../../utils/messageTracking';
+import { getTotalUnreadCount, getRoomLastSeen } from '../../utils/messageTracking';
 import MessageBadge from '../../components/MessageBadge';
+import websocketService from '../../services/websocketService';
+import { tokenStorage } from '../../utils/storage';
 
 interface FeatureCard {
   id: string;
@@ -40,6 +42,10 @@ export default function HomeScreen() {
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
   const [chatUnreadCount, setChatUnreadCount] = useState<number>(0);
+  const [userMemberIds, setUserMemberIds] = useState<{ [familyId: number]: number }>({});
+  const processedMessageIds = useRef<Set<number>>(new Set());
+  // Fallback deduplication: track room_id + created_at for messages without message_id
+  const processedNotifications = useRef<Set<string>>(new Set());
   const { selectedFamily, families } = useFamily();
 
   const cards: FeatureCard[] = [
@@ -127,13 +133,139 @@ export default function HomeScreen() {
         }
       }
 
-      const totalUnread = await getTotalUnreadCount(rooms, userMemberIds);
+      const totalUnread = await getTotalUnreadCount(rooms, userMemberIds, processedMessageIds.current);
       setChatUnreadCount(totalUnread);
+      // Store userMemberIds for notification handler
+      setUserMemberIds(userMemberIds);
     } catch (err) {
       console.error('Error loading chat unread count:', err);
       setChatUnreadCount(0);
     }
   }, []);
+
+  // Handle notification WebSocket messages for real-time badge updates
+  const handleNotification = useCallback(async (notification: any) => {
+    console.log('[Home] Notification received:', notification);
+    if (notification.type === 'room_message') {
+      const { room_id, sender, created_at, message_id } = notification;
+      // Convert room_id to number if it's a string
+      const roomIdNum = typeof room_id === 'string' ? parseInt(room_id, 10) : room_id;
+      const messageIdNum = message_id ? (typeof message_id === 'string' ? parseInt(message_id, 10) : message_id) : null;
+
+      // Deduplicate: Skip if we've already processed this message
+      if (messageIdNum && processedMessageIds.current.has(messageIdNum)) {
+        console.log('[Home] Message already processed (by ID), skipping:', messageIdNum);
+        return;
+      }
+
+      // Fallback deduplication: use room_id + created_at if message_id is missing
+      const notificationKey = `${roomIdNum}_${created_at}`;
+      if (processedNotifications.current.has(notificationKey)) {
+        console.log('[Home] Notification already processed (by key), skipping:', notificationKey);
+        return;
+      }
+
+      // Mark as processed IMMEDIATELY to prevent race conditions with duplicate notifications
+      // This must happen before any async operations
+      if (messageIdNum) {
+        processedMessageIds.current.add(messageIdNum);
+      }
+      processedNotifications.current.add(notificationKey);
+
+      console.log('[Home] Processing room_message notification:', { room_id: roomIdNum, sender, created_at, message_id: messageIdNum });
+
+      try {
+        // Get rooms to find the room's family
+        const rooms = await chatService.getChatRooms();
+        const room = rooms.find(r => r.id === roomIdNum);
+
+        if (!room) {
+          console.log('[Home] Room not found in rooms list, reloading counts to get latest data');
+          // Already marked as processed above, just reload counts
+          await loadChatUnreadCount();
+          return;
+        }
+
+        // Get user member ID for this room's family
+        let userMemberId = userMemberIds[room.family];
+
+        if (!userMemberId) {
+          // If we don't have the member ID yet, reload counts (will get member IDs)
+          console.log('[Home] No userMemberId for family, reloading counts');
+          // Already marked as processed above, just reload counts
+          await loadChatUnreadCount();
+          return;
+        }
+
+        // Only update if message is from another user (not the current user)
+        // Convert sender to number if it's a string
+        const senderNum = typeof sender === 'string' ? parseInt(sender, 10) : sender;
+        if (senderNum !== userMemberId) {
+          console.log('[Home] Message from another user, checking last_seen');
+          // Check if message is newer than last seen (user might be viewing the room)
+          const lastSeen = await getRoomLastSeen(roomIdNum);
+          const messageTime = new Date(created_at);
+
+          console.log('[Home] Last seen check:', { lastSeen, messageTime, isNewer: !lastSeen || messageTime > lastSeen });
+
+          // Only increment if message is newer than last seen (or never seen)
+          if (!lastSeen || messageTime > lastSeen) {
+            console.log('[Home] Incrementing badge count');
+            // Already marked as processed above, just increment
+            setChatUnreadCount(prev => {
+              const newCount = prev + 1;
+              console.log('[Home] Badge count updated:', prev, '->', newCount);
+              return newCount;
+            });
+          } else {
+            console.log('[Home] Message already seen, not incrementing');
+            // Already marked as processed above
+          }
+        } else {
+          console.log('[Home] Message from current user, not incrementing');
+          // Already marked as processed above
+        }
+      } catch (err) {
+        console.error('[Home] Error handling notification:', err);
+        // Fallback: reload counts
+        await loadChatUnreadCount();
+      }
+    } else {
+      console.log('[Home] Unknown notification type:', notification.type);
+    }
+  }, [userMemberIds, loadChatUnreadCount]);
+
+  // Connect to notification WebSocket on mount
+  useEffect(() => {
+    const connectNotifications = async () => {
+      try {
+        const token = await tokenStorage.getAccessToken();
+        if (token) {
+          console.log('[Home] Connecting to notification WebSocket...');
+          websocketService.setNotificationHandler(handleNotification);
+          await websocketService.connectToNotifications(token);
+          console.log('[Home] Notification WebSocket connected');
+        } else {
+          console.warn('[Home] No token available for notification WebSocket');
+        }
+      } catch (err) {
+        console.error('[Home] Error connecting to notification WebSocket:', err);
+      }
+    };
+
+    connectNotifications();
+
+    // Cleanup on unmount
+    return () => {
+      console.log('[Home] Removing notification handler');
+      websocketService.removeNotificationHandler(handleNotification);
+      // Don't disconnect - other screens might be using it
+      // Only disconnect if no handlers remain
+      if (!websocketService.hasNotificationHandlers()) {
+        websocketService.disconnectFromNotifications();
+      }
+    };
+  }, [handleNotification]);
 
   useEffect(() => {
     loadUserData();
@@ -149,6 +281,7 @@ export default function HomeScreen() {
         loadUserData();
       }
       // Refresh chat unread count when screen comes into focus (throttled to prevent loops)
+      // This will pick up updated last_seen timestamps from when user viewed rooms
       const timeoutId = setTimeout(() => {
         loadChatUnreadCount();
       }, 500);

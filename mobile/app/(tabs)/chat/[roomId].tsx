@@ -32,7 +32,7 @@ import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useFamily } from '../../../contexts/FamilyContext';
 import AuthenticatedImage from '../../../components/AuthenticatedImage';
 import ProfileService from '../../../services/profileService';
-import FamilyService from '../../../services/familyService';
+import FamilyService, { Member } from '../../../services/familyService';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { setRoomLastSeen } from '../../../utils/messageTracking';
 
@@ -64,6 +64,7 @@ export default function ConversationScreen() {
   const [deletingMessageId, setDeletingMessageId] = useState<number | null>(null);
   const [showDeleteMessageModal, setShowDeleteMessageModal] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState<number | null>(null);
+  const [roomMembersCache, setRoomMembersCache] = useState<Member[]>([]);
 
   const encryptionManager = useRef(new EncryptionManager()).current;
   const messagesEndRef = useRef<FlatList>(null);
@@ -159,7 +160,7 @@ export default function ConversationScreen() {
       }
 
       const members = await FamilyService.getFamilyMembers(roomData.family);
-      setCachedMembers(members); // Cache members to avoid repeated API calls
+      setRoomMembersCache(members); // Cache members to avoid repeated API calls
 
       // Find member by email (profile.id is profile ID, not user ID, so we use email instead)
       const userMember = members.find(m => m.user_email.toLowerCase() === profile.email.toLowerCase());
@@ -202,14 +203,46 @@ export default function ConversationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.id]); // Only depend on room.id to prevent infinite loops
 
-  // Mark messages as seen when screen comes into focus
+  // Track if screen is currently focused
+  const isFocusedRef = useRef(false);
+
+  // Mark messages as seen when screen comes into focus AND messages are loaded
   useFocusEffect(
     useCallback(() => {
-      if (roomId) {
-        // Mark room as seen when user views it
-        setRoomLastSeen(roomId, new Date());
+      // Mark screen as focused when it comes into focus
+      isFocusedRef.current = true;
+
+      // Only mark as seen if we have messages and the screen is focused
+      if (roomId && messages.length > 0 && isFocusedRef.current) {
+        // Use a small delay to ensure messages are rendered
+        const timeoutId = setTimeout(() => {
+          if (isFocusedRef.current && messages.length > 0) {
+            const latestMessage = messages[messages.length - 1];
+            if (latestMessage && userMemberId) {
+              // Only mark as seen if the latest message is from another user
+              // (we don't want to mark as seen if the user just sent a message)
+              if (latestMessage.sender !== userMemberId) {
+                setRoomLastSeen(roomId, new Date(latestMessage.created_at));
+              }
+            } else if (latestMessage) {
+              // If we don't have userMemberId yet, mark with latest message anyway
+              setRoomLastSeen(roomId, new Date(latestMessage.created_at));
+            }
+          }
+        }, 500); // Small delay to ensure screen is actually visible
+
+        return () => {
+          clearTimeout(timeoutId);
+          // Mark screen as unfocused when it loses focus
+          isFocusedRef.current = false;
+        };
+      } else {
+        // Mark screen as unfocused when it loses focus
+        return () => {
+          isFocusedRef.current = false;
+        };
       }
-    }, [roomId])
+    }, [roomId, userMemberId]) // Removed messages.length from dependencies to prevent re-running on every message
   );
 
   useEffect(() => {
@@ -456,7 +489,9 @@ export default function ConversationScreen() {
         });
 
         // Update last_seen to the latest message timestamp (only for messages from other users)
-        if (merged.length > 0 && userMemberId) {
+        // Only update if the screen is actually focused (user is viewing the room)
+        // Don't mark as seen when just loading messages - only when user is actively viewing
+        if (merged.length > 0 && userMemberId && isFocusedRef.current) {
           // Find the latest message from another user
           const otherUserMessages = merged.filter(msg => msg.sender !== userMemberId);
           if (otherUserMessages.length > 0) {
@@ -467,7 +502,7 @@ export default function ConversationScreen() {
             const latestMessage = merged[merged.length - 1];
             setRoomLastSeen(roomId, new Date(latestMessage.created_at));
           }
-        } else if (merged.length > 0) {
+        } else if (merged.length > 0 && isFocusedRef.current) {
           // If we don't have userMemberId yet, mark with latest message anyway
           const latestMessage = merged[merged.length - 1];
           setRoomLastSeen(roomId, new Date(latestMessage.created_at));
@@ -581,10 +616,10 @@ export default function ConversationScreen() {
         let senderMemberId = message.sender || 0;
         if (!senderMemberId && message.sender_username && room) {
           // Use cached members if available, otherwise fetch
-          let members = cachedMembers;
-          if (members.length === 0) {
+          let members = roomMembersCache;
+          if (members.length === 0 || members[0]?.family !== room.family) {
             members = await FamilyService.getFamilyMembers(room.family);
-            setCachedMembers(members);
+            setRoomMembersCache(members);
           }
           const usernameLower = message.sender_username.toLowerCase();
 
@@ -643,7 +678,8 @@ export default function ConversationScreen() {
               updated[existingIndex] = newMessage;
 
               // If this is a message from another user and we're viewing the room, update last_seen
-              if (roomId && userMemberId && senderMemberId !== userMemberId) {
+              // Only update if the screen is actually focused
+              if (roomId && userMemberId && senderMemberId !== userMemberId && isFocusedRef.current) {
                 setRoomLastSeen(roomId, new Date(newMessage.created_at));
               }
 
@@ -654,7 +690,8 @@ export default function ConversationScreen() {
           } else {
             // New message - add it
             // If this is a message from another user and we're viewing the room, update last_seen
-            if (roomId && userMemberId && senderMemberId !== userMemberId) {
+            // Only update if the screen is actually focused
+            if (roomId && userMemberId && senderMemberId !== userMemberId && isFocusedRef.current) {
               setRoomLastSeen(roomId, new Date(newMessage.created_at));
             }
 

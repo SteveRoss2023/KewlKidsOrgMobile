@@ -123,11 +123,13 @@ export async function getUnreadCountFromLastMessage(
  * Calculate total unread count across all rooms.
  * @param rooms - Array of chat rooms
  * @param userMemberIds - Map of familyId to user's member ID for that family
+ * @param processedMessageIds - Optional set of message IDs that have already been processed via notifications (to avoid double counting)
  * @returns Total number of unread messages across all rooms
  */
 export async function getTotalUnreadCount(
   rooms: any[],
-  userMemberIds: { [familyId: number]: number }
+  userMemberIds: { [familyId: number]: number },
+  processedMessageIds?: Set<number>
 ): Promise<number> {
   let total = 0;
 
@@ -139,6 +141,12 @@ export async function getTotalUnreadCount(
 
     // Use last_message if available for performance
     if (room.last_message) {
+      // Skip if this message was already processed via notification (to avoid double counting)
+      if (processedMessageIds && room.last_message.id && processedMessageIds.has(room.last_message.id)) {
+        console.log(`[MessageTracking] Skipping already processed message ${room.last_message.id} in room ${room.id}`);
+        continue;
+      }
+
       const count = await getUnreadCountFromLastMessage(
         room.id,
         room.last_message.created_at,

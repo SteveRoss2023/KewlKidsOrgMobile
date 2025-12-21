@@ -188,6 +188,115 @@ class EncryptionManager {
   }
 
   /**
+   * Store a derived room key in secure storage for faster access.
+   */
+  async storeRoomKey(roomId: number, familyId: number, key: CryptoKey): Promise<void> {
+    try {
+      const exported = await this.exportKey(key);
+      const storageKey = `room_key_${roomId}_family_${familyId}`;
+      await secureStorage.setItem(storageKey, exported);
+      console.log(`[Encryption] Stored room key for room ${roomId} in secure storage`);
+    } catch (error) {
+      console.error(`[Encryption] Error storing room key for room ${roomId}:`, error);
+    }
+  }
+
+  /**
+   * Load a stored room key from secure storage.
+   */
+  async loadStoredRoomKey(roomId: number, familyId: number): Promise<CryptoKey | null> {
+    try {
+      const storageKey = `room_key_${roomId}_family_${familyId}`;
+      const storedKey = await secureStorage.getItem(storageKey);
+      if (storedKey) {
+        const key = await this.importKey(storedKey);
+        console.log(`[Encryption] Loaded stored room key for room ${roomId}`);
+        return key;
+      }
+      return null;
+    } catch (error) {
+      console.error(`[Encryption] Error loading stored room key for room ${roomId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Clear room key for a specific room.
+   */
+  async clearRoomKey(roomId: number, familyId: number): Promise<void> {
+    try {
+      const storageKey = `room_key_${roomId}_family_${familyId}`;
+      await secureStorage.removeItem(storageKey);
+      // Also clear from cache
+      const cacheKey = `room_${roomId}_family_${familyId}`;
+      globalRoomKeyCache.delete(cacheKey);
+      console.log(`[Encryption] Cleared room key for room ${roomId}`);
+    } catch (error) {
+      console.error(`[Encryption] Error clearing room key for room ${roomId}:`, error);
+    }
+  }
+
+  /**
+   * Pre-derive room key immediately after room creation (non-blocking).
+   */
+  async preDeriveRoomKey(roomId: number, familyId: number): Promise<void> {
+    try {
+      // Check if already stored
+      const stored = await this.loadStoredRoomKey(roomId, familyId);
+      if (stored) {
+        const cacheKey = `room_${roomId}_family_${familyId}`;
+        this.roomKeyCache.set(cacheKey, stored);
+        return;
+      }
+
+      // Derive in background
+      const familySecret = await this.getOrCreateFamilySecret(familyId);
+      await this.deriveRoomKey(roomId, familyId, familySecret);
+      console.log(`[Encryption] Pre-derived key for room ${roomId} in background`);
+    } catch (error) {
+      console.error(`[Encryption] Error pre-deriving key for room ${roomId}:`, error);
+    }
+  }
+
+  /**
+   * Pre-derive room keys in the background for all rooms.
+   * This should be called when the chat list loads.
+   */
+  async preDeriveRoomKeys(rooms: Array<{ id: number; family: number }>): Promise<void> {
+    if (rooms.length === 0) return;
+
+    console.log(`[Encryption] Pre-deriving keys for ${rooms.length} rooms in background...`);
+
+    // Derive keys in parallel (but limit concurrency to avoid overwhelming the device)
+    const BATCH_SIZE = 3; // Process 3 rooms at a time
+    for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
+      const batch = rooms.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (room) => {
+          try {
+            // Check if already stored
+            const stored = await this.loadStoredRoomKey(room.id, room.family);
+            if (stored) {
+              // Just cache it
+              const cacheKey = `room_${room.id}_family_${room.family}`;
+              this.roomKeyCache.set(cacheKey, stored);
+              return;
+            }
+
+            // Derive and store
+            const familySecret = await this.getOrCreateFamilySecret(room.family);
+            await this.deriveRoomKey(room.id, room.family, familySecret);
+          } catch (error) {
+            console.error(`[Encryption] Error pre-deriving key for room ${room.id}:`, error);
+          }
+        })
+      );
+    }
+
+    console.log(`[Encryption] Finished pre-deriving keys for ${rooms.length} rooms`);
+  }
+
+  /**
    * Derive a deterministic encryption key for a room.
    * All users in the same room will derive the same key.
    *
@@ -203,6 +312,15 @@ class EncryptionManager {
     if (cached) {
       console.log(`[Encryption] Using cached room key for room ${roomId}`);
       return cached;
+    }
+
+    // Check secure storage for persisted key
+    const storedKey = await this.loadStoredRoomKey(roomId, familyId);
+    if (storedKey) {
+      console.log(`[Encryption] Using stored room key for room ${roomId}`);
+      // Cache it for this session
+      this.roomKeyCache.set(cacheKey, storedKey);
+      return storedKey;
     }
 
     console.log(`[Encryption] Deriving room key for room ${roomId} (this may take a few seconds on mobile)...`);
@@ -246,9 +364,11 @@ class EncryptionManager {
       ['encrypt', 'decrypt']
     );
 
-    // Cache the derived key for future use
+    // Cache and store the derived key
     this.roomKeyCache.set(cacheKey, derivedKey);
-    console.log(`[Encryption] Room key derived and cached in ${Date.now() - derivationStartTime}ms`);
+    await this.storeRoomKey(roomId, familyId, derivedKey);
+
+    console.log(`[Encryption] Room key derived and stored in ${Date.now() - derivationStartTime}ms`);
 
     return derivedKey;
   }

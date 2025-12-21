@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,9 +22,12 @@ import FamilyService, { Member } from '../../services/familyService';
 import ProfileService from '../../services/profileService';
 import { APIError } from '../../services/api';
 import GlobalNavBar from '../../components/GlobalNavBar';
-import { getUnreadCountFromLastMessage } from '../../utils/messageTracking';
+import { getUnreadCountFromLastMessage, getRoomLastSeen } from '../../utils/messageTracking';
 import MessageBadge from '../../components/MessageBadge';
 import ConfirmModal from '../../components/ConfirmModal';
+import { EncryptionManager } from '../../utils/encryption';
+import websocketService from '../../services/websocketService';
+import { tokenStorage } from '../../utils/storage';
 
 interface RoomGroup {
   familyId: number;
@@ -36,6 +39,7 @@ export default function ChatScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { selectedFamily, families } = useFamily();
+  const encryptionManager = useRef(new EncryptionManager()).current;
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,6 +61,7 @@ export default function ChatScreen() {
   const [unreadCounts, setUnreadCounts] = useState<{ [roomId: number]: number }>({});
   const [showDeleteRoomModal, setShowDeleteRoomModal] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState<ChatRoom | null>(null);
+  const memberIdsLoadedRef = useRef(false);
 
   const loadRooms = useCallback(async () => {
     try {
@@ -73,7 +78,45 @@ export default function ChatScreen() {
         })));
       }
       setRooms(allRooms);
-      // Don't calculate unread counts here - do it in a separate effect
+
+      // Get user member IDs if we don't have them yet (needed for notification handler)
+      // Use ref to avoid dependency on userMemberIds state
+      if (allRooms.length > 0 && !memberIdsLoadedRef.current) {
+        memberIdsLoadedRef.current = true; // Mark as loading to prevent duplicate fetches
+        // Fetch asynchronously and update state
+        (async () => {
+          try {
+            const profile = await ProfileService.getProfile();
+            const familyIds = new Set(allRooms.map(r => r.family));
+            const memberIds: { [familyId: number]: number } = {};
+            for (const familyId of familyIds) {
+              try {
+                const members = await FamilyService.getFamilyMembers(familyId);
+                const userMember = members.find(m => m.user_email.toLowerCase() === profile.email.toLowerCase());
+                if (userMember) {
+                  memberIds[familyId] = userMember.id;
+                }
+              } catch (err) {
+                console.error(`Error getting members for family ${familyId}:`, err);
+              }
+            }
+            setUserMemberIds(memberIds);
+          } catch (err) {
+            console.error('[Chat] Error loading member IDs:', err);
+            memberIdsLoadedRef.current = false; // Reset on error so we can retry
+          }
+        })();
+      }
+
+      // Pre-derive keys in the background (non-blocking)
+      if (allRooms.length > 0 && selectedFamily) {
+        // Don't await - let it run in background
+        encryptionManager.preDeriveRoomKeys(
+          allRooms.map(r => ({ id: r.id, family: r.family }))
+        ).catch(err => {
+          console.error('[Chat] Error pre-deriving room keys:', err);
+        });
+      }
     } catch (err) {
       const apiError = err as APIError;
       setError(apiError.message || 'Failed to load chat rooms');
@@ -82,46 +125,240 @@ export default function ChatScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []); // Remove userMemberIds dependency to break circular dependency
+  }, [selectedFamily]); // Only depend on selectedFamily
 
+  // Track processed message IDs to prevent duplicate processing
+  const processedMessageIds = useRef<Set<number>>(new Set());
+  // Fallback deduplication: track room_id + created_at for messages without message_id
+  const processedNotifications = useRef<Set<string>>(new Set());
+
+  // Handle notification WebSocket messages for real-time badge updates
+  const handleNotification = useCallback(async (notification: any) => {
+    console.log('[ChatList] Notification received:', notification);
+    if (notification.type === 'room_message') {
+      const { room_id, sender, created_at, message_id } = notification;
+      // Convert room_id to number if it's a string
+      const roomIdNum = typeof room_id === 'string' ? parseInt(room_id, 10) : room_id;
+      const messageIdNum = message_id ? (typeof message_id === 'string' ? parseInt(message_id, 10) : message_id) : null;
+
+      // Deduplicate: Skip if we've already processed this message
+      if (messageIdNum && processedMessageIds.current.has(messageIdNum)) {
+        console.log('[ChatList] Message already processed (by ID), skipping:', messageIdNum);
+        return;
+      }
+
+      // Fallback deduplication: use room_id + created_at if message_id is missing
+      const notificationKey = `${roomIdNum}_${created_at}`;
+      if (processedNotifications.current.has(notificationKey)) {
+        console.log('[ChatList] Notification already processed (by key), skipping:', notificationKey);
+        return;
+      }
+
+      // Mark as processed IMMEDIATELY to prevent race conditions with duplicate notifications
+      // This must happen before any async operations
+      if (messageIdNum) {
+        processedMessageIds.current.add(messageIdNum);
+      }
+      processedNotifications.current.add(notificationKey);
+
+      console.log('[ChatList] Processing room_message notification:', { room_id: roomIdNum, sender, created_at, message_id: messageIdNum });
+
+      // Find the room to get its family
+      // Use a fresh rooms list in case it changed
+      const currentRooms = await chatService.getChatRooms();
+      const room = currentRooms.find(r => r.id === roomIdNum);
+      if (!room) {
+        console.log('[ChatList] Room not found in current rooms list, reloading rooms');
+        // Already marked as processed above, just reload rooms
+        await loadRooms();
+        return;
+      }
+
+      // Get user member ID - try from state first, then fetch if needed
+      let userMemberId = userMemberIds[room.family];
+      if (!userMemberId) {
+        console.log('[ChatList] No userMemberId in state, fetching...');
+        try {
+          const profile = await ProfileService.getProfile();
+          const members = await FamilyService.getFamilyMembers(room.family);
+          const userMember = members.find(m => m.user_email.toLowerCase() === profile.email.toLowerCase());
+          if (userMember) {
+            userMemberId = userMember.id;
+            // Update state for future use
+            setUserMemberIds(prev => ({ ...prev, [room.family]: userMember.id }));
+          }
+        } catch (err) {
+          console.error('[ChatList] Error fetching user member ID:', err);
+        }
+      }
+
+      if (!userMemberId) {
+        console.log('[ChatList] Still no userMemberId, will reload on next focus');
+        // Don't call loadRooms here - it causes dependency issues
+        // The member IDs will be loaded when the screen comes into focus
+        return;
+      }
+
+      console.log('[ChatList] User member ID for room:', { room_id: roomIdNum, family: room.family, userMemberId });
+
+      // Only increment if message is from another user (not the current user)
+      // Convert sender to number if it's a string
+      const senderNum = typeof sender === 'string' ? parseInt(sender, 10) : sender;
+      if (senderNum !== userMemberId) {
+        console.log('[ChatList] Message from another user, checking last_seen');
+        // Check if message is newer than last seen (user might be viewing the room)
+        const lastSeen = await getRoomLastSeen(roomIdNum);
+        const messageTime = new Date(created_at);
+
+        console.log('[ChatList] Last seen check:', { lastSeen, messageTime, isNewer: !lastSeen || messageTime > lastSeen });
+
+        // Only increment if message is newer than last seen (or never seen)
+        if (!lastSeen || messageTime > lastSeen) {
+          console.log('[ChatList] Incrementing badge for room:', roomIdNum);
+          // Already marked as processed above, just increment
+          setUnreadCounts(prev => {
+            const current = prev[roomIdNum] || 0;
+            const newCount = current + 1;
+            console.log('[ChatList] Badge count updated for room', roomIdNum, ':', current, '->', newCount);
+            return { ...prev, [roomIdNum]: newCount };
+          });
+        } else {
+          console.log('[ChatList] Message already seen, not incrementing');
+          // Already marked as processed above
+        }
+      } else {
+        console.log('[ChatList] Message from current user, not incrementing');
+        // Already marked as processed above
+      }
+    } else {
+      console.log('[ChatList] Unknown notification type:', notification.type);
+    }
+  }, [userMemberIds]); // Removed loadRooms dependency - we'll call it directly if needed
+
+  // Store handler in ref to prevent recreation
+  const handleNotificationRef = useRef(handleNotification);
+  useEffect(() => {
+    handleNotificationRef.current = handleNotification;
+  }, [handleNotification]);
+
+  // Create a stable handler wrapper that uses the ref
+  const stableHandlerRef = useRef((notification: any) => {
+    handleNotificationRef.current(notification);
+  });
+
+  // Connect to notification WebSocket on mount - only once
+  useEffect(() => {
+    const connectNotifications = async () => {
+      try {
+        const token = await tokenStorage.getAccessToken();
+        if (token) {
+          console.log('[ChatList] Connecting to notification WebSocket...');
+          // Use stable handler reference
+          websocketService.setNotificationHandler(stableHandlerRef.current);
+          await websocketService.connectToNotifications(token);
+          console.log('[ChatList] Notification WebSocket connected');
+        } else {
+          console.warn('[ChatList] No token available for notification WebSocket');
+        }
+      } catch (err) {
+        console.error('[ChatList] Error connecting to notification WebSocket:', err);
+      }
+    };
+
+    connectNotifications();
+
+    // Cleanup on unmount
+    return () => {
+      console.log('[ChatList] Removing notification handler');
+      websocketService.removeNotificationHandler(stableHandlerRef.current);
+      // Don't disconnect - other screens might be using it
+      // Only disconnect if no handlers remain
+      if (!websocketService.hasNotificationHandlers()) {
+        websocketService.disconnectFromNotifications();
+      }
+    };
+  }, []); // Empty dependencies - only run once on mount
+
+  // Load rooms once on mount
   useEffect(() => {
     loadRooms();
-  }, [loadRooms]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Refresh rooms and unread counts when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      let isMounted = true;
+
       // Refresh rooms list when screen comes into focus
-      loadRooms();
+      loadRooms().then(() => {
+        if (!isMounted) return;
 
-      // Also update unread counts if we already have rooms and member IDs
-      if (rooms.length > 0 && Object.keys(userMemberIds).length > 0) {
-        // Throttle to prevent rapid-fire calls
-        const timeoutId = setTimeout(() => {
-          const updateCounts = async () => {
-            const counts: { [roomId: number]: number } = {};
-            for (const room of rooms) {
-              const userMemberId = userMemberIds[room.family] || null;
-              if (room.last_message) {
-                const count = await getUnreadCountFromLastMessage(
-                  room.id,
-                  room.last_message.created_at,
-                  room.last_message.sender_id,
-                  userMemberId
-                );
-                counts[room.id] = count;
-              } else {
-                counts[room.id] = 0;
+        // Recalculate unread counts when screen comes into focus
+        // This will pick up updated last_seen timestamps from when user viewed rooms
+        // Use a longer delay to ensure we don't overwrite real-time updates that just happened
+        const timeoutId = setTimeout(async () => {
+          if (!isMounted) return;
+
+          // Wait for rooms to load
+          const currentRooms = await chatService.getChatRooms();
+          if (currentRooms.length === 0) {
+            return;
+          }
+
+          // Get user member IDs if needed (fetch fresh to avoid stale state)
+          const profile = await ProfileService.getProfile();
+          const familyIds = new Set(currentRooms.map(r => r.family));
+          const memberIdMap: { [familyId: number]: number } = {};
+
+          for (const familyId of familyIds) {
+            try {
+              const members = await FamilyService.getFamilyMembers(familyId);
+              const userMember = members.find(m => m.user_email.toLowerCase() === profile.email.toLowerCase());
+              if (userMember) {
+                memberIdMap[familyId] = userMember.id;
               }
+            } catch (err) {
+              console.error(`Error getting members for family ${familyId}:`, err);
             }
-            setUnreadCounts(counts);
-          };
-          updateCounts();
-        }, 300);
+          }
 
-        return () => clearTimeout(timeoutId);
-      }
-    }, [loadRooms, rooms.length, Object.keys(userMemberIds).join(',')]) // Include loadRooms to refresh on focus
+          if (!isMounted) return;
+
+          // Recalculate all counts based on current last_seen timestamps
+          // This will clear badges for rooms that were viewed
+          const counts: { [roomId: number]: number } = {};
+          for (const room of currentRooms) {
+            const userMemberId = memberIdMap[room.family] || null;
+            if (room.last_message) {
+              const calculatedCount = await getUnreadCountFromLastMessage(
+                room.id,
+                room.last_message.created_at,
+                room.last_message.sender_id,
+                userMemberId
+              );
+              counts[room.id] = calculatedCount;
+            } else {
+              counts[room.id] = 0;
+            }
+          }
+
+          if (isMounted) {
+            // Update counts - this will clear badges for rooms that were viewed
+            // This happens after a delay, so real-time updates have time to set their counts first
+            setUnreadCounts(counts);
+          }
+        }, 1000); // Longer delay to avoid overwriting real-time updates
+
+        return () => {
+          clearTimeout(timeoutId);
+        };
+      });
+
+      return () => {
+        isMounted = false;
+      };
+    }, []) // Empty dependencies - only run when screen comes into focus
   );
 
   const onRefresh = useCallback(() => {
@@ -295,6 +532,11 @@ export default function ChatScreen() {
         memberIdsToUse
       );
 
+      // Pre-derive key immediately in background (non-blocking)
+      encryptionManager.preDeriveRoomKey(newRoom.id, newRoom.family)
+        .catch(err => {
+          console.error('[Chat] Error pre-deriving key for new room:', err);
+        });
 
       // Refresh rooms list
       await loadRooms();

@@ -25,6 +25,7 @@ class WebSocketService {
   private notificationSocket: WebSocket | null = null;
   private roomMessageHandler: MessageHandler | null = null;
   private notificationHandler: MessageHandler | null = null;
+  private notificationHandlers: Set<MessageHandler> = new Set(); // Support multiple handlers
   private errorHandler: ErrorHandler | null = null;
   private connectionHandler: ConnectionHandler | null = null;
   private disconnectHandler: ConnectionHandler | null = null;
@@ -158,6 +159,7 @@ class WebSocketService {
       const ws = new WebSocket(url);
 
       ws.onopen = () => {
+        console.log('[WebSocketService] Notification WebSocket connected');
         this.notificationSocket = ws;
         resolve();
       };
@@ -165,15 +167,32 @@ class WebSocketService {
       ws.onmessage = (event) => {
         try {
           const data: WebSocketMessage = JSON.parse(event.data);
-          if (this.notificationHandler) {
+          console.log('[WebSocketService] Notification message received:', data);
+
+          // Call all registered handlers
+          if (this.notificationHandlers.size > 0) {
+            console.log(`[WebSocketService] Calling ${this.notificationHandlers.size} notification handler(s)`);
+            this.notificationHandlers.forEach(handler => {
+              try {
+                handler(data);
+              } catch (error) {
+                console.error('[WebSocketService] Error in notification handler:', error);
+              }
+            });
+          } else if (this.notificationHandler) {
+            // Fallback to single handler for backwards compatibility
+            console.log('[WebSocketService] Calling notification handler (single)');
             this.notificationHandler(data);
+          } else {
+            console.warn('[WebSocketService] No notification handler set');
           }
         } catch (error) {
-          console.error('Error parsing notification message:', error);
+          console.error('[WebSocketService] Error parsing notification message:', error);
         }
       };
 
       ws.onerror = (error) => {
+        console.error('[WebSocketService] Notification WebSocket error:', error);
         if (this.errorHandler) {
           this.errorHandler(error);
         }
@@ -181,6 +200,7 @@ class WebSocketService {
       };
 
       ws.onclose = () => {
+        console.log('[WebSocketService] Notification WebSocket closed');
         this.notificationSocket = null;
       };
     });
@@ -205,9 +225,35 @@ class WebSocketService {
 
   /**
    * Set message handler for notifications.
+   * Supports multiple handlers - each handler will be called for every notification.
    */
   setNotificationHandler(handler: MessageHandler | null): void {
-    this.notificationHandler = handler;
+    this.notificationHandler = handler; // Keep for backwards compatibility
+
+    if (handler) {
+      this.notificationHandlers.add(handler);
+    } else {
+      // If null, don't clear all handlers - let individual screens remove their own
+      // This allows multiple screens to have handlers
+    }
+  }
+
+  /**
+   * Remove a specific notification handler.
+   */
+  removeNotificationHandler(handler: MessageHandler): void {
+    this.notificationHandlers.delete(handler);
+    // Also clear single handler if it matches
+    if (this.notificationHandler === handler) {
+      this.notificationHandler = null;
+    }
+  }
+
+  /**
+   * Check if there are any notification handlers registered.
+   */
+  hasNotificationHandlers(): boolean {
+    return this.notificationHandlers.size > 0 || this.notificationHandler !== null;
   }
 
   /**
