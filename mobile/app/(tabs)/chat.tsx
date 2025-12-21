@@ -13,7 +13,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -22,6 +22,9 @@ import FamilyService, { Member } from '../../services/familyService';
 import ProfileService from '../../services/profileService';
 import { APIError } from '../../services/api';
 import GlobalNavBar from '../../components/GlobalNavBar';
+import { getUnreadCountFromLastMessage } from '../../utils/messageTracking';
+import MessageBadge from '../../components/MessageBadge';
+import ConfirmModal from '../../components/ConfirmModal';
 
 interface RoomGroup {
   familyId: number;
@@ -51,12 +54,26 @@ export default function ChatScreen() {
   const [selectedRoomDetails, setSelectedRoomDetails] = useState<ChatRoom | null>(null);
   const [roomDetailsMembers, setRoomDetailsMembers] = useState<Member[]>([]);
   const [loadingRoomDetails, setLoadingRoomDetails] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState<{ [roomId: number]: number }>({});
+  const [showDeleteRoomModal, setShowDeleteRoomModal] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState<ChatRoom | null>(null);
 
   const loadRooms = useCallback(async () => {
     try {
       setError('');
       const allRooms = await chatService.getChatRooms();
+      console.log('[Chat] Loaded rooms from API:', allRooms.length, 'rooms');
+      if (allRooms.length > 0) {
+        console.log('[Chat] Room details:', allRooms.map(r => ({
+          id: r.id,
+          family: r.family,
+          name: r.name || r.display_name || 'Unnamed',
+          members: r.members?.length || 0,
+          created_by: r.created_by
+        })));
+      }
       setRooms(allRooms);
+      // Don't calculate unread counts here - do it in a separate effect
     } catch (err) {
       const apiError = err as APIError;
       setError(apiError.message || 'Failed to load chat rooms');
@@ -65,11 +82,47 @@ export default function ChatScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, []); // Remove userMemberIds dependency to break circular dependency
 
   useEffect(() => {
     loadRooms();
   }, [loadRooms]);
+
+  // Refresh rooms and unread counts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh rooms list when screen comes into focus
+      loadRooms();
+
+      // Also update unread counts if we already have rooms and member IDs
+      if (rooms.length > 0 && Object.keys(userMemberIds).length > 0) {
+        // Throttle to prevent rapid-fire calls
+        const timeoutId = setTimeout(() => {
+          const updateCounts = async () => {
+            const counts: { [roomId: number]: number } = {};
+            for (const room of rooms) {
+              const userMemberId = userMemberIds[room.family] || null;
+              if (room.last_message) {
+                const count = await getUnreadCountFromLastMessage(
+                  room.id,
+                  room.last_message.created_at,
+                  room.last_message.sender_id,
+                  userMemberId
+                );
+                counts[room.id] = count;
+              } else {
+                counts[room.id] = 0;
+              }
+            }
+            setUnreadCounts(counts);
+          };
+          updateCounts();
+        }, 300);
+
+        return () => clearTimeout(timeoutId);
+      }
+    }, [loadRooms, rooms.length, Object.keys(userMemberIds).join(',')]) // Include loadRooms to refresh on focus
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -116,12 +169,12 @@ export default function ChatScreen() {
       // Load member IDs and roles for each family to check room ownership and permissions
       useEffect(() => {
         const loadUserMemberData = async () => {
-          if (!currentUserId) return;
+          if (!currentUserId || rooms.length === 0) return;
 
           const memberIdMap: { [familyId: number]: number } = {};
           const roleMap: { [familyId: number]: string } = {};
 
-          // Get current user's email for matching
+          // Get current user's email for matching (only once)
           let userEmail: string | null = null;
           try {
             const profile = await ProfileService.getProfile();
@@ -135,6 +188,13 @@ export default function ChatScreen() {
           const familyIds = new Set(rooms.map(room => room.family));
 
           for (const familyId of familyIds) {
+            // Skip if we already have this family's member ID
+            if (userMemberIds[familyId]) {
+              memberIdMap[familyId] = userMemberIds[familyId];
+              roleMap[familyId] = userRoles[familyId] || '';
+              continue;
+            }
+
             try {
               const members = await FamilyService.getFamilyMembers(familyId);
               // Match by email since profile.id is not the user ID
@@ -148,14 +208,15 @@ export default function ChatScreen() {
             }
           }
 
-          setUserMemberIds(memberIdMap);
-          setUserRoles(roleMap);
+          // Only update if we have new data
+          if (Object.keys(memberIdMap).length > 0) {
+            setUserMemberIds(prev => ({ ...prev, ...memberIdMap }));
+            setUserRoles(prev => ({ ...prev, ...roleMap }));
+          }
         };
 
-        if (rooms.length > 0 && currentUserId) {
-          loadUserMemberData();
-        }
-      }, [rooms, currentUserId]);
+        loadUserMemberData();
+      }, [rooms.length, currentUserId]); // Only depend on length, not the array itself
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -164,11 +225,9 @@ export default function ChatScreen() {
         return;
       }
 
-      console.log('[Chat] Fetching members for family:', selectedFamily.id);
       setLoadingMembers(true);
       try {
         const members = await FamilyService.getFamilyMembers(selectedFamily.id);
-        console.log('[Chat] Loaded members:', members.length, members.map(m => ({ id: m.id, email: m.user_email })));
         setFamilyMembers(members);
       } catch (err) {
         console.error('[Chat] Error fetching members:', err);
@@ -218,7 +277,6 @@ export default function ChatScreen() {
     setCreatingRoom(true);
     setError('');
 
-    console.log('Starting room creation...');
 
     try {
       // If no members selected but there are no other members, create room with empty member list
@@ -237,7 +295,6 @@ export default function ChatScreen() {
         memberIdsToUse
       );
 
-      console.log('Room created successfully:', newRoom);
 
       // Refresh rooms list
       await loadRooms();
@@ -288,21 +345,8 @@ export default function ChatScreen() {
   };
 
   const handleDeleteRoom = (room: ChatRoom) => {
-    Alert.alert(
-      'Delete Room',
-      `Are you sure you want to delete "${room.display_name || room.name || `Room ${room.id}`}"? This action cannot be undone.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => confirmDeleteRoom(room.id),
-        },
-      ]
-    );
+    setRoomToDelete(room);
+    setShowDeleteRoomModal(true);
   };
 
   const handleShowRoomDetails = async (room: ChatRoom) => {
@@ -323,12 +367,16 @@ export default function ChatScreen() {
     }
   };
 
-  const confirmDeleteRoom = async (roomId: number) => {
+  const confirmDeleteRoom = async () => {
+    if (!roomToDelete) return;
+
     try {
-      setDeletingRoomId(roomId);
-      await chatService.deleteChatRoom(roomId);
+      setDeletingRoomId(roomToDelete.id);
+      await chatService.deleteChatRoom(roomToDelete.id);
       // Refresh rooms list
       await loadRooms();
+      setShowDeleteRoomModal(false);
+      setRoomToDelete(null);
     } catch (err) {
       const apiError = err as APIError;
       Alert.alert('Error', apiError.message || 'Failed to delete room');
@@ -337,8 +385,13 @@ export default function ChatScreen() {
     }
   };
 
+  const cancelDeleteRoom = () => {
+    setShowDeleteRoomModal(false);
+    setRoomToDelete(null);
+  };
+
   const renderRoomItem = ({ item }: { item: ChatRoom }) => {
-    const unreadCount = 0; // TODO: Get from context
+    const unreadCount = unreadCounts[item.id] || 0;
     const lastMessage = item.last_message;
     const userMemberId = userMemberIds[item.family];
     const userRole = userRoles[item.family];
@@ -360,17 +413,7 @@ export default function ChatScreen() {
         const canDelete = isCreator || isAdminOrOwner;
     const isDeleting = deletingRoomId === item.id;
 
-    // Debug logging
-    if (__DEV__) {
-      console.log(`[ChatList] Room ${item.id} delete check:`, {
-        roomCreatedBy: item.created_by,
-        userMemberId,
-        userRole,
-        isCreator,
-        isAdminOrOwner,
-        canDelete,
-      });
-    }
+    // Debug logging removed to prevent console spam
 
     return (
       <View style={[styles.roomItemContainer, { backgroundColor: colors.card }]}>
@@ -389,11 +432,7 @@ export default function ChatScreen() {
               </Text>
             )}
           </View>
-          {unreadCount > 0 && (
-            <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.unreadText}>{unreadCount}</Text>
-            </View>
-          )}
+          <MessageBadge count={unreadCount} style={styles.roomBadge} />
         </TouchableOpacity>
         <View style={styles.roomActions}>
           <TouchableOpacity
@@ -443,19 +482,14 @@ export default function ChatScreen() {
   }
 
   const groupedRooms = groupRoomsByFamily(rooms);
+  console.log('[Chat] Rendering with', rooms.length, 'rooms in', groupedRooms.length, 'groups');
 
   // Filter out current user from member selection
   const availableMembers = familyMembers.filter(
     (member) => !currentUserId || member.user !== currentUserId
   );
 
-  console.log('[Chat] Available members for selection:', {
-    totalMembers: familyMembers.length,
-    currentUserId,
-    availableCount: availableMembers.length,
-    selectedCount: selectedMemberIds.length,
-    familyMembers: familyMembers.map(m => ({ id: m.id, userId: m.user, email: m.user_email })),
-  });
+  // Removed console.log to prevent infinite loop
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -777,6 +811,17 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmModal
+        visible={showDeleteRoomModal}
+        title="Delete Room"
+        message={`Are you sure you want to delete "${roomToDelete?.display_name || roomToDelete?.name || `Room ${roomToDelete?.id}`}"? This action cannot be undone.`}
+        onClose={cancelDeleteRoom}
+        onConfirm={confirmDeleteRoom}
+        confirmText="Delete"
+        cancelText="Cancel"
+        type="danger"
+      />
     </View>
   );
 }
@@ -879,6 +924,11 @@ const styles = StyleSheet.create({
   },
   roomContent: {
     flex: 1,
+  },
+  roomBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
   },
   roomName: {
     fontSize: 16,

@@ -9,6 +9,10 @@ import { useFamily } from '../../contexts/FamilyContext';
 import AlertModal from '../../components/AlertModal';
 import EmailVerificationBanner from '../../components/EmailVerificationBanner';
 import ProfileService from '../../services/profileService';
+import chatService from '../../services/chatService';
+import FamilyService from '../../services/familyService';
+import { getTotalUnreadCount } from '../../utils/messageTracking';
+import MessageBadge from '../../components/MessageBadge';
 
 interface FeatureCard {
   id: string;
@@ -35,6 +39,8 @@ export default function HomeScreen() {
   const [showVerifiedModal, setShowVerifiedModal] = useState(false);
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState<number>(0);
+  const { selectedFamily, families } = useFamily();
 
   const cards: FeatureCard[] = [
     {
@@ -95,9 +101,45 @@ export default function HomeScreen() {
     },
   ];
 
+  const loadChatUnreadCount = useCallback(async () => {
+    try {
+      const rooms = await chatService.getChatRooms();
+
+      if (rooms.length === 0) {
+        setChatUnreadCount(0);
+        return;
+      }
+
+      // Get user member IDs for each family (cache profile to avoid repeated calls)
+      const profile = await ProfileService.getProfile();
+      const userMemberIds: { [familyId: number]: number } = {};
+      const familyIds = new Set(rooms.map(r => r.family));
+
+      for (const familyId of familyIds) {
+        try {
+          const members = await FamilyService.getFamilyMembers(familyId);
+          const userMember = members.find(m => m.user_email.toLowerCase() === profile.email.toLowerCase());
+          if (userMember) {
+            userMemberIds[familyId] = userMember.id;
+          }
+        } catch (err) {
+          console.error(`Error getting members for family ${familyId}:`, err);
+        }
+      }
+
+      const totalUnread = await getTotalUnreadCount(rooms, userMemberIds);
+      setChatUnreadCount(totalUnread);
+    } catch (err) {
+      console.error('Error loading chat unread count:', err);
+      setChatUnreadCount(0);
+    }
+  }, []);
+
   useEffect(() => {
     loadUserData();
-  }, []);
+    // Load chat unread count immediately (don't wait for user data)
+    loadChatUnreadCount();
+  }, [loadChatUnreadCount]);
 
   // Refresh verification status when screen comes into focus
   useFocusEffect(
@@ -106,9 +148,13 @@ export default function HomeScreen() {
       if (userEmail && emailVerified === false) {
         loadUserData();
       }
-      // Don't refresh families here - let FamilyContext handle it on mount
-      // This prevents infinite loops
-    }, [userEmail, emailVerified])
+      // Refresh chat unread count when screen comes into focus (throttled to prevent loops)
+      const timeoutId = setTimeout(() => {
+        loadChatUnreadCount();
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
+    }, [userEmail, emailVerified, loadChatUnreadCount])
   );
 
   useEffect(() => {
@@ -172,6 +218,8 @@ export default function HomeScreen() {
       await refreshFamilies();
       // Refresh user data
       await loadUserData();
+      // Refresh chat unread count
+      await loadChatUnreadCount();
     } catch (error) {
       console.error('Error refreshing:', error);
     } finally {
@@ -287,8 +335,11 @@ export default function HomeScreen() {
             onPress={() => handleCardPress(card.id)}
             activeOpacity={0.7}
           >
-            <View style={[styles.cardIcon, { backgroundColor: `${card.color}20` }]}>
+            <View style={[styles.cardIcon, { backgroundColor: `${card.color}20` }, { position: 'relative' }]}>
               <Text style={styles.iconEmoji}>{card.icon}</Text>
+              {card.id === 'chat' && (
+                <MessageBadge count={chatUnreadCount} style={styles.chatCardBadge} />
+              )}
             </View>
             <View style={styles.cardContent}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>{card.title}</Text>
@@ -401,6 +452,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    position: 'relative',
+  },
+  chatCardBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
   },
   iconEmoji: {
     fontSize: 24,
