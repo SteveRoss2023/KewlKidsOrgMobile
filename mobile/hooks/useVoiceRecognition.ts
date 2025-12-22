@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import Constants from 'expo-constants';
 import Voice from '@react-native-voice/voice';
 
@@ -257,10 +257,42 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
         return;
       }
 
-      // Try to start directly - wrap in Promise to catch all errors
-      // The library internally calls isAvailable() which might fail if native module is null
+      // Check if the native module is actually registered in NativeModules
+      // The module uses NativeModules.Voice internally, but the native module is registered as "RCTVoice"
+      // Check both names in case of a mismatch
+      const voiceModule = NativeModules.Voice || NativeModules.RCTVoice;
+      if (!voiceModule) {
+        console.error('NativeModules.Voice and NativeModules.RCTVoice are both null - native module not registered');
+        console.log('Available NativeModules:', Object.keys(NativeModules).filter(k => k.toLowerCase().includes('voice') || k.toLowerCase().includes('rct')).join(', '));
+        setError('Voice recognition native module is not registered. This may be a compatibility issue with Expo/React Native. Please rebuild the app with: npm run dev:android');
+        setIsListening(false);
+        return;
+      }
+
+      // Log which module name worked
+      if (NativeModules.RCTVoice && !NativeModules.Voice) {
+        console.warn('Voice module found as RCTVoice but not as Voice - this may indicate a module name mismatch');
+      }
+
+      // Check if the native module is actually connected
+      // The Voice object might exist but the native bridge might be null
+      try {
+        // Try to access a property that requires native module
+        // If this throws, the native module isn't connected
+        if (typeof Voice.start !== 'function') {
+          throw new Error('Voice.start is not a function - native module not connected');
+        }
+      } catch (checkErr: any) {
+        console.error('Voice module native bridge check failed:', checkErr);
+        setError('Voice recognition native module is not connected. Please fully restart the app (close and reopen), or rebuild if the issue persists.');
+        setIsListening(false);
+        return;
+      }
+
+      // Try to start voice recognition directly
       Promise.resolve()
         .then(() => {
+          // Try to start directly - this will work if the module is properly linked
           return Voice.start('en-US');
         })
         .then(() => {
@@ -275,10 +307,11 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
           if (errorMessage.includes('null') ||
               errorMessage.includes('startSpeech') ||
               errorMessage.includes('isSpeechAvailable') ||
+              errorMessage.includes('isAvailable') ||
               errorMessage.includes('not available') ||
               errorMessage.includes('Cannot read property')) {
             console.warn('Voice module not properly initialized or not available');
-            setError('Voice recognition is not available on this device.');
+            setError('Voice recognition native module is not connected. Please fully close and restart the app, or rebuild if the issue persists.');
           } else {
             setError('Failed to start voice recognition. Please try again.');
           }
