@@ -13,30 +13,8 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-// Import draggable flatlist conditionally to avoid worklets issues
-// In Expo Go, these modules cause worklets version mismatch errors
-// In development builds (eas build or expo run), they should work properly
-let DraggableFlatList: any = null;
-let ScaleDecorator: any = null;
-let RenderItemParams: any = null;
-let GestureHandlerRootView: any = null;
-
-// Try to load these modules on mobile (not web, since we use HTML5 drag-and-drop there)
-// If they fail to load (e.g., in Expo Go), we'll gracefully fall back to move buttons
-if (Platform.OS !== 'web') {
-  try {
-    const DraggableFlatListModule = require('react-native-draggable-flatlist');
-    DraggableFlatList = DraggableFlatListModule.default;
-    ScaleDecorator = DraggableFlatListModule.ScaleDecorator;
-    RenderItemParams = DraggableFlatListModule.RenderItemParams;
-
-    const GestureHandlerModule = require('react-native-gesture-handler');
-    GestureHandlerRootView = GestureHandlerModule.GestureHandlerRootView;
-  } catch (error) {
-    // Modules not available (likely Expo Go) - will use move button fallback
-    // This is expected and handled gracefully by the UI
-  }
-}
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { DraxProvider, DraxView } from 'react-native-drax';
 import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useFamily } from '../../../contexts/FamilyContext';
@@ -504,12 +482,12 @@ export default function ListDetailScreen() {
     }
 
     // Filter out editing item when using the main edit form (not inline in draggable list)
-    if (editingItem && (Platform.OS === 'web' || !isTodoList || !DraggableFlatList || !GestureHandlerRootView)) {
+    if (editingItem && (Platform.OS === 'web' || !isTodoList)) {
       items = items.filter((item) => item.id !== editingItem.id);
     }
 
     return items;
-  }, [listItems, selectedRecipeFilter, editingItem, isTodoList, DraggableFlatList, GestureHandlerRootView, Platform.OS]);
+  }, [listItems, selectedRecipeFilter, editingItem, isTodoList, Platform.OS]);
 
   // Group items by category
   const groupedItems = useMemo(() => {
@@ -734,17 +712,33 @@ export default function ListDetailScreen() {
     }
   };
 
-  const handleDragEnd = async ({ data }: { data: ListItem[] }) => {
+  const handleDragEnd = async (draggedId: string, droppedId: string) => {
     if (!isTodoList) return;
 
+    const sortedItems = [...filteredItems].sort((a, b) => {
+      if (a.order !== b.order) {
+        return (a.order || 0) - (b.order || 0);
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    const draggedIndex = sortedItems.findIndex((item) => item.id.toString() === draggedId);
+    const droppedIndex = sortedItems.findIndex((item) => item.id.toString() === droppedId);
+
+    if (draggedIndex === -1 || droppedIndex === -1) return;
+
+    // Reorder items
+    const newItems = [...sortedItems];
+    const [movedItem] = newItems.splice(draggedIndex, 1);
+    newItems.splice(droppedIndex, 0, movedItem);
+
     // Update order values
-    const updatePromises = data.map((item, index) =>
+    const updatePromises = newItems.map((item, index) =>
       ListService.updateListItem(item.id, { order: index })
     );
 
     try {
       await Promise.all(updatePromises);
-      setListItems(data);
       await fetchListItems();
     } catch (err) {
       console.error('Error reordering items:', err);
@@ -913,7 +907,7 @@ export default function ListDetailScreen() {
     }
   };
 
-  const renderItem = ({ item, drag, isActive }: any) => {
+  const renderItem = ({ item, index }: { item: ListItem; index: number }) => {
     // On web, use modal instead of inline editing
     if (editingItem && editingItem.id === item.id && Platform.OS !== 'web') {
       return (
@@ -932,7 +926,7 @@ export default function ListDetailScreen() {
       );
     }
 
-    const itemComponent = (
+    return (
       <ListItemComponent
         item={item}
         onToggleComplete={() => toggleItemComplete(item)}
@@ -943,35 +937,14 @@ export default function ListDetailScreen() {
         onMove={() => handleOpenMoveModal(item)}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
-        onDrag={drag ? () => {
-          drag();
-        } : undefined}
-        onMoveUp={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+        onMoveUp={Platform.OS !== 'web' && isTodoList ? () => {
           handleMoveItem(item.id, 'up');
         } : undefined}
-        onMoveDown={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+        onMoveDown={Platform.OS !== 'web' && isTodoList ? () => {
           handleMoveItem(item.id, 'down');
         } : undefined}
       />
     );
-
-    if (isTodoList && ScaleDecorator && drag && Platform.OS !== 'web') {
-      return (
-        <ScaleDecorator>
-          <TouchableOpacity
-            onLongPress={() => {
-              drag();
-            }}
-            disabled={isActive}
-            activeOpacity={0.7}
-            style={isActive ? { opacity: 0.5 } : undefined}
-            delayLongPress={300} // Reduce delay to 300ms for better UX
-          >
-            {itemComponent}
-          </TouchableOpacity>
-        </ScaleDecorator>
-      );
-    }
 
     return itemComponent;
   };
@@ -1140,7 +1113,7 @@ export default function ListDetailScreen() {
         </ScrollView>
       )}
 
-      {editingItem && (Platform.OS === 'web' || !isTodoList || !DraggableFlatList || !GestureHandlerRootView) && (
+      {editingItem && (Platform.OS === 'web' || !isTodoList) && (
         <Modal
           visible={true}
           animationType="fade"
@@ -1278,24 +1251,60 @@ export default function ListDetailScreen() {
             );
           })}
         </ScrollView>
-      ) : isTodoList && DraggableFlatList && GestureHandlerRootView && Platform.OS !== 'web' ? (
+      ) : isTodoList && Platform.OS !== 'web' ? (
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <DraggableFlatList
-            data={[...filteredItems].sort((a, b) => {
-              if (a.order !== b.order) {
-                return (a.order || 0) - (b.order || 0);
-              }
-              return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-            })}
-            onDragEnd={(params) => {
-              handleDragEnd(params);
-            }}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderItem}
-            contentContainerStyle={styles.itemsContainer}
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-          />
+          <DraxProvider>
+            <FlatList
+              data={[...filteredItems].sort((a, b) => {
+                if (a.order !== b.order) {
+                  return (a.order || 0) - (b.order || 0);
+                }
+                return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+              })}
+              keyExtractor={(item) => item.id.toString()}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              renderItem={({ item, index }) => {
+                const sortedItems = [...filteredItems].sort((a, b) => {
+                  if (a.order !== b.order) {
+                    return (a.order || 0) - (b.order || 0);
+                  }
+                  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                });
+                const nextItem = sortedItems[index + 1];
+                const dropId = nextItem ? nextItem.id.toString() : null;
+
+                return (
+                  <DraxView
+                    draggable
+                    payload={item.id.toString()}
+                    onReceiveDragDrop={({ dragged }) => {
+                      const draggedId = dragged.payload as string;
+                      if (dropId) {
+                        handleDragEnd(draggedId, dropId);
+                      } else {
+                        // Drop at end
+                        const lastItem = sortedItems[sortedItems.length - 1];
+                        if (lastItem) {
+                          handleDragEnd(draggedId, lastItem.id.toString());
+                        }
+                      }
+                    }}
+                  >
+                    <DraxView
+                      onReceiveDragDrop={({ dragged }) => {
+                        const draggedId = dragged.payload as string;
+                        handleDragEnd(draggedId, item.id.toString());
+                      }}
+                    >
+                      {renderItem({ item, index })}
+                    </DraxView>
+                  </DraxView>
+                );
+              }}
+              contentContainerStyle={styles.itemsContainer}
+            />
+          </DraxProvider>
         </GestureHandlerRootView>
       ) : (
         <FlatList
@@ -1343,10 +1352,10 @@ export default function ListDetailScreen() {
                 onDelete={() => handleDeleteItem(item)}
                 isGroceryList={isGroceryList}
                 isTodoList={isTodoList}
-                onMoveUp={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+                onMoveUp={Platform.OS !== 'web' && isTodoList ? () => {
                   handleMoveItem(item.id, 'up');
                 } : undefined}
-                onMoveDown={!DraggableFlatList && Platform.OS !== 'web' && isTodoList ? () => {
+                onMoveDown={Platform.OS !== 'web' && isTodoList ? () => {
                   handleMoveItem(item.id, 'down');
                 } : undefined}
               />

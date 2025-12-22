@@ -12,30 +12,8 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-// Import draggable flatlist conditionally to avoid worklets issues
-// In Expo Go, these modules cause worklets version mismatch errors
-// In development builds (eas build or expo run), they should work properly
-let DraggableFlatList: any = null;
-let ScaleDecorator: any = null;
-let RenderItemParams: any = null;
-let GestureHandlerRootView: any = null;
-
-// Try to load these modules on mobile (not web, since we use HTML5 drag-and-drop there)
-// If they fail to load (e.g., in Expo Go), we'll gracefully fall back to move buttons
-if (Platform.OS !== 'web') {
-  try {
-    const DraggableFlatListModule = require('react-native-draggable-flatlist');
-    DraggableFlatList = DraggableFlatListModule.default;
-    ScaleDecorator = DraggableFlatListModule.ScaleDecorator;
-    RenderItemParams = DraggableFlatListModule.RenderItemParams;
-    
-    const GestureHandlerModule = require('react-native-gesture-handler');
-    GestureHandlerRootView = GestureHandlerModule.GestureHandlerRootView;
-  } catch (error) {
-    // Modules not available (likely Expo Go) - will use move button fallback
-    // This is expected and handled gracefully by the UI
-  }
-}
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { DraxProvider, DraxView } from 'react-native-drax';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -283,9 +261,19 @@ export default function GroceryCategoriesScreen() {
   };
 
   // Mobile drag and drop handler
-  const handleDragEnd = async ({ data }: { data: GroceryCategory[] }) => {
+  const handleDragEnd = async (draggedId: string, droppedId: string) => {
+    const draggedIndex = categories.findIndex((c) => c.id.toString() === draggedId);
+    const droppedIndex = categories.findIndex((c) => c.id.toString() === droppedId);
+
+    if (draggedIndex === -1 || droppedIndex === -1) return;
+
+    // Reorder categories
+    const newCategories = [...categories];
+    const [movedCategory] = newCategories.splice(draggedIndex, 1);
+    newCategories.splice(droppedIndex, 0, movedCategory);
+
     // Update order values based on new positions (starting from 1)
-    const updatedCategories = data.map((cat, index) => ({
+    const updatedCategories = newCategories.map((cat, index) => ({
       ...cat,
       order: index + 1,
     }));
@@ -603,89 +591,98 @@ export default function GroceryCategoriesScreen() {
                   />
                 ))}
               </ScrollView>
-            ) : DraggableFlatList && GestureHandlerRootView ? (
-              // Mobile: Use DraggableFlatList for drag and drop
+            ) : Platform.OS !== 'web' ? (
+              // Mobile: Use react-native-drax for drag and drop
               <GestureHandlerRootView style={{ flex: 1 }}>
-                <DraggableFlatList
-                  data={categories}
-                  onDragEnd={handleDragEnd}
-                  keyExtractor={(item) => item.id.toString()}
-                  renderItem={({ item, drag, isActive }: any) => {
-                    const index = categories.findIndex((c) => c.id === item.id);
-                    const categoryComponent = (
-                      <View
-                        style={[
-                          styles.categoryItem,
-                          { backgroundColor: colors.surface, borderColor: colors.border },
-                          isActive && { opacity: 0.5 },
-                        ]}
-                      >
-                        <View style={styles.dragHandleContainer}>
-                          <View style={styles.dragHandle}>
-                            <FontAwesome name="bars" size={14} color={colors.textSecondary} />
+                <DraxProvider>
+                  <ScrollView>
+                    {categories.map((category, index) => {
+                      const nextCategory = categories[index + 1];
+                      const dropId = nextCategory ? nextCategory.id.toString() : null;
+
+                      const categoryComponent = (
+                        <View
+                          style={[
+                            styles.categoryItem,
+                            { backgroundColor: colors.surface, borderColor: colors.border },
+                          ]}
+                        >
+                          <View style={styles.dragHandleContainer}>
+                            <View style={styles.dragHandle}>
+                              <FontAwesome name="bars" size={14} color={colors.textSecondary} />
+                            </View>
                           </View>
-                        </View>
-                        <View style={styles.categoryItemInfo}>
-                          <View style={styles.categoryNameRow}>
-                            {item.icon && (() => {
-                              const emoji = getIconDisplay(item.icon);
-                              if (!emoji) return null;
-                              
-                              return <Text style={styles.categoryIconEmoji}>{emoji}</Text>;
-                            })()}
-                            <Text style={[styles.categoryName, { color: colors.text }]}>{item.name}</Text>
-                            {item.is_default && (
-                              <FontAwesome name="check-circle" size={14} color="#10b981" style={styles.defaultCheckmark} />
+                          <View style={styles.categoryItemInfo}>
+                            <View style={styles.categoryNameRow}>
+                              {category.icon && (() => {
+                                const emoji = getIconDisplay(category.icon);
+                                if (!emoji) return null;
+
+                                return <Text style={styles.categoryIconEmoji}>{emoji}</Text>;
+                              })()}
+                              <Text style={[styles.categoryName, { color: colors.text }]}>{category.name}</Text>
+                              {category.is_default && (
+                                <FontAwesome name="check-circle" size={14} color="#10b981" style={styles.defaultCheckmark} />
+                              )}
+                            </View>
+                            {category.description && (
+                              <Text style={[styles.categoryDescription, { color: colors.textSecondary }]}>
+                                {category.description}
+                              </Text>
                             )}
                           </View>
-                          {item.description && (
-                            <Text style={[styles.categoryDescription, { color: colors.textSecondary }]}>
-                              {item.description}
-                            </Text>
-                          )}
-                        </View>
-                        <View style={styles.categoryItemActions}>
-                          <TouchableOpacity
-                            onPress={() => handleEditCategory(item)}
-                            style={[styles.editButton, { borderColor: colors.border }]}
-                            disabled={reordering}
-                          >
-                            <FontAwesome name="edit" size={16} color={colors.text} />
-                          </TouchableOpacity>
-                          {!item.is_default && (
+                          <View style={styles.categoryItemActions}>
                             <TouchableOpacity
-                              onPress={() => setDeletingCategoryId(item.id)}
-                              style={[styles.deleteButton, { borderColor: colors.border }]}
+                              onPress={() => handleEditCategory(category)}
+                              style={[styles.editButton, { borderColor: colors.border }]}
                               disabled={reordering}
                             >
-                              <FontAwesome name="trash" size={16} color={colors.error} />
+                              <FontAwesome name="edit" size={16} color={colors.text} />
                             </TouchableOpacity>
-                          )}
+                            {!category.is_default && (
+                              <TouchableOpacity
+                                onPress={() => setDeletingCategoryId(category.id)}
+                                style={[styles.deleteButton, { borderColor: colors.border }]}
+                                disabled={reordering}
+                              >
+                                <FontAwesome name="trash" size={16} color={colors.error} />
+                              </TouchableOpacity>
+                            )}
+                          </View>
                         </View>
-                      </View>
-                    );
+                      );
 
-                    if (ScaleDecorator && drag) {
                       return (
-                        <ScaleDecorator>
-                          <TouchableOpacity
-                            onLongPress={() => {
-                              drag();
+                        <DraxView
+                          key={category.id}
+                          draggable
+                          payload={category.id.toString()}
+                          onReceiveDragDrop={({ dragged }) => {
+                            const draggedId = dragged.payload as string;
+                            if (dropId) {
+                              handleDragEnd(draggedId, dropId);
+                            } else {
+                              // Drop at end
+                              const lastCategory = categories[categories.length - 1];
+                              if (lastCategory) {
+                                handleDragEnd(draggedId, lastCategory.id.toString());
+                              }
+                            }
+                          }}
+                        >
+                          <DraxView
+                            onReceiveDragDrop={({ dragged }) => {
+                              const draggedId = dragged.payload as string;
+                              handleDragEnd(draggedId, category.id.toString());
                             }}
-                            disabled={isActive}
-                            activeOpacity={0.7}
-                            style={isActive ? { opacity: 0.5 } : undefined}
-                            delayLongPress={300}
                           >
                             {categoryComponent}
-                          </TouchableOpacity>
-                        </ScaleDecorator>
+                          </DraxView>
+                        </DraxView>
                       );
-                    }
-
-                    return categoryComponent;
-                  }}
-                />
+                    })}
+                  </ScrollView>
+                </DraxProvider>
               </GestureHandlerRootView>
             ) : (
               // Mobile fallback: Use ScrollView with up/down arrows if DraggableFlatList is not available
@@ -737,7 +734,7 @@ export default function GroceryCategoriesScreen() {
                         {category.icon && (() => {
                           const emoji = getIconDisplay(category.icon);
                           if (!emoji) return null;
-                          
+
                           return <Text style={styles.categoryIconEmoji}>{emoji}</Text>;
                         })()}
                         <Text style={[styles.categoryName, { color: colors.text }]}>{category.name}</Text>
