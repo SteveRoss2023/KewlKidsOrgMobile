@@ -83,7 +83,8 @@ This forces Cursor to use HTTP/1.1, which is more compatible with networks that 
 ### Fix #4: Move Project Out of OneDrive (If Possible)
 
 If you can, try moving your project temporarily to a local folder (not synced):
-- `C:\Users\steve_80f2z1j\Documents\Development\Projects\KewlKidsOrganizerMobile`
+- **Current location**: `C:\dev\kewlkids` (project has been moved here to resolve path length issues)
+- **Previous location**: `C:\Users\steve_80f2z1j\Development\Cursor Projects\KewlKidsOrganizerMobile`
 
 Then test if connection issues persist. If they stop, OneDrive sync is interfering.
 

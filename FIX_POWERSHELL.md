@@ -35,7 +35,7 @@ del %USERPROFILE%\Documents\WindowsPowerShell\profile.ps1
 
 Then run the setup script again:
 ```cmd
-cd "C:\Users\steve_80f2z1j\OneDrive\Documents\Development\Projects\Cursor Projects\KewlKidsOrganizerMobile"
+cd "C:\dev\kewlkids"
 powershell -ExecutionPolicy Bypass -File setup_powershell_profile.ps1
 ```
 
