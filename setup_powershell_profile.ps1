@@ -34,7 +34,7 @@ Activate-BackendVenv
 `$originalPrompt = Get-Command prompt -ErrorAction SilentlyContinue
 function global:prompt {
     Activate-BackendVenv
-    
+
     # Call the original prompt
     if (`$originalPrompt) {
         & `$originalPrompt
