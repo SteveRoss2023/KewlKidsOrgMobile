@@ -1074,6 +1074,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                 )}
               </View>
               <View style={styles.sortContainer}>
+                <Text style={[styles.sortLabel, { color: colors.text }]}>Sort</Text>
                 {Platform.OS === 'web' ? (
                   <select
                     value={sortBy}
@@ -1081,7 +1082,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                       setSortBy(e.target.value as 'name' | 'date' | 'size');
                     }}
                     style={{
-                      flex: 1,
+                      width: 150,
                       height: 44,
                       padding: '8px 12px',
                       borderRadius: 8,
@@ -1478,6 +1479,11 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     requiresLogout: false,
   });
   const [reconnecting, setReconnecting] = useState(false);
+  // Sort state
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -1550,6 +1556,64 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     // Return folders first, then files
     return [...folders, ...files];
   };
+
+  // Sort files
+  const filterAndSortFiles = (filesList: CloudFile[]): CloudFile[] => {
+    // Apply sorting
+    const folders: CloudFile[] = [];
+    const files: CloudFile[] = [];
+
+    filesList.forEach((file) => {
+      const mimeType = file.mimeType || file.file?.mimeType;
+      const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
+      if (isFolder) {
+        folders.push(file);
+      } else {
+        files.push(file);
+      }
+    });
+
+    // Sort folders
+    folders.sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      } else if (sortBy === 'date') {
+        const dateA = new Date(a.modifiedTime || a.createdTime || 0).getTime();
+        const dateB = new Date(b.modifiedTime || b.createdTime || 0).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      } else if (sortBy === 'size') {
+        const sizeA = a.size || 0;
+        const sizeB = b.size || 0;
+        return sortOrder === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+      }
+      return 0;
+    });
+
+    // Sort files
+    files.sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      } else if (sortBy === 'date') {
+        const dateA = new Date(a.modifiedTime || a.createdTime || 0).getTime();
+        const dateB = new Date(b.modifiedTime || b.createdTime || 0).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      } else if (sortBy === 'size') {
+        const sizeA = a.size || 0;
+        const sizeB = b.size || 0;
+        return sortOrder === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+      }
+      return 0;
+    });
+
+    return [...folders, ...files];
+  };
+
+  // Note: Recursive loading functions are no longer used
+  // Server-side search is now used instead for better performance with large file collections
 
   const loadFiles = useCallback(
     async (skipLoading = false) => {
@@ -1753,6 +1817,25 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  // Get files to display
+  const getDisplayFiles = (): CloudFile[] => {
+    return files;
+  };
+
+  // Calculate summary statistics
+  const totalFolders = files.filter((f) => {
+    const mimeType = f.mimeType || f.file?.mimeType;
+    return f.folder || mimeType === 'application/vnd.google-apps.folder';
+  }).length;
+  const totalFiles = files.length - totalFolders;
+  const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
+
+  const navigateToPath = (index: number) => {
+    handleBreadcrumbClick(index);
+  };
+
+  const displayFiles = filterAndSortFiles(getDisplayFiles());
+
   if (loading && !refreshing) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -1764,44 +1847,204 @@ function OneDriveBrowser({ colors }: { colors: any }) {
 
   return (
     <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
-      {error && (
-        <View style={[styles.errorContainer, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
-          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+      {/* Title with Breadcrumb and Actions */}
+      <View style={[styles.titleBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.titleRow}>
+          <Text style={[styles.documentsTitle, { color: colors.text }]}>OneDrive</Text>
+          <View style={styles.titleActions}>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                setShowFolderForm(true);
+                setFolderName('');
+              }}
+              disabled={uploading || loading}
+            >
+              <FontAwesome name="folder-open" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowUploadForm(true)}
+              disabled={uploading || loading}
+            >
+              <FontAwesome name="upload" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowSummary(!showSummary)}
+            >
+              <FontAwesome name="info-circle" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+        {/* Always show breadcrumb */}
+        <View style={[styles.breadcrumbInline, { borderTopColor: colors.border }]}>
+          {folderPath.length === 0 ? (
+            <Text style={[styles.breadcrumbItem, { color: colors.text }]}>Home</Text>
+          ) : (
+            <>
+              <TouchableOpacity onPress={() => navigateToPath(-1)}>
+                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+              </TouchableOpacity>
+              {folderPath.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                  <TouchableOpacity onPress={() => navigateToPath(index)}>
+                    <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              ))}
+            </>
+          )}
+        </View>
+      </View>
+
+      {/* Summary Statistics - Shown when info button is clicked */}
+      {!loading && showSummary && (
+        <View style={[styles.summary, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="folder" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Folders</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalFolders}</Text>
+            </View>
+          </View>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="file" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Files</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalFiles}</Text>
+            </View>
+          </View>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="database" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Size</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>
+                {DocumentService.formatFileSize(totalSize)}
+              </Text>
+            </View>
+          </View>
         </View>
       )}
 
-      {/* Header with actions */}
-      <View style={[styles.browserHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={styles.breadcrumb}>
-          <TouchableOpacity onPress={() => handleBreadcrumbClick(-1)}>
-            <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+      {/* Messages */}
+      {error && (
+        <View style={[styles.message, styles.errorMessage, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
+          <Text style={[styles.messageText, { color: colors.error }]}>{error}</Text>
+          <TouchableOpacity onPress={() => setError('')}>
+            <FontAwesome name="times" size={16} color={colors.error} />
           </TouchableOpacity>
-          {folderPath.map((folder, index) => (
-            <View key={folder.id} style={styles.breadcrumbRow}>
-              <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-              <TouchableOpacity onPress={() => handleBreadcrumbClick(index)}>
-                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
         </View>
+      )}
 
-        <View style={styles.actionButtons}>
+      {/* Sort Controls */}
+      <View style={[styles.searchSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.sortContainer}>
+          <Text style={[styles.sortLabel, { color: colors.text }]}>Sort</Text>
+          {Platform.OS === 'web' ? (
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value as 'name' | 'date' | 'size');
+              }}
+              style={{
+                width: 150,
+                height: 44,
+                padding: '8px 12px',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.background,
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: '500',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="name">Name</option>
+              <option value="date">Date</option>
+              <option value="size">Size</option>
+            </select>
+          ) : Platform.OS === 'android' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
+                onPress={() => setShowSortModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sortDropdownText, { color: colors.text }]}>
+                  {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <Modal
+                visible={showSortModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowSortModal(false)}
+              >
+                <TouchableOpacity
+                  style={[styles.sortModalOverlay, { paddingBottom: 150 }]}
+                  activeOpacity={1}
+                  onPress={() => setShowSortModal(false)}
+                >
+                  <View style={[styles.sortModalContent, { backgroundColor: colors.surface, marginBottom: 20, maxHeight: '50%', paddingBottom: 20 }]}>
+                    <View style={styles.sortModalHeader}>
+                      <Text style={[styles.sortModalTitle, { color: colors.text }]}>Sort By</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowSortModal(false)}
+                        style={styles.sortModalCloseButton}
+                      >
+                        <FontAwesome name="times" size={20} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                    {['name', 'date', 'size'].map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.sortModalOption,
+                          sortBy === option && { backgroundColor: colors.primary + '20' },
+                        ]}
+                        onPress={() => {
+                          setSortBy(option as 'name' | 'date' | 'size');
+                          setShowSortModal(false);
+                        }}
+                      >
+                        <Text style={[styles.sortModalOptionText, { color: colors.text }]}>
+                          {option.charAt(0).toUpperCase() + option.slice(1)}
+                        </Text>
+                        {sortBy === option && (
+                          <FontAwesome name="check" size={16} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </TouchableOpacity>
+              </Modal>
+            </>
+          ) : (
+            <Picker
+              selectedValue={sortBy}
+              onValueChange={(value) => setSortBy(value as 'name' | 'date' | 'size')}
+              style={[styles.sortPicker, { backgroundColor: colors.background, color: colors.text }]}
+              itemStyle={{ color: colors.text, height: 120 }}
+            >
+              <Picker.Item label="Name" value="name" />
+              <Picker.Item label="Date" value="date" />
+              <Picker.Item label="Size" value="size" />
+            </Picker>
+          )}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primary }]}
-            onPress={() => setShowUploadForm(true)}
-            disabled={uploading}
+            style={[styles.sortOrderButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+            onPress={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
           >
-            <FontAwesome name="upload" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>Upload</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primary }]}
-            onPress={() => setShowFolderForm(true)}
-            disabled={loading}
-          >
-            <FontAwesome name="folder" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>New Folder</Text>
+            <FontAwesome
+              name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
+              size={14}
+              color={colors.text}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -1810,13 +2053,15 @@ function OneDriveBrowser({ colors }: { colors: any }) {
         style={styles.filesScrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
       >
-        {files.length === 0 ? (
+        {displayFiles.length === 0 ? (
           <View style={styles.placeholder}>
-            <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>This folder is empty.</Text>
+            <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
+              This folder is empty.
+            </Text>
           </View>
         ) : (
           <View style={styles.filesList}>
-            {files.map((file) => (
+            {displayFiles.map((file) => (
               <FileItem
                 key={file.id}
                 file={file}
@@ -1979,6 +2224,11 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     requiresLogout: false,
   });
   const [reconnecting, setReconnecting] = useState(false);
+  // Sort state
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -2051,6 +2301,64 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     // Return folders first, then files
     return [...folders, ...files];
   };
+
+  // Sort files
+  const filterAndSortFiles = (filesList: CloudFile[]): CloudFile[] => {
+    // Apply sorting
+    const folders: CloudFile[] = [];
+    const files: CloudFile[] = [];
+
+    filesList.forEach((file) => {
+      const mimeType = file.mimeType || file.file?.mimeType;
+      const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
+      if (isFolder) {
+        folders.push(file);
+      } else {
+        files.push(file);
+      }
+    });
+
+    // Sort folders
+    folders.sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      } else if (sortBy === 'date') {
+        const dateA = new Date(a.modifiedTime || a.createdTime || 0).getTime();
+        const dateB = new Date(b.modifiedTime || b.createdTime || 0).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      } else if (sortBy === 'size') {
+        const sizeA = a.size || 0;
+        const sizeB = b.size || 0;
+        return sortOrder === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+      }
+      return 0;
+    });
+
+    // Sort files
+    files.sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      } else if (sortBy === 'date') {
+        const dateA = new Date(a.modifiedTime || a.createdTime || 0).getTime();
+        const dateB = new Date(b.modifiedTime || b.createdTime || 0).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      } else if (sortBy === 'size') {
+        const sizeA = a.size || 0;
+        const sizeB = b.size || 0;
+        return sortOrder === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+      }
+      return 0;
+    });
+
+    return [...folders, ...files];
+  };
+
+  // Note: loadAllFiles and loadAllFilesRecursively are no longer used
+  // Server-side search is now used instead for better performance
 
   const loadFiles = useCallback(
     async (skipLoading = false) => {
@@ -2252,6 +2560,25 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  // Get files to display
+  const getDisplayFiles = (): CloudFile[] => {
+    return files;
+  };
+
+  // Calculate summary statistics
+  const totalFolders = files.filter((f) => {
+    const mimeType = f.mimeType || f.file?.mimeType;
+    return f.folder || mimeType === 'application/vnd.google-apps.folder';
+  }).length;
+  const totalFiles = files.length - totalFolders;
+  const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
+
+  const navigateToPath = (index: number) => {
+    handleBreadcrumbClick(index);
+  };
+
+  const displayFiles = filterAndSortFiles(getDisplayFiles());
+
   if (loading && !refreshing) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -2263,44 +2590,204 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
 
   return (
     <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
-      {error && (
-        <View style={[styles.errorContainer, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
-          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+      {/* Title with Breadcrumb and Actions */}
+      <View style={[styles.titleBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.titleRow}>
+          <Text style={[styles.documentsTitle, { color: colors.text }]}>Google Drive</Text>
+          <View style={styles.titleActions}>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                setShowFolderForm(true);
+                setFolderName('');
+              }}
+              disabled={uploading || loading}
+            >
+              <FontAwesome name="folder-open" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowUploadForm(true)}
+              disabled={uploading || loading}
+            >
+              <FontAwesome name="upload" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowSummary(!showSummary)}
+            >
+              <FontAwesome name="info-circle" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+        {/* Always show breadcrumb */}
+        <View style={[styles.breadcrumbInline, { borderTopColor: colors.border }]}>
+          {folderPath.length === 0 ? (
+            <Text style={[styles.breadcrumbItem, { color: colors.text }]}>Home</Text>
+          ) : (
+            <>
+              <TouchableOpacity onPress={() => navigateToPath(-1)}>
+                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+              </TouchableOpacity>
+              {folderPath.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                  <TouchableOpacity onPress={() => navigateToPath(index)}>
+                    <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              ))}
+            </>
+          )}
+        </View>
+      </View>
+
+      {/* Summary Statistics - Shown when info button is clicked */}
+      {!loading && showSummary && (
+        <View style={[styles.summary, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="folder" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Folders</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalFolders}</Text>
+            </View>
+          </View>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="file" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Files</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalFiles}</Text>
+            </View>
+          </View>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="database" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Size</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>
+                {DocumentService.formatFileSize(totalSize)}
+              </Text>
+            </View>
+          </View>
         </View>
       )}
 
-      {/* Header with actions */}
-      <View style={[styles.browserHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={styles.breadcrumb}>
-          <TouchableOpacity onPress={() => handleBreadcrumbClick(-1)}>
-            <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+      {/* Messages */}
+      {error && (
+        <View style={[styles.message, styles.errorMessage, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
+          <Text style={[styles.messageText, { color: colors.error }]}>{error}</Text>
+          <TouchableOpacity onPress={() => setError('')}>
+            <FontAwesome name="times" size={16} color={colors.error} />
           </TouchableOpacity>
-          {folderPath.map((folder, index) => (
-            <View key={folder.id} style={styles.breadcrumbRow}>
-              <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-              <TouchableOpacity onPress={() => handleBreadcrumbClick(index)}>
-                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
         </View>
+      )}
 
-        <View style={styles.actionButtons}>
+      {/* Sort Controls */}
+      <View style={[styles.searchSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.sortContainer}>
+          <Text style={[styles.sortLabel, { color: colors.text }]}>Sort</Text>
+          {Platform.OS === 'web' ? (
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value as 'name' | 'date' | 'size');
+              }}
+              style={{
+                width: 150,
+                height: 44,
+                padding: '8px 12px',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.background,
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: '500',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="name">Name</option>
+              <option value="date">Date</option>
+              <option value="size">Size</option>
+            </select>
+          ) : Platform.OS === 'android' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
+                onPress={() => setShowSortModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sortDropdownText, { color: colors.text }]}>
+                  {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <Modal
+                visible={showSortModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowSortModal(false)}
+              >
+                <TouchableOpacity
+                  style={[styles.sortModalOverlay, { paddingBottom: 150 }]}
+                  activeOpacity={1}
+                  onPress={() => setShowSortModal(false)}
+                >
+                  <View style={[styles.sortModalContent, { backgroundColor: colors.surface, marginBottom: 20, maxHeight: '50%', paddingBottom: 20 }]}>
+                    <View style={styles.sortModalHeader}>
+                      <Text style={[styles.sortModalTitle, { color: colors.text }]}>Sort By</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowSortModal(false)}
+                        style={styles.sortModalCloseButton}
+                      >
+                        <FontAwesome name="times" size={20} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                    {['name', 'date', 'size'].map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.sortModalOption,
+                          sortBy === option && { backgroundColor: colors.primary + '20' },
+                        ]}
+                        onPress={() => {
+                          setSortBy(option as 'name' | 'date' | 'size');
+                          setShowSortModal(false);
+                        }}
+                      >
+                        <Text style={[styles.sortModalOptionText, { color: colors.text }]}>
+                          {option.charAt(0).toUpperCase() + option.slice(1)}
+                        </Text>
+                        {sortBy === option && (
+                          <FontAwesome name="check" size={16} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </TouchableOpacity>
+              </Modal>
+            </>
+          ) : (
+            <Picker
+              selectedValue={sortBy}
+              onValueChange={(value) => setSortBy(value as 'name' | 'date' | 'size')}
+              style={[styles.sortPicker, { backgroundColor: colors.background, color: colors.text }]}
+              itemStyle={{ color: colors.text, height: 120 }}
+            >
+              <Picker.Item label="Name" value="name" />
+              <Picker.Item label="Date" value="date" />
+              <Picker.Item label="Size" value="size" />
+            </Picker>
+          )}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primary }]}
-            onPress={() => setShowUploadForm(true)}
-            disabled={uploading}
+            style={[styles.sortOrderButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+            onPress={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
           >
-            <FontAwesome name="upload" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>Upload</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primary }]}
-            onPress={() => setShowFolderForm(true)}
-            disabled={loading}
-          >
-            <FontAwesome name="folder" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>New Folder</Text>
+            <FontAwesome
+              name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
+              size={14}
+              color={colors.text}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -2309,13 +2796,15 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
         style={styles.filesScrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
       >
-        {files.length === 0 ? (
+        {displayFiles.length === 0 ? (
           <View style={styles.placeholder}>
-            <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>This folder is empty.</Text>
+            <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
+              This folder is empty.
+            </Text>
           </View>
         ) : (
           <View style={styles.filesList}>
-            {files.map((file) => (
+            {displayFiles.map((file) => (
               <FileItem
                 key={file.id}
                 file={file}
@@ -2473,6 +2962,11 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
     requiresReconnect: false,
     requiresLogout: false,
   });
+  // Sort state
+  const [sortBy, setSortBy] = useState<'name' | 'date'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // Default to newest first
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -2641,11 +3135,25 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
   // Helper function to sort photos by creation time: most recent first (newest at top, oldest at bottom)
   const sortPhotos = (photos: GooglePhotoItem[]): GooglePhotoItem[] => {
     return [...photos].sort((a, b) => {
-      const timeA = a.mediaMetadata?.creationTime ? new Date(a.mediaMetadata.creationTime).getTime() : 0;
-      const timeB = b.mediaMetadata?.creationTime ? new Date(b.mediaMetadata.creationTime).getTime() : 0;
-      // Sort in descending order (newest first)
-      return timeB - timeA;
+      if (sortBy === 'date') {
+        const timeA = a.mediaMetadata?.creationTime ? new Date(a.mediaMetadata.creationTime).getTime() : 0;
+        const timeB = b.mediaMetadata?.creationTime ? new Date(b.mediaMetadata.creationTime).getTime() : 0;
+        return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      } else if (sortBy === 'name') {
+        const nameA = (a.filename || '').toLowerCase();
+        const nameB = (b.filename || '').toLowerCase();
+        return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      }
+      return 0;
     });
+  };
+
+  // Filter and sort photos based on search query and sort settings
+  const filterAndSortPhotos = (photosList: GooglePhotoItem[]): GooglePhotoItem[] => {
+    let filtered = photosList;
+
+    // Apply sorting
+    return sortPhotos(filtered);
   };
 
   const loadItems = useCallback(
@@ -2707,6 +3215,11 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
     setRefreshing(false);
   }, [loadItems]);
 
+  // Calculate summary statistics
+  const totalPhotos = items.length;
+
+  const displayPhotos = filterAndSortPhotos(items);
+
   if (loading && !refreshing) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -2718,18 +3231,162 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
 
   return (
     <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
-      {error && (
-        <View style={[styles.errorContainer, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
-          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+      {/* Title with Breadcrumb and Actions */}
+      <View style={[styles.titleBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.titleRow}>
+          <Text style={[styles.documentsTitle, { color: colors.text }]}>Google Photos</Text>
+          <View style={styles.titleActions}>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowSummary(!showSummary)}
+            >
+              <FontAwesome name="info-circle" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+        {/* Always show breadcrumb */}
+        <View style={[styles.breadcrumbInline, { borderTopColor: colors.border }]}>
+          <Text style={[styles.breadcrumbItem, { color: colors.text }]}>Home</Text>
+        </View>
+      </View>
+
+      {/* Summary Statistics - Shown when info button is clicked */}
+      {!loading && showSummary && (
+        <View style={[styles.summary, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <View style={styles.summaryItem}>
+            <FontAwesome name="photo" size={20} color={colors.primary} />
+            <View style={styles.summaryContent}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Photos</Text>
+              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalPhotos}</Text>
+            </View>
+          </View>
         </View>
       )}
+
+      {/* Messages */}
+      {error && (
+        <View style={[styles.message, styles.errorMessage, { backgroundColor: colors.error + '20', borderColor: colors.error }]}>
+          <Text style={[styles.messageText, { color: colors.error }]}>{error}</Text>
+          <TouchableOpacity onPress={() => setError('')}>
+            <FontAwesome name="times" size={16} color={colors.error} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Sort Controls */}
+      <View style={[styles.searchSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.sortContainer}>
+          {Platform.OS === 'web' ? (
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value as 'name' | 'date');
+              }}
+              style={{
+                flex: 1,
+                height: 44,
+                padding: '8px 12px',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.background,
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: '500',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="date">Date</option>
+              <option value="name">Name</option>
+            </select>
+          ) : Platform.OS === 'android' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
+                onPress={() => setShowSortModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sortDropdownText, { color: colors.text }]}>
+                  {sortBy === 'date' ? 'Date' : 'Name'}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <Modal
+                visible={showSortModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowSortModal(false)}
+              >
+                <TouchableOpacity
+                  style={[styles.sortModalOverlay, { paddingBottom: 150 }]}
+                  activeOpacity={1}
+                  onPress={() => setShowSortModal(false)}
+                >
+                  <View style={[styles.sortModalContent, { backgroundColor: colors.surface, marginBottom: 20, maxHeight: '50%', paddingBottom: 20 }]}>
+                    <View style={styles.sortModalHeader}>
+                      <Text style={[styles.sortModalTitle, { color: colors.text }]}>Sort By</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowSortModal(false)}
+                        style={styles.sortModalCloseButton}
+                      >
+                        <FontAwesome name="times" size={20} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                    {['date', 'name'].map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.sortModalOption,
+                          sortBy === option && { backgroundColor: colors.primary + '20' },
+                        ]}
+                        onPress={() => {
+                          setSortBy(option as 'name' | 'date');
+                          setShowSortModal(false);
+                        }}
+                      >
+                        <Text style={[styles.sortModalOptionText, { color: colors.text }]}>
+                          {option === 'date' ? 'Date' : 'Name'}
+                        </Text>
+                        {sortBy === option && (
+                          <FontAwesome name="check" size={16} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </TouchableOpacity>
+              </Modal>
+            </>
+          ) : (
+            <Picker
+              selectedValue={sortBy}
+              onValueChange={(value) => setSortBy(value as 'name' | 'date')}
+              style={[styles.sortPicker, { backgroundColor: colors.background, color: colors.text }]}
+              itemStyle={{ color: colors.text, height: 120 }}
+            >
+              <Picker.Item label="Date" value="date" />
+              <Picker.Item label="Name" value="name" />
+            </Picker>
+          )}
+          <TouchableOpacity
+            style={[styles.sortOrderButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+            onPress={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+          >
+            <FontAwesome
+              name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
+              size={14}
+              color={colors.text}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <ScrollView
         style={styles.filesScrollView}
         contentContainerStyle={styles.photosGridContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
       >
-        {items.length === 0 ? (
+        {displayPhotos.length === 0 ? (
           <View style={styles.placeholder}>
             <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
               No photos found in your Google Photos library.
@@ -2738,7 +3395,7 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
         ) : (
           <>
             <View style={styles.photosGrid}>
-              {items.map((item) => {
+              {displayPhotos.map((item) => {
                 const uri = item.baseUrl || undefined;
                 return (
                   <TouchableOpacity
@@ -3460,7 +4117,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   sortDropdownWrapper: {
-    flex: 1,
+    width: 150,
     borderRadius: 8,
     borderWidth: 1,
     height: 44,
@@ -3468,6 +4125,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
+  },
+  sortLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginRight: 8,
   },
   sortDropdownText: {
     flex: 1,

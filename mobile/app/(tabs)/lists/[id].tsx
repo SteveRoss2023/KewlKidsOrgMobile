@@ -1005,8 +1005,10 @@ export default function ListDetailScreen() {
                   }}
                   style={[styles.addButton, { backgroundColor: colors.primary }]}
                 >
-                  <FontAwesome name="plus" size={16} color="#fff" />
-                  <Text style={styles.addButtonText}>Add Item</Text>
+                  {Platform.OS === 'web' && <FontAwesome name="plus" size={16} color="#fff" />}
+                  <Text style={styles.addButtonText}>
+                    {Platform.OS === 'web' ? 'Add Item' : '+Add'}
+                  </Text>
                 </TouchableOpacity>
                 {isGroceryList && (
                   <TouchableOpacity
@@ -1052,15 +1054,18 @@ export default function ListDetailScreen() {
                 size={14}
                 color={colors.textSecondary}
               />
-              <Text style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}>
-                {areAllCollapsed ? 'Expand All' : 'Collapse All'}
+              <Text
+                style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {areAllCollapsed ? 'Expand' : 'Collapse'}
               </Text>
             </TouchableOpacity>
           )}
         </View>
         {isGroceryList && availableRecipes.length > 0 && (
           <View style={styles.recipeFilterRow}>
-            <Text style={[styles.filterLabel, { color: colors.text }]}>Filter by recipe:</Text>
+            <FontAwesome name="filter" size={16} color={colors.textSecondary} />
             <View style={styles.pickerWrapper}>
               <ThemeAwarePicker
                 selectedValue={selectedRecipeFilter}
@@ -1072,9 +1077,6 @@ export default function ListDetailScreen() {
                 placeholder="All items"
               />
             </View>
-            {Platform.OS !== 'web' && selectedRecipeFilter && (
-              <View style={styles.spacer} />
-            )}
             {selectedRecipeFilter && (
               <View style={styles.deleteButtonWrapper}>
                 <TouchableOpacity
@@ -1085,10 +1087,7 @@ export default function ListDetailScreen() {
                   {deletingRecipeItems ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <>
-                      <FontAwesome name="trash" size={14} color="#fff" />
-                      <Text style={styles.deleteRecipeButtonText}>Delete All</Text>
-                    </>
+                    <FontAwesome name="trash" size={16} color="#fff" />
                   )}
                 </TouchableOpacity>
               </View>
@@ -1096,6 +1095,11 @@ export default function ListDetailScreen() {
           </View>
         )}
       </View>
+
+      {/* Divider after filter */}
+      {isGroceryList && availableRecipes.length > 0 && (
+        <View style={[styles.filterDivider, { borderBottomColor: colors.border }]} />
+      )}
 
       {showAddItem && !editingItem && (
         <ScrollView
@@ -1509,29 +1513,35 @@ const styles = StyleSheet.create({
   },
   actionsBar: {
     flexDirection: 'column',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'web' ? 16 : 0, // No bottom padding on mobile
     borderBottomWidth: 1,
     gap: 0,
-    ...(Platform.OS !== 'web' ? {
-      minHeight: 220, // Reserve space for dropdown + recipe filter
-    } : {}),
   },
   actionsBarTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 12,
+    marginBottom: Platform.OS === 'web' ? 12 : 8, // Reduced margin on mobile
     gap: 8,
     flexWrap: Platform.OS === 'web' ? 'nowrap' : 'wrap',
   },
   recipeFilterRow: {
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    alignItems: Platform.OS === 'web' ? 'center' : 'flex-start',
-    gap: Platform.OS === 'web' ? 12 : 0, // Use explicit margins on mobile instead
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Platform.OS === 'web' ? 12 : 8,
     width: '100%',
-    paddingHorizontal: Platform.OS === 'web' ? 0 : 16,
-    marginTop: Platform.OS === 'web' ? 0 : 12, // Add spacing on mobile
+    paddingHorizontal: Platform.OS === 'web' ? 0 : 0, // No horizontal padding since actionsBar has it
+    marginTop: 0, // No top margin - actionsBarTop marginBottom handles spacing
+    marginBottom: 0, // No bottom margin
+    flexWrap: 'nowrap',
+  },
+  filterDivider: {
+    borderBottomWidth: 1,
+    marginHorizontal: Platform.OS === 'web' ? 0 : 16,
+    marginVertical: 0, // No vertical margin
   },
   filterLabel: {
     fontSize: 14,
@@ -1548,9 +1558,12 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { flex: 1, minWidth: 150 }
       : {
-          width: '100%',
-          minHeight: 50, // Ensure minimum height for dropdown
-          marginBottom: 32, // More spacing before delete button
+          flex: 2, // Give more flex space to dropdown
+          minWidth: 200, // Increased width to prevent text wrapping
+          minHeight: 40, // Smaller height for mobile
+          marginRight: 8, // Add spacing before delete button if present
+          marginBottom: 0, // No bottom margin
+          flexShrink: 1,
         }
     ),
   },
@@ -1567,8 +1580,8 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? {}
       : {
-          width: '100%',
-          marginTop: 0, // Spacer handles spacing
+          flexShrink: 0, // Don't shrink delete button
+          marginLeft: 8, // Add spacing from dropdown
           alignItems: 'flex-start', // Align button to left, not full width
         }
     ),
@@ -1814,10 +1827,12 @@ const styles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
     flexShrink: 0,
+    flexWrap: 'nowrap',
   },
   expandCollapseButtonText: {
     fontSize: 14,
     fontWeight: '500',
+    flexShrink: 0,
   },
   modalOverlay: {
     flex: 1,

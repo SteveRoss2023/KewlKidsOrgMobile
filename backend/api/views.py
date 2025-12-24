@@ -2343,6 +2343,94 @@ def OneDriveListFilesView(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def OneDriveSearchFilesView(request):
+    """Search files/folders in OneDrive."""
+    from documents.models import OneDriveSync
+    from documents.onedrive_sync import OneDriveSync as OneDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = OneDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'OneDrive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    search_query = request.GET.get('q', '').strip()  # Search query
+    if not search_query:
+        return Response({'error': 'Search query required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    limit = int(request.GET.get('limit', 200))  # Limit results (default 200)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = OneDriveSyncService(access_token, refresh_token)
+        files = sync.search_files(search_query, limit=limit)
+
+        # Normalize files to ensure consistent structure
+        normalized_files = []
+        for file_item in files:
+            normalized_item = {
+                'id': file_item.get('id', ''),
+                'name': file_item.get('name', 'Unknown'),
+                'folder': 'folder' in file_item,
+                'mimeType': file_item.get('file', {}).get('mimeType') if 'file' in file_item else None,
+                'size': file_item.get('size'),
+                'lastModifiedDateTime': file_item.get('lastModifiedDateTime'),
+                'createdDateTime': file_item.get('createdDateTime'),
+                'webUrl': file_item.get('webUrl'),
+            }
+            # If it's a folder, set folder flag
+            if 'folder' in file_item:
+                normalized_item['folder'] = True
+            normalized_files.append(normalized_item)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        return Response({'files': normalized_files}, status=status.HTTP_200_OK)
+    except ValueError as e:
+        error_msg = str(e).lower()
+        # Check if it's a session key issue (not OAuth expiration)
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your OneDrive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        # Check if it's a decryption failure
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive search decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt OneDrive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive search error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"OneDrive search error: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def OneDriveUploadFileView(request):
@@ -2913,6 +3001,92 @@ def GoogleDriveListFilesView(request):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Google Drive list files error: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def GoogleDriveSearchFilesView(request):
+    """Search files/folders in Google Drive."""
+    from documents.models import GoogleDriveSync
+    from documents.googledrive_sync import GoogleDriveSync as GoogleDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = GoogleDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'Google Drive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    search_query = request.GET.get('q', '').strip()  # Search query
+    if not search_query:
+        return Response({'error': 'Search query required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    limit = int(request.GET.get('limit', 200))  # Limit results (default 200)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = GoogleDriveSyncService(access_token, refresh_token)
+        files = sync.search_files(search_query, limit=limit)
+
+        # Normalize files to ensure consistent structure
+        normalized_files = []
+        for file_item in files:
+            normalized_item = {
+                'id': file_item.get('id', ''),
+                'name': file_item.get('name', 'Unknown'),
+                'folder': file_item.get('folder', False),
+                'mimeType': file_item.get('mimeType'),
+                'size': file_item.get('size'),
+                'modifiedTime': file_item.get('modifiedTime'),
+                'createdTime': file_item.get('createdTime'),
+                'webViewLink': file_item.get('webViewLink'),
+                'parents': file_item.get('parents', []),
+            }
+            normalized_files.append(normalized_item)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        return Response({'files': normalized_files}, status=status.HTTP_200_OK)
+    except ValueError as e:
+        error_msg = str(e).lower()
+        # Check if it's a session key issue (not OAuth expiration)
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your Google Drive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        # Check if it's a decryption failure
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive search decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt Google Drive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive search error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Google Drive search error: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

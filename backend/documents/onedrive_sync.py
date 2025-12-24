@@ -112,6 +112,155 @@ class OneDriveSync:
         response.raise_for_status()
         return response.json().get('value', [])
 
+    def _search_files_recursive(self, query: str, folder_id: Optional[str] = None,
+                                 limit: int = 200, max_depth: int = 5, current_depth: int = 0,
+                                 results: List[Dict] = None) -> List[Dict]:
+        """
+        Recursively search files/folders in OneDrive by traversing folders.
+        Used as fallback when Microsoft Search API is not available (e.g., MSA accounts).
+
+        Args:
+            query: Search query string
+            folder_id: ID of folder to search (None for root)
+            limit: Maximum number of results
+            max_depth: Maximum folder depth to search
+            current_depth: Current depth in folder tree
+            results: Accumulated results list
+
+        Returns:
+            List of matching file/folder items.
+        """
+        if results is None:
+            results = []
+
+        if current_depth >= max_depth or len(results) >= limit:
+            return results
+
+        headers = self._get_headers()
+        import logging
+        logger = logging.getLogger(__name__)
+        query_lower = query.lower()
+
+        try:
+            # List files in current folder
+            if folder_id:
+                url = f'{self.base_url}/me/drive/items/{folder_id}/children'
+            else:
+                url = f'{self.base_url}/me/drive/root/children'
+
+            response = requests.get(url, headers=headers)
+            if response.status_code == 401:
+                self.refresh_access_token()
+                headers = self._get_headers()
+                response = requests.get(url, headers=headers)
+            response.raise_for_status()
+
+            items = response.json().get('value', [])
+
+            # Filter items that match the query
+            for item in items:
+                if len(results) >= limit:
+                    break
+                name = item.get('name', '').lower()
+                if query_lower in name:
+                    results.append(item)
+
+            # Recursively search subfolders
+            if current_depth < max_depth - 1:
+                folders = [item for item in items if 'folder' in item]
+                for folder in folders:
+                    if len(results) >= limit:
+                        break
+                    folder_id = folder.get('id')
+                    if folder_id:
+                        self._search_files_recursive(
+                            query, folder_id, limit, max_depth,
+                            current_depth + 1, results
+                        )
+
+        except Exception as e:
+            logger.warning(f"Error searching folder {folder_id} at depth {current_depth}: {str(e)}")
+
+        return results
+
+    def search_files(self, query: str, limit: int = 200) -> List[Dict]:
+        """
+        Search files/folders in OneDrive using Microsoft Graph API.
+        Tries Microsoft Search API first (works for work/school accounts),
+        falls back to recursive search for MSA accounts.
+
+        Args:
+            query: Search query string (searches in file/folder names)
+            limit: Maximum number of results (default 200)
+
+        Returns:
+            List of matching file/folder items.
+        """
+        headers = self._get_headers()
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Try Microsoft Search API first (works for work/school accounts, not MSA)
+        try:
+            search_url = f'{self.base_url}/search/query'
+            request_body = {
+                'requests': [
+                    {
+                        'entityTypes': ['driveItem'],
+                        'query': {
+                            'queryString': query
+                        },
+                        'from': 0,
+                        'size': limit
+                    }
+                ]
+            }
+
+            response = requests.post(search_url, headers=headers, json=request_body)
+            if response.status_code == 401:
+                self.refresh_access_token()
+                headers = self._get_headers()
+                response = requests.post(search_url, headers=headers, json=request_body)
+
+            if response.status_code == 200:
+                # Extract results from Microsoft Search API response
+                result = response.json()
+                if 'value' in result and len(result['value']) > 0:
+                    hits_containers = result['value'][0].get('hitsContainers', [])
+                    if hits_containers and len(hits_containers) > 0:
+                        hits = hits_containers[0].get('hits', [])
+                        items = []
+                        for hit in hits:
+                            resource = hit.get('resource', {})
+                            if resource:
+                                items.append(resource)
+                        if items:
+                            logger.info(f"Microsoft Search API found {len(items)} results for query: {query}")
+                            return items
+
+            # Check if it's an MSA account error
+            if response.status_code == 400:
+                error_text = response.text.lower()
+                if 'msa account' in error_text or 'not supported for msa' in error_text:
+                    logger.info("MSA account detected, using recursive search fallback")
+                    # Fall through to recursive search
+                else:
+                    logger.warning(f"Microsoft Search API returned 400: {response.text[:200]}")
+            else:
+                logger.warning(f"Microsoft Search API returned {response.status_code}: {response.text[:200]}")
+        except Exception as e:
+            logger.warning(f"Microsoft Search API failed: {str(e)}")
+
+        # Fallback: Recursive search (for MSA accounts or when Search API fails)
+        # This traverses folders up to 5 levels deep
+        logger.info(f"Using recursive search for query: {query}")
+        results = self._search_files_recursive(query, None, limit, max_depth=5, current_depth=0)
+        if results:
+            logger.info(f"Recursive search found {len(results)} results for query: {query}")
+            return results[:limit]
+
+        return []
+
     def get_file(self, item_id: str) -> Dict:
         """Get file/folder metadata."""
         headers = self._get_headers()

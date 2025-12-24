@@ -141,6 +141,62 @@ class GoogleDriveSync:
             })
         return result
 
+    def search_files(self, query: str, limit: int = 200) -> List[Dict]:
+        """
+        Search files/folders in Google Drive.
+
+        Args:
+            query: Search query string (searches in file/folder names)
+            limit: Maximum number of results (default 200)
+
+        Returns:
+            List of matching file/folder items.
+        """
+        headers = self._get_headers()
+
+        # Google Drive search query - searches across entire Drive
+        # Escape single quotes in query to prevent query injection
+        escaped_query = query.replace("'", "\\'")
+        search_query = f"name contains '{escaped_query}' and trashed = false"
+
+        params = {
+            'q': search_query,
+            'fields': 'files(id,name,mimeType,size,modifiedTime,createdTime,parents,webViewLink)',
+            'pageSize': limit,
+        }
+
+        response = requests.get(
+            f'{self.base_url}/files',
+            headers=headers,
+            params=params
+        )
+        if response.status_code == 401:
+            self.refresh_access_token()
+            headers = self._get_headers()
+            response = requests.get(
+                f'{self.base_url}/files',
+                headers=headers,
+                params=params
+            )
+        response.raise_for_status()
+
+        files = response.json().get('files', [])
+        # Transform to match OneDrive-like structure
+        result = []
+        for file in files:
+            result.append({
+                'id': file.get('id'),
+                'name': file.get('name'),
+                'mimeType': file.get('mimeType'),
+                'size': file.get('size'),
+                'modifiedTime': file.get('modifiedTime'),
+                'createdTime': file.get('createdTime'),
+                'parents': file.get('parents', []),
+                'webViewLink': file.get('webViewLink'),
+                'folder': file.get('mimeType') == 'application/vnd.google-apps.folder',
+            })
+        return result
+
     def list_photos(self, page_size: int = 100, page_token: Optional[str] = None) -> Dict:
         """
         List photo and video files from Google Drive.

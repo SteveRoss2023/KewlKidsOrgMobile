@@ -18,6 +18,7 @@ export interface CloudFile {
   };
   webViewLink?: string;
   parents?: string[];
+  folderPath?: string; // Full path for recursive search (e.g., "Folder1/SubFolder/File.txt")
 }
 
 export interface CloudFilesResponse {
@@ -72,6 +73,40 @@ class DocumentService {
       return response.data.files || [];
     } catch (error: any) {
       console.error('Error listing Google Drive files:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search files in OneDrive
+   */
+  async searchOneDriveFiles(query: string, limit: number = 200): Promise<CloudFile[]> {
+    try {
+      const params: any = { q: query };
+      if (limit) {
+        params.limit = limit;
+      }
+      const response = await apiClient.get<CloudFilesResponse>('/onedrive/files/search/', { params });
+      return response.data.files || [];
+    } catch (error: any) {
+      console.error('Error searching OneDrive files:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search files in Google Drive
+   */
+  async searchGoogleDriveFiles(query: string, limit: number = 200): Promise<CloudFile[]> {
+    try {
+      const params: any = { q: query };
+      if (limit) {
+        params.limit = limit;
+      }
+      const response = await apiClient.get<CloudFilesResponse>('/googledrive/files/search/', { params });
+      return response.data.files || [];
+    } catch (error: any) {
+      console.error('Error searching Google Drive files:', error);
       throw error;
     }
   }

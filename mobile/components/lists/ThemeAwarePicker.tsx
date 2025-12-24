@@ -113,12 +113,12 @@ export default function ThemeAwarePicker({
           {
             backgroundColor: colors.background,
             borderColor: colors.border,
-            minHeight: 50,
+            minHeight: Platform.OS === 'web' ? 50 : 40,
           },
         ]}
         textStyle={{
           color: colors.text,
-          fontSize: 16,
+          fontSize: Platform.OS === 'web' ? 16 : 13,
         }}
         placeholderStyle={{
           color: colors.textSecondary,
