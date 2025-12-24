@@ -34,7 +34,29 @@ export default function RootLayout() {
         ) {
           return; // Suppress this warning
         }
+        // Filter out measureLayout warnings from react-native-drax (known issue with React Native new architecture)
+        if (
+          typeof args[0] === 'string' &&
+          args[0].includes('ref.measureLayout must be called with a ref to a native component')
+        ) {
+          return; // Suppress this warning
+        }
         originalError.apply(console, args);
+      };
+    }
+
+    // Suppress react-native-drax measureLayout warnings (known issue with React Native new architecture)
+    if (__DEV__) {
+      const originalWarn = console.warn;
+      console.warn = (...args: any[]) => {
+        // Filter out measureLayout warnings from react-native-drax
+        if (
+          typeof args[0] === 'string' &&
+          args[0].includes('ref.measureLayout must be called with a ref to a native component')
+        ) {
+          return; // Suppress this warning
+        }
+        originalWarn.apply(console, args);
       };
     }
   }, []);
