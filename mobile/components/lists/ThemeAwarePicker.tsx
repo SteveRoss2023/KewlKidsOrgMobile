@@ -43,6 +43,14 @@ export default function ThemeAwarePicker({
           const option = options.find(opt => String(opt.value ?? '') === value);
           onValueChange(option ? option.value : null);
         }}
+        onClick={(e) => {
+          // Prevent click from bubbling up to parent TouchableOpacity
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          // Also prevent mousedown from bubbling
+          e.stopPropagation();
+        }}
         disabled={!enabled}
         style={{
           width: '100%',
@@ -89,8 +97,17 @@ export default function ThemeAwarePicker({
         }}
         placeholder={placeholder}
         disabled={!enabled}
-        listMode="FLATLIST"
+        listMode="MODAL"
         dropDownDirection="AUTO"
+        modalProps={{
+          animationType: 'slide',
+          transparent: false,
+        }}
+        modalTitle="Select a list"
+        modalAnimationType="slide"
+        modalContentContainerStyle={{
+          backgroundColor: colors.surface,
+        }}
         style={[
           styles.dropdown,
           {
@@ -109,9 +126,6 @@ export default function ThemeAwarePicker({
         dropDownContainerStyle={{
           backgroundColor: colors.surface,
           borderColor: colors.border,
-          maxHeight: 200,
-          zIndex: 1000,
-          elevation: 5, // Android shadow
         }}
         selectedItemLabelStyle={{
           color: colors.text,

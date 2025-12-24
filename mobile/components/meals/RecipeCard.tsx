@@ -100,9 +100,9 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
       activeOpacity={0.7}
     >
       {imageUri && !imageError ? (
-        <Image 
-          source={{ uri: imageUri }} 
-          style={styles.image} 
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.image}
           resizeMode="cover"
           onError={(error) => {
             const errorMessage = error.nativeEvent?.error || 'Unknown error';
@@ -154,6 +154,24 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
             style={styles.addToListContainer}
             onStartShouldSetResponder={() => true}
             onResponderTerminationRequest={() => false}
+            onTouchStart={(e) => {
+              // Prevent touch events from bubbling to parent on mobile
+              e.stopPropagation();
+            }}
+            // @ts-ignore - web-specific onClick handler
+            onClick={(e: any) => {
+              // Prevent click events from bubbling to parent on web
+              if (e && e.stopPropagation) {
+                e.stopPropagation();
+              }
+            }}
+            // @ts-ignore - web-specific onMouseDown handler
+            onMouseDown={(e: any) => {
+              // Prevent mousedown events from bubbling to parent on web
+              if (e && e.stopPropagation) {
+                e.stopPropagation();
+              }
+            }}
           >
             {addedToList ? (
               <View style={[styles.addedMessage, { backgroundColor: colors.success + '20' }]}>
@@ -181,7 +199,11 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
                     { backgroundColor: colors.primary },
                     (!selectedListId || addingToList) && styles.addButtonDisabled,
                   ]}
-                  onPress={handleAddToList}
+                  onPress={(e) => {
+                    // Prevent the press from bubbling to parent card
+                    e.stopPropagation();
+                    handleAddToList();
+                  }}
                   disabled={!selectedListId || addingToList}
                 >
                   {addingToList ? (
@@ -218,6 +240,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     overflow: 'hidden',
+    // Allow dropdown to render outside card on mobile
+    zIndex: 1,
   },
   image: {
     width: '100%',
@@ -244,9 +268,13 @@ const styles = StyleSheet.create({
   addToListContainer: {
     marginTop: 8,
     gap: 6,
+    // Ensure dropdown can render above other elements
+    zIndex: 10,
   },
   pickerWrapper: {
     flex: 1,
+    // Higher z-index for the picker container
+    zIndex: 1000,
   },
   addButton: {
     paddingHorizontal: 12,

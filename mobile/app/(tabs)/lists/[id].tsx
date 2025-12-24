@@ -1072,21 +1072,26 @@ export default function ListDetailScreen() {
                 placeholder="All items"
               />
             </View>
+            {Platform.OS !== 'web' && selectedRecipeFilter && (
+              <View style={styles.spacer} />
+            )}
             {selectedRecipeFilter && (
-              <TouchableOpacity
-                onPress={handleDeleteRecipeItems}
-                style={[styles.deleteRecipeButton, { backgroundColor: '#E06C75' }]}
-                disabled={deletingRecipeItems}
-              >
-                {deletingRecipeItems ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <FontAwesome name="trash" size={14} color="#fff" />
-                    <Text style={styles.deleteRecipeButtonText}>Delete All</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={styles.deleteButtonWrapper}>
+                <TouchableOpacity
+                  onPress={handleDeleteRecipeItems}
+                  style={[styles.deleteRecipeButton, { backgroundColor: '#E06C75' }]}
+                  disabled={deletingRecipeItems}
+                >
+                  {deletingRecipeItems ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome name="trash" size={14} color="#fff" />
+                      <Text style={styles.deleteRecipeButtonText}>Delete All</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         )}
@@ -1522,9 +1527,10 @@ const styles = StyleSheet.create({
   },
   recipeFilterRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
-    gap: 12,
+    alignItems: Platform.OS === 'web' ? 'center' : 'flex-start',
+    gap: Platform.OS === 'web' ? 12 : 0, // Use explicit margins on mobile instead
     width: '100%',
+    paddingHorizontal: Platform.OS === 'web' ? 0 : 16,
     marginTop: Platform.OS === 'web' ? 0 : 12, // Add spacing on mobile
   },
   filterLabel: {
@@ -1541,7 +1547,30 @@ const styles = StyleSheet.create({
   pickerWrapper: {
     ...(Platform.OS === 'web'
       ? { flex: 1, minWidth: 150 }
-      : { width: '100%' }
+      : {
+          width: '100%',
+          minHeight: 50, // Ensure minimum height for dropdown
+          marginBottom: 32, // More spacing before delete button
+        }
+    ),
+  },
+  spacer: {
+    ...(Platform.OS === 'web'
+      ? {}
+      : {
+          height: 16, // Explicit spacer to push delete button down
+          width: '100%',
+        }
+    ),
+  },
+  deleteButtonWrapper: {
+    ...(Platform.OS === 'web'
+      ? {}
+      : {
+          width: '100%',
+          marginTop: 0, // Spacer handles spacing
+          alignItems: 'flex-start', // Align button to left, not full width
+        }
     ),
   },
   deleteRecipeButton: {
@@ -1555,10 +1584,8 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { flexShrink: 0 }
       : {
-          width: '100%',
-          marginTop: 12, // Reduced spacing
-          zIndex: 0,
-          position: 'relative',
+          alignSelf: 'flex-start', // Don't stretch to full width
+          marginTop: 0,
         }
     ),
   },

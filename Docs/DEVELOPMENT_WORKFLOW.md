@@ -37,6 +37,12 @@ npx expo start --dev-client
 
 The app on your phone will automatically reload when you save changes.
 
+**Note:** Hot reload works most of the time, but sometimes you need to manually reload:
+- Press `r` in Metro terminal for a quick reload
+- Shake phone → "Reload" for a manual reload
+- Press `shift+r` in Metro for a full reload (clears cache)
+- Some structural changes (like changing component modes) may require a manual reload
+
 ## When You Need to Rebuild
 
 You only need to rebuild and reinstall when you change:
