@@ -10,10 +10,16 @@ import { Platform, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FamilyProvider } from '../contexts/FamilyContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
+import navigationService from '../services/navigationService';
 
 export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
+
+  // Initialize navigation service with router
+  useEffect(() => {
+    navigationService.setRouter(router);
+  }, [router]);
 
   useEffect(() => {
     // Suppress React Native Web accessibility warnings in development

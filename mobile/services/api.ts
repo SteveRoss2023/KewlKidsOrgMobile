@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { tokenStorage, STORAGE_KEYS } from '../utils/storage';
+import navigationService from './navigationService';
 
 /**
  * API Configuration
@@ -18,7 +19,7 @@ const getApiBaseUrl = (): string => {
     }
     return url;
   }
-  
+
   // On web, detect if we're running on ngrok and use ngrok API URL
   if (Platform.OS === 'web') {
     // Check if we're accessing the app via ngrok
@@ -36,7 +37,7 @@ const getApiBaseUrl = (): string => {
     // Not on ngrok, use localhost
     return 'http://localhost:8900/api';
   }
-  
+
   // On native (phone), use the computer's local IP address
   // Update this IP address to match your computer's local network IP
   // You can find it by running: ipconfig (Windows) or ifconfig (Mac/Linux)
@@ -72,7 +73,7 @@ apiClient.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
     // For FormData (file uploads), don't set Content-Type - let axios set it with boundary
     // React Native FormData requires axios to automatically set Content-Type
     if (config.data instanceof FormData) {
@@ -85,7 +86,7 @@ apiClient.interceptors.request.use(
         config.headers['Content-Type'] = 'application/json';
       }
     }
-    
+
     // Log request details in development
     if (__DEV__) {
       console.log('API Request:', {
@@ -97,7 +98,7 @@ apiClient.interceptors.request.use(
         dataType: config.data instanceof FormData ? 'FormData' : typeof config.data,
       });
     }
-    
+
     return config;
   },
   (error: AxiosError) => {
@@ -130,8 +131,44 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
+    // Check if this is an OAuth-related endpoint - don't redirect for these
+    const isOAuthEndpoint = originalRequest.url?.includes('/oauth/') ||
+                            originalRequest.url?.includes('/connection/') ||
+                            originalRequest.url?.includes('/disconnect/') ||
+                            originalRequest.url?.includes('/onedrive/') ||
+                            originalRequest.url?.includes('/googledrive/') ||
+                            originalRequest.url?.includes('/googlephotos/') ||
+                            originalRequest.url?.includes('/calendar/outlook/') ||
+                            originalRequest.url?.includes('/media-items/');
+
+    // Check if error response indicates OAuth issue (not session issue)
+    const errorData = error.response?.data as any;
+    const isOAuthError = errorData?.requires_reconnect ||
+                        errorData?.requires_refresh ||
+                        errorData?.error?.toLowerCase().includes('oauth') ||
+                        errorData?.error?.toLowerCase().includes('token') ||
+                        errorData?.error?.toLowerCase().includes('session expired') ||
+                        errorData?.error?.toLowerCase().includes('decrypt');
+
     // If error is 401 and we haven't tried to refresh yet
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // For OAuth endpoints with OAuth-specific errors, don't redirect - let the screen handle it
+      if (isOAuthEndpoint && isOAuthError) {
+        return Promise.reject(error);
+      }
+
+      // Check if we have a refresh token first
+      const refreshToken = await tokenStorage.getRefreshToken();
+      if (!refreshToken) {
+        // No refresh token available, clear tokens and redirect to login
+        // But not for OAuth endpoints - let them handle the error
+        if (!isOAuthEndpoint) {
+          await tokenStorage.clearTokens();
+          navigationService.navigateToLogin();
+        }
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         // If already refreshing, queue this request
         return new Promise((resolve, reject) => {
@@ -152,10 +189,6 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshToken = await tokenStorage.getRefreshToken();
-        if (!refreshToken) {
-          throw new Error('No refresh token available');
-        }
 
         // Attempt to refresh the token
         const response = await axios.post(`${API_BASE_URL}/auth/refresh/`, {
@@ -180,10 +213,29 @@ apiClient.interceptors.response.use(
 
         // Clear tokens and redirect to login
         await tokenStorage.clearTokens();
-        
-        // You can add navigation logic here if needed
-        // For now, we'll just reject the error
+
+        // Redirect to login page when authentication fails
+        navigationService.navigateToLogin();
+
         return Promise.reject(refreshError);
+      }
+    }
+
+    // If we get a 401 after already trying to refresh, redirect to login
+    // But not for OAuth endpoints - let them handle the error
+    if (error.response?.status === 401 && originalRequest._retry) {
+      const isOAuthEndpoint = originalRequest.url?.includes('/oauth/') ||
+                              originalRequest.url?.includes('/connection/') ||
+                              originalRequest.url?.includes('/disconnect/') ||
+                              originalRequest.url?.includes('/onedrive/') ||
+                              originalRequest.url?.includes('/googledrive/') ||
+                              originalRequest.url?.includes('/googlephotos/') ||
+                              originalRequest.url?.includes('/calendar/outlook/') ||
+                              originalRequest.url?.includes('/media-items/');
+
+      if (!isOAuthEndpoint) {
+        await tokenStorage.clearTokens();
+        navigationService.navigateToLogin();
       }
     }
 
@@ -212,7 +264,7 @@ export class APIError extends Error {
 export const handleAPIError = (error: AxiosError): APIError => {
   // Don't log 404 errors - they're expected when endpoints don't exist yet
   const is404 = error.response?.status === 404;
-  
+
   if (!is404) {
     console.log('API Error Details:', {
       message: error.message,
@@ -234,12 +286,12 @@ export const handleAPIError = (error: AxiosError): APIError => {
     // Server responded with error
     const status = error.response.status;
     const data = error.response.data;
-    
+
     // For 400 errors, log more details to help debug
     if (status === 400) {
       console.log('400 Bad Request Details:', JSON.stringify(data, null, 2));
     }
-    
+
     // Try to extract a meaningful error message
     let message = error.message;
     if (data) {
@@ -271,14 +323,14 @@ export const handleAPIError = (error: AxiosError): APIError => {
         message = JSON.stringify(data);
       }
     }
-    
+
     return new APIError(message, status, data);
   } else if (error.request) {
     // Request made but no response
-    const fullUrl = error.config?.url 
+    const fullUrl = error.config?.url
       ? `${API_BASE_URL}${error.config.url.startsWith('/') ? '' : '/'}${error.config.url}`
       : API_BASE_URL;
-    
+
     console.error('Network error - request made but no response. Check:', {
       baseURL: API_BASE_URL,
       url: error.config?.url,
@@ -286,7 +338,7 @@ export const handleAPIError = (error: AxiosError): APIError => {
       method: error.config?.method,
       timeout: error.code === 'ECONNABORTED' ? 'Request timeout' : 'Connection failed',
     });
-    
+
     // Provide more helpful error message
     let errorMessage = `Network error - no response from server.`;
     if (error.code === 'ECONNABORTED') {
@@ -295,7 +347,7 @@ export const handleAPIError = (error: AxiosError): APIError => {
       errorMessage = `Network error - unable to reach server. Please check your internet connection and ensure the server is running.`;
     }
     errorMessage += ` URL: ${fullUrl}`;
-    
+
     return new APIError(errorMessage, 0);
   } else {
     // Something else happened

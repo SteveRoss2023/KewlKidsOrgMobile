@@ -1,9 +1,80 @@
-import { Tabs } from 'expo-router';
+import { useEffect, useState, useCallback } from 'react';
+import { Tabs, useRouter, useFocusEffect } from 'expo-router';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useFamily } from '../../contexts/FamilyContext';
+import AuthService from '../../services/authService';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const router = useRouter();
+  const { refreshFamilies } = useFamily();
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    checkAuthentication();
+  }, []);
+
+  // Refresh families when tabs come into focus (e.g., after login or returning from another screen)
+  useFocusEffect(
+    useCallback(() => {
+      const refreshOnFocus = async () => {
+        try {
+          const isAuthenticated = await AuthService.isAuthenticated();
+          if (isAuthenticated) {
+            // Refresh families when tabs come into focus and user is authenticated
+            await refreshFamilies();
+          }
+        } catch (error) {
+          console.error('Error refreshing families on focus:', error);
+          // Don't block if refresh fails
+        }
+      };
+
+      // Only refresh if we're not currently checking auth (to avoid double refresh on mount)
+      if (!isCheckingAuth) {
+        refreshOnFocus();
+      }
+    }, [refreshFamilies, isCheckingAuth])
+  );
+
+  const checkAuthentication = async () => {
+    try {
+      const isAuthenticated = await AuthService.isAuthenticated();
+
+      if (!isAuthenticated) {
+        // User is not authenticated, redirect to login
+        router.replace('/(auth)/login');
+        return;
+      }
+
+      // User is authenticated, refresh families to ensure they're loaded
+      // This fixes the issue where families don't appear immediately after login
+      try {
+        await refreshFamilies();
+      } catch (error) {
+        console.error('Error refreshing families after authentication:', error);
+        // Don't block navigation if family refresh fails
+      }
+    } catch (error) {
+      // On error, redirect to login
+      console.error('Error checking authentication:', error);
+      router.replace('/(auth)/login');
+      return;
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  };
+
+  // Show loading indicator while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <Tabs
@@ -173,4 +244,12 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
 

@@ -31,16 +31,60 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import ConfirmModal from '../../components/ConfirmModal';
+import AlertModal from '../../components/AlertModal';
+import AuthService from '../../services/authService';
+import { APIError } from '../../services/api';
+import { useRouter } from 'expo-router';
+import { Picker } from '@react-native-picker/picker';
 
 type TabType = 'app' | 'onedrive' | 'googledrive' | 'googlephotos';
 
 export default function DocumentsScreen() {
   const { colors } = useTheme();
+  const router = useRouter();
   const { selectedFamily } = useFamily();
   const [activeTab, setActiveTab] = useState<TabType>('app');
   const [onedriveConnected, setOnedriveConnected] = useState(false);
   const [googledriveConnected, setGoogledriveConnected] = useState(false);
   const [googlephotosConnected, setGooglephotosConnected] = useState(false);
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    requiresReconnect: boolean;
+    requiresLogout: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    requiresReconnect: false,
+    requiresLogout: false,
+  });
+
+  const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
+    const apiError = err as APIError;
+    const errorData = apiError.data || {};
+    const errorMessage = apiError.message || err.message || 'An error occurred';
+
+    const requiresReconnect = errorData.requires_reconnect ||
+                            errorData.requires_refresh ||
+                            errorMessage.toLowerCase().includes('reconnect') ||
+                            errorMessage.toLowerCase().includes('disconnect and reconnect') ||
+                            errorMessage.toLowerCase().includes('token expired') ||
+                            errorMessage.toLowerCase().includes('decrypt') ||
+                            errorMessage.toLowerCase().includes('session expired');
+
+    const requiresLogout = errorData.requires_logout ||
+                          errorMessage.toLowerCase().includes('log out') ||
+                          errorMessage.toLowerCase().includes('log in again') ||
+                          (apiError.status === 401 && !requiresReconnect);
+
+    return {
+      message: errorMessage,
+      requiresReconnect,
+      requiresLogout,
+    };
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -51,15 +95,55 @@ export default function DocumentsScreen() {
   const checkConnections = async () => {
     try {
       const [onedriveStatus, googledriveStatus, googlephotosStatus] = await Promise.all([
-        OAuthService.checkConnection('onedrive'),
-        OAuthService.checkConnection('googledrive'),
-        OAuthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
+        OAuthService.checkConnection('onedrive').catch((err) => {
+          console.error('Error checking OneDrive connection:', err);
+          return { connected: false };
+        }),
+        OAuthService.checkConnection('googledrive').catch((err) => {
+          console.error('Error checking Google Drive connection:', err);
+          return { connected: false };
+        }),
+        OAuthService.checkConnection('googlephotos').catch((err) => {
+          console.error('Error checking Google Photos connection:', err);
+          // Show error modal for Google Photos errors
+          const parsedError = parseError(err, 'Google Photos');
+          if (parsedError.requiresReconnect || parsedError.requiresLogout) {
+            setErrorModal({
+              visible: true,
+              title: 'Google Photos Connection Error',
+              message: parsedError.message,
+              requiresReconnect: parsedError.requiresReconnect,
+              requiresLogout: parsedError.requiresLogout,
+            });
+          }
+          return { connected: false };
+        }),
       ]);
       setOnedriveConnected(onedriveStatus.connected);
       setGoogledriveConnected(googledriveStatus.connected);
       setGooglephotosConnected(googlephotosStatus.connected);
     } catch (error) {
       console.error('Error checking connections:', error);
+    }
+  };
+
+  const handleErrorModalClose = () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleReconnect = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    router.push('/(tabs)/googlephotos-connect');
+  };
+
+  const handleLogout = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    try {
+      await AuthService.logout();
+      router.replace('/(auth)/login');
+    } catch (err) {
+      console.error('Error during logout:', err);
+      router.replace('/(auth)/login');
     }
   };
 
@@ -126,6 +210,18 @@ export default function DocumentsScreen() {
           />
         )}
       </View>
+
+      <AlertModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        type="error"
+        onClose={handleErrorModalClose}
+        onConfirm={errorModal.requiresReconnect ? handleReconnect : errorModal.requiresLogout ? handleLogout : handleErrorModalClose}
+        confirmText={errorModal.requiresReconnect ? 'Go to Settings' : errorModal.requiresLogout ? 'Logout' : 'OK'}
+        showCancel={errorModal.requiresReconnect || errorModal.requiresLogout}
+        cancelText="Cancel"
+      />
     </View>
   );
 }
@@ -171,12 +267,10 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
     folderId: null,
     folderName: '',
   });
-  const [documentsFilter, setDocumentsFilter] = useState('');
-  const [documentsSortBy, setDocumentsSortBy] = useState<'name' | 'date' | 'size'>('name');
-  const [documentsSortOrder, setDocumentsSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [foldersFilter, setFoldersFilter] = useState('');
-  const [foldersSortBy, setFoldersSortBy] = useState<'name' | 'date'>('name');
-  const [foldersSortOrder, setFoldersSortOrder] = useState<'asc' | 'desc'>('asc');
+  // Unified search and sort for both folders and documents
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const loadDocuments = useCallback(
     async (skipLoading = false) => {
@@ -282,55 +376,80 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
     }
   };
 
+  // Get folders to display - if searching, search all folders, otherwise show current folder's folders
+  const getDisplayFolders = (): AppFolder[] => {
+    if (searchQuery.trim()) {
+      // When searching, search through all folders
+      return allFolders;
+    } else {
+      // When not searching, show only folders in current folder
+      return folders;
+    }
+  };
+
+  // Get documents to display - if searching, search all documents, otherwise show current folder's documents
+  const getDisplayDocuments = (): AppDocument[] => {
+    if (searchQuery.trim()) {
+      // When searching, search through all documents
+      return allDocuments;
+    } else {
+      // When not searching, show only documents in current folder
+      return documents;
+    }
+  };
+
   const filterAndSortFolders = (foldersList: AppFolder[]) => {
     let filtered = foldersList;
-    if (foldersFilter.trim()) {
-      const filterLower = foldersFilter.toLowerCase();
+    if (searchQuery.trim()) {
+      const queryLower = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (folder) =>
-          folder.name.toLowerCase().includes(filterLower) ||
-          (folder.description && folder.description.toLowerCase().includes(filterLower))
+          folder.name.toLowerCase().includes(queryLower) ||
+          (folder.description && folder.description.toLowerCase().includes(queryLower))
       );
     }
     filtered = [...filtered].sort((a, b) => {
       let comparison = 0;
-      if (foldersSortBy === 'name') {
+      if (sortBy === 'name') {
         comparison = a.name.localeCompare(b.name);
-      } else if (foldersSortBy === 'date') {
+      } else if (sortBy === 'date') {
         const dateA = new Date(a.created_at || a.updated_at || 0).getTime();
         const dateB = new Date(b.created_at || b.updated_at || 0).getTime();
         comparison = dateA - dateB;
+      } else if (sortBy === 'size') {
+        // Folders don't have size, so sort by name when size is selected
+        comparison = a.name.localeCompare(b.name);
       }
-      return foldersSortOrder === 'asc' ? comparison : -comparison;
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
     return filtered;
   };
 
   const filterAndSortDocuments = (documentsList: AppDocument[]) => {
     let filtered = documentsList;
-    if (documentsFilter.trim()) {
-      const filterLower = documentsFilter.toLowerCase();
+    if (searchQuery.trim()) {
+      const queryLower = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (doc) =>
-          doc.name.toLowerCase().includes(filterLower) ||
-          (doc.description && doc.description.toLowerCase().includes(filterLower)) ||
-          (doc.mime_type && doc.mime_type.toLowerCase().includes(filterLower))
+          doc.name.toLowerCase().includes(queryLower) ||
+          (doc.description && doc.description.toLowerCase().includes(queryLower)) ||
+          (doc.mime_type && doc.mime_type.toLowerCase().includes(queryLower))
       );
     }
     filtered = [...filtered].sort((a, b) => {
       let comparison = 0;
-      if (documentsSortBy === 'name') {
+      if (sortBy === 'name') {
         comparison = a.name.localeCompare(b.name);
-      } else if (documentsSortBy === 'date') {
+      } else if (sortBy === 'date') {
         const dateA = new Date(a.created_at || a.updated_at || 0).getTime();
         const dateB = new Date(b.created_at || b.updated_at || 0).getTime();
         comparison = dateA - dateB;
-      } else if (documentsSortBy === 'size') {
+      } else if (sortBy === 'size') {
         const sizeA = a.file_size || 0;
         const sizeB = b.file_size || 0;
         comparison = sizeA - sizeB;
       }
-      return documentsSortOrder === 'asc' ? comparison : -comparison;
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
     return filtered;
   };
@@ -564,6 +683,33 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
 
   return (
     <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
+      {/* Title with Breadcrumb */}
+      <View style={[styles.titleBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <Text style={[styles.documentsTitle, { color: colors.text }]}>Documents</Text>
+        {(folderPath.length > 0 || currentFolder) && (
+          <View style={styles.breadcrumbInline}>
+            <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+            <TouchableOpacity onPress={() => navigateToPath(-1)}>
+              <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+            </TouchableOpacity>
+            {folderPath.map((folder, index) => (
+              <React.Fragment key={folder.id}>
+                <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                <TouchableOpacity onPress={() => navigateToPath(index)}>
+                  <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
+                </TouchableOpacity>
+              </React.Fragment>
+            ))}
+            {currentFolder && !folderPath.find((f) => f.id === currentFolder.id) && (
+              <>
+                <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                <Text style={[styles.breadcrumbItem, { color: colors.text }]}>{currentFolder.name}</Text>
+              </>
+            )}
+          </View>
+        )}
+      </View>
+
       {/* Header Actions */}
       <View style={[styles.headerActions, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <TouchableOpacity
@@ -603,29 +749,6 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
           <Text style={styles.actionButtonText}>{showUploadForm ? 'Cancel' : 'Upload Document'}</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Breadcrumb */}
-      {(folderPath.length > 0 || currentFolder) && (
-        <View style={[styles.breadcrumb, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={() => navigateToPath(-1)}>
-            <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
-          </TouchableOpacity>
-          {folderPath.map((folder, index) => (
-            <React.Fragment key={folder.id}>
-              <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-              <TouchableOpacity onPress={() => navigateToPath(index)}>
-                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
-              </TouchableOpacity>
-            </React.Fragment>
-          ))}
-          {currentFolder && !folderPath.find((f) => f.id === currentFolder.id) && (
-            <>
-              <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-              <Text style={[styles.breadcrumbItem, { color: colors.text }]}>{currentFolder.name}</Text>
-            </>
-          )}
-        </View>
-      )}
 
       {/* Summary Statistics */}
       {!loading && (
@@ -825,79 +948,83 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
           </View>
         ) : (
           <>
-            {/* Filter and Sort Controls */}
-            <View style={[styles.filterSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-              <View style={styles.filterSortGroup}>
-                <Text style={[styles.filterSortLabel, { color: colors.textSecondary }]}>Filter Folders:</Text>
+            {/* Search and Sort Controls */}
+            <View style={[styles.searchSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+              <View style={styles.searchContainer}>
                 <TextInput
-                  style={[styles.filterInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                  placeholder="Search folders..."
+                  style={[styles.searchInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder="Search folders and documents..."
                   placeholderTextColor={colors.textSecondary}
-                  value={foldersFilter}
-                  onChangeText={setFoldersFilter}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
                 />
-              </View>
-              <View style={styles.filterSortGroup}>
-                <Text style={[styles.filterSortLabel, { color: colors.textSecondary }]}>Sort Folders:</Text>
-                <View style={styles.sortControls}>
-                  <TouchableOpacity
-                    style={[styles.sortButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-                    onPress={() => setFoldersSortBy(foldersSortBy === 'name' ? 'date' : 'name')}
-                  >
-                    <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {foldersSortBy === 'name' ? 'Name' : 'Date'}
-                    </Text>
+                {searchQuery.length > 0 ? (
+                  <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+                    <FontAwesome name="times" size={14} color={colors.textSecondary} />
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sortButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-                    onPress={() => setFoldersSortOrder(foldersSortOrder === 'asc' ? 'desc' : 'asc')}
-                  >
-                    <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {foldersSortOrder === 'asc' ? '\u2191' : '\u2193'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                ) : (
+                  <FontAwesome name="search" size={16} color={colors.textSecondary} style={styles.searchIcon} />
+                )}
               </View>
-              <View style={styles.filterSortGroup}>
-                <Text style={[styles.filterSortLabel, { color: colors.textSecondary }]}>Filter Documents:</Text>
-                <TextInput
-                  style={[styles.filterInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                  placeholder="Search documents..."
-                  placeholderTextColor={colors.textSecondary}
-                  value={documentsFilter}
-                  onChangeText={setDocumentsFilter}
-                />
-              </View>
-              <View style={styles.filterSortGroup}>
-                <Text style={[styles.filterSortLabel, { color: colors.textSecondary }]}>Sort Documents:</Text>
-                <View style={styles.sortControls}>
-                  <TouchableOpacity
-                    style={[styles.sortButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-                    onPress={() => {
-                      const order: ('name' | 'date' | 'size')[] = ['name', 'date', 'size'];
-                      const currentIndex = order.indexOf(documentsSortBy);
-                      setDocumentsSortBy(order[(currentIndex + 1) % order.length]);
+              <View style={styles.sortContainer}>
+                {Platform.OS === 'web' ? (
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value as 'name' | 'date' | 'size');
+                    }}
+                    style={{
+                      flex: 1,
+                      height: 44,
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                      color: colors.text,
+                      fontSize: 14,
+                      fontWeight: '500',
+                      outline: 'none',
+                      cursor: 'pointer',
                     }}
                   >
-                    <Text style={[styles.sortButtonText, { color: colors.text }]}>{documentsSortBy}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sortButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-                    onPress={() => setDocumentsSortOrder(documentsSortOrder === 'asc' ? 'desc' : 'asc')}
-                  >
-                    <Text style={[styles.sortButtonText, { color: colors.text }]}>
-                      {documentsSortOrder === 'asc' ? '\u2191' : '\u2193'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                    <option value="name">Name</option>
+                    <option value="date">Date</option>
+                    <option value="size">Size</option>
+                  </select>
+                ) : (
+                  <View style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                    <Picker
+                      selectedValue={sortBy}
+                      onValueChange={(value) => setSortBy(value as 'name' | 'date' | 'size')}
+                      style={[styles.sortPicker, { color: colors.text }]}
+                      dropdownIconColor={colors.textSecondary}
+                      mode={Platform.OS === 'android' ? 'dropdown' : 'default'}
+                    >
+                      <Picker.Item label="Name" value="name" color={colors.text} />
+                      <Picker.Item label="Date" value="date" color={colors.text} />
+                      <Picker.Item label="Size" value="size" color={colors.text} />
+                    </Picker>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={[styles.sortOrderButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  onPress={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                >
+                  <FontAwesome
+                    name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
+                    size={14}
+                    color={colors.text}
+                  />
+                </TouchableOpacity>
               </View>
             </View>
 
             {/* Folders List */}
-            {filterAndSortFolders(folders).length > 0 && (
+            {filterAndSortFolders(getDisplayFolders()).length > 0 && (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Folders</Text>
-                {filterAndSortFolders(folders).map((folder) => (
+                {filterAndSortFolders(getDisplayFolders()).map((folder) => (
                   <AppFolderItem
                     key={folder.id}
                     folder={folder}
@@ -919,10 +1046,10 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
             )}
 
             {/* Documents List */}
-            {filterAndSortDocuments(documents).length > 0 && (
+            {filterAndSortDocuments(getDisplayDocuments()).length > 0 && (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Documents</Text>
-                {filterAndSortDocuments(documents).map((document) => (
+                {filterAndSortDocuments(getDisplayDocuments()).map((document) => (
                   <AppDocumentItem
                     key={document.id}
                     document={document}
@@ -1159,6 +1286,7 @@ function GooglePhotosTab({
 }
 
 function OneDriveBrowser({ colors }: { colors: any }) {
+  const router = useRouter();
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
@@ -1173,6 +1301,92 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     isOpen: false,
     item: null,
   });
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    requiresReconnect: boolean;
+    requiresLogout: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    requiresReconnect: false,
+    requiresLogout: false,
+  });
+  const [reconnecting, setReconnecting] = useState(false);
+
+  const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
+    const apiError = err as APIError;
+    const errorData = apiError.data || {};
+    const errorMessage = apiError.message || err.message || 'An error occurred';
+
+    const hasReconnectFlag = errorData.requires_reconnect || errorData.requires_reconnect === true;
+    const hasRefreshFlag = errorData.requires_refresh || errorData.requires_refresh === true;
+    const isOAuth401 = apiError.status === 401;
+
+    const requiresReconnect = hasReconnectFlag ||
+                            (isOAuth401 && !hasRefreshFlag) ||
+                            errorMessage.toLowerCase().includes('reconnect') ||
+                            errorMessage.toLowerCase().includes('disconnect and reconnect') ||
+                            errorMessage.toLowerCase().includes('token expired') ||
+                            errorMessage.toLowerCase().includes('decrypt') ||
+                            errorMessage.toLowerCase().includes('unable to decrypt') ||
+                            errorMessage.toLowerCase().includes('oauth') ||
+                            errorMessage.toLowerCase().includes('invalid token');
+
+    const requiresLogout = hasRefreshFlag ||
+                          errorData.requires_logout ||
+                          errorMessage.toLowerCase().includes('log out') ||
+                          errorMessage.toLowerCase().includes('log in again') ||
+                          errorMessage.toLowerCase().includes('session expired');
+
+    let finalMessage = errorMessage;
+    if (isOAuth401 && !hasReconnectFlag && !hasRefreshFlag) {
+      finalMessage = 'Your OneDrive connection has expired. Please reconnect your account in Settings.';
+    } else if (isOAuth401 && hasReconnectFlag) {
+      finalMessage = errorMessage || 'Your OneDrive connection needs to be reconnected. Please disconnect and reconnect in Settings.';
+    }
+
+    return {
+      message: finalMessage,
+      requiresReconnect,
+      requiresLogout,
+    };
+  };
+
+  // Helper function to sort files: folders first (alphabetically), then files (alphabetically)
+  const sortFiles = (filesList: CloudFile[]): CloudFile[] => {
+    const folders: CloudFile[] = [];
+    const files: CloudFile[] = [];
+
+    filesList.forEach((file) => {
+      const mimeType = file.mimeType || file.file?.mimeType;
+      const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
+      if (isFolder) {
+        folders.push(file);
+      } else {
+        files.push(file);
+      }
+    });
+
+    // Sort folders alphabetically by name
+    folders.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    // Sort files alphabetically by name
+    files.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    // Return folders first, then files
+    return [...folders, ...files];
+  };
 
   const loadFiles = useCallback(
     async (skipLoading = false) => {
@@ -1182,18 +1396,23 @@ function OneDriveBrowser({ colors }: { colors: any }) {
         }
         setError('');
         const filesList = await DocumentService.listOneDriveFiles(currentFolder || undefined);
-        setFiles(filesList);
+        const sortedFiles = sortFiles(filesList);
+        setFiles(sortedFiles);
       } catch (err: any) {
         console.error('Error loading OneDrive files:', err);
-        const errorData = err?.response?.data;
-        const errorMessage = errorData?.error || err?.message || 'Failed to load files. Please try again.';
+        const parsedError = parseError(err);
 
-        // Handle session expiration specifically
-        if (errorData?.requires_refresh) {
-          setError('Session expired. Your OneDrive connection is still valid, but you need to refresh your session. Please log out and log back in.');
-        } else {
-          setError(errorMessage);
-        }
+        // Show error modal
+        setErrorModal({
+          visible: true,
+          title: 'Error Loading Files',
+          message: parsedError.message,
+          requiresReconnect: parsedError.requiresReconnect,
+          requiresLogout: parsedError.requiresLogout,
+        });
+
+        // Also set inline error
+        setError(parsedError.message);
       } finally {
         if (!skipLoading) {
           setLoading(false);
@@ -1220,6 +1439,50 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     await loadFiles(true);
     setRefreshing(false);
   }, [loadFiles]);
+
+  const handleReconnect = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    try {
+      setReconnecting(true);
+      setError('');
+
+      // Disconnect first
+      try {
+        await OAuthService.disconnect('onedrive');
+      } catch (disconnectErr) {
+        // Ignore disconnect errors - service might already be disconnected
+        console.log('Disconnect error (may be expected):', disconnectErr);
+      }
+
+      // Wait a moment before reconnecting
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Initiate reconnect OAuth flow
+      const result = await OAuthService.connectOneDrive();
+
+      if (result.success) {
+        // Wait a moment for backend to process, then reload
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await loadFiles(false);
+        setError('');
+      } else {
+        throw new Error(result.message || 'Failed to reconnect OneDrive');
+      }
+    } catch (err: any) {
+      console.error('Error reconnecting OneDrive:', err);
+      const parsedError = parseError(err);
+      setErrorModal({
+        visible: true,
+        title: 'Reconnect Failed',
+        message: parsedError.message,
+        requiresReconnect: parsedError.requiresReconnect,
+        requiresLogout: parsedError.requiresLogout,
+      });
+      setError(parsedError.message);
+    } finally {
+      setReconnecting(false);
+    }
+  };
 
   const handleFolderClick = (folder: CloudFile) => {
     setCurrentFolder(folder.id);
@@ -1482,11 +1745,49 @@ function OneDriveBrowser({ colors }: { colors: any }) {
           type="danger"
         />
       )}
+
+      <AlertModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        type="error"
+        onClose={() => setErrorModal(prev => ({ ...prev, visible: false }))}
+        onConfirm={errorModal.requiresReconnect ? handleReconnect : errorModal.requiresLogout ? async () => {
+          setErrorModal(prev => ({ ...prev, visible: false }));
+          try {
+            await AuthService.logout();
+            router.replace('/(auth)/login');
+          } catch (err) {
+            console.error('Error during logout:', err);
+            router.replace('/(auth)/login');
+          }
+        } : () => setErrorModal(prev => ({ ...prev, visible: false }))}
+        confirmText={errorModal.requiresReconnect ? (reconnecting ? 'Reconnecting...' : 'Reconnect') : errorModal.requiresLogout ? 'Logout' : 'OK'}
+        showCancel={errorModal.requiresReconnect || errorModal.requiresLogout}
+        cancelText="Cancel"
+      />
+
+      {reconnecting && (
+        <Modal visible={true} transparent animationType="fade">
+          <View style={styles.reconnectOverlay}>
+            <View style={[styles.reconnectModal, { backgroundColor: colors.surface }]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.reconnectText, { color: colors.text }]}>
+                Reconnecting OneDrive...
+              </Text>
+              <Text style={[styles.reconnectSubtext, { color: colors.textSecondary }]}>
+                Please complete the authorization in your browser
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
 
 function GoogleDriveBrowser({ colors }: { colors: any }) {
+  const router = useRouter();
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
@@ -1501,6 +1802,92 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     isOpen: false,
     item: null,
   });
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    requiresReconnect: boolean;
+    requiresLogout: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    requiresReconnect: false,
+    requiresLogout: false,
+  });
+  const [reconnecting, setReconnecting] = useState(false);
+
+  const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
+    const apiError = err as APIError;
+    const errorData = apiError.data || {};
+    const errorMessage = apiError.message || err.message || 'An error occurred';
+
+    const hasReconnectFlag = errorData.requires_reconnect || errorData.requires_reconnect === true;
+    const hasRefreshFlag = errorData.requires_refresh || errorData.requires_refresh === true;
+    const isOAuth401 = apiError.status === 401;
+
+    const requiresReconnect = hasReconnectFlag ||
+                            (isOAuth401 && !hasRefreshFlag) ||
+                            errorMessage.toLowerCase().includes('reconnect') ||
+                            errorMessage.toLowerCase().includes('disconnect and reconnect') ||
+                            errorMessage.toLowerCase().includes('token expired') ||
+                            errorMessage.toLowerCase().includes('decrypt') ||
+                            errorMessage.toLowerCase().includes('unable to decrypt') ||
+                            errorMessage.toLowerCase().includes('oauth') ||
+                            errorMessage.toLowerCase().includes('invalid token');
+
+    const requiresLogout = hasRefreshFlag ||
+                          errorData.requires_logout ||
+                          errorMessage.toLowerCase().includes('log out') ||
+                          errorMessage.toLowerCase().includes('log in again') ||
+                          errorMessage.toLowerCase().includes('session expired');
+
+    let finalMessage = errorMessage;
+    if (isOAuth401 && !hasReconnectFlag && !hasRefreshFlag) {
+      finalMessage = 'Your Google Drive connection has expired. Please reconnect your account in Settings.';
+    } else if (isOAuth401 && hasReconnectFlag) {
+      finalMessage = errorMessage || 'Your Google Drive connection needs to be reconnected. Please disconnect and reconnect in Settings.';
+    }
+
+    return {
+      message: finalMessage,
+      requiresReconnect,
+      requiresLogout,
+    };
+  };
+
+  // Helper function to sort files: folders first (alphabetically), then files (alphabetically)
+  const sortFiles = (filesList: CloudFile[]): CloudFile[] => {
+    const folders: CloudFile[] = [];
+    const files: CloudFile[] = [];
+
+    filesList.forEach((file) => {
+      const mimeType = file.mimeType || file.file?.mimeType;
+      const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
+      if (isFolder) {
+        folders.push(file);
+      } else {
+        files.push(file);
+      }
+    });
+
+    // Sort folders alphabetically by name
+    folders.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    // Sort files alphabetically by name
+    files.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    // Return folders first, then files
+    return [...folders, ...files];
+  };
 
   const loadFiles = useCallback(
     async (skipLoading = false) => {
@@ -1510,18 +1897,23 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
         }
         setError('');
         const filesList = await DocumentService.listGoogleDriveFiles(currentFolder || undefined);
-        setFiles(filesList);
+        const sortedFiles = sortFiles(filesList);
+        setFiles(sortedFiles);
       } catch (err: any) {
         console.error('Error loading Google Drive files:', err);
-        const errorData = err?.response?.data;
-        const errorMessage = errorData?.error || err?.message || 'Failed to load files. Please try again.';
+        const parsedError = parseError(err);
 
-        // Handle session expiration specifically
-        if (errorData?.requires_refresh) {
-          setError('Session expired. Your Google Drive connection is still valid, but you need to refresh your session. Please log out and log back in.');
-        } else {
-          setError(errorMessage);
-        }
+        // Show error modal
+        setErrorModal({
+          visible: true,
+          title: 'Error Loading Files',
+          message: parsedError.message,
+          requiresReconnect: parsedError.requiresReconnect,
+          requiresLogout: parsedError.requiresLogout,
+        });
+
+        // Also set inline error
+        setError(parsedError.message);
       } finally {
         if (!skipLoading) {
           setLoading(false);
@@ -1548,6 +1940,50 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     await loadFiles(true);
     setRefreshing(false);
   }, [loadFiles]);
+
+  const handleReconnect = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    try {
+      setReconnecting(true);
+      setError('');
+
+      // Disconnect first
+      try {
+        await OAuthService.disconnect('googledrive');
+      } catch (disconnectErr) {
+        // Ignore disconnect errors - service might already be disconnected
+        console.log('Disconnect error (may be expected):', disconnectErr);
+      }
+
+      // Wait a moment before reconnecting
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Initiate reconnect OAuth flow
+      const result = await OAuthService.connectGoogleDrive();
+
+      if (result.success) {
+        // Wait a moment for backend to process, then reload
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await loadFiles(false);
+        setError('');
+      } else {
+        throw new Error(result.message || 'Failed to reconnect Google Drive');
+      }
+    } catch (err: any) {
+      console.error('Error reconnecting Google Drive:', err);
+      const parsedError = parseError(err);
+      setErrorModal({
+        visible: true,
+        title: 'Reconnect Failed',
+        message: parsedError.message,
+        requiresReconnect: parsedError.requiresReconnect,
+        requiresLogout: parsedError.requiresLogout,
+      });
+      setError(parsedError.message);
+    } finally {
+      setReconnecting(false);
+    }
+  };
 
   const handleFolderClick = (folder: CloudFile) => {
     setCurrentFolder(folder.id);
@@ -1808,11 +2244,49 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
           type="danger"
         />
       )}
+
+      <AlertModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        type="error"
+        onClose={() => setErrorModal(prev => ({ ...prev, visible: false }))}
+        onConfirm={errorModal.requiresReconnect ? handleReconnect : errorModal.requiresLogout ? async () => {
+          setErrorModal(prev => ({ ...prev, visible: false }));
+          try {
+            await AuthService.logout();
+            router.replace('/(auth)/login');
+          } catch (err) {
+            console.error('Error during logout:', err);
+            router.replace('/(auth)/login');
+          }
+        } : () => setErrorModal(prev => ({ ...prev, visible: false }))}
+        confirmText={errorModal.requiresReconnect ? (reconnecting ? 'Reconnecting...' : 'Reconnect') : errorModal.requiresLogout ? 'Logout' : 'OK'}
+        showCancel={errorModal.requiresReconnect || errorModal.requiresLogout}
+        cancelText="Cancel"
+      />
+
+      {reconnecting && (
+        <Modal visible={true} transparent animationType="fade">
+          <View style={styles.reconnectOverlay}>
+            <View style={[styles.reconnectModal, { backgroundColor: colors.surface }]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.reconnectText, { color: colors.text }]}>
+                Reconnecting Google Drive...
+              </Text>
+              <Text style={[styles.reconnectSubtext, { color: colors.textSecondary }]}>
+                Please complete the authorization in your browser
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
 
 function GooglePhotosBrowser({ colors }: { colors: any }) {
+  const router = useRouter();
   const { width, height } = useWindowDimensions();
   const isMobileView = Platform.OS !== 'web' || width < 768;
   const [items, setItems] = useState<GooglePhotoItem[]>([]);
@@ -1822,6 +2296,117 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<GooglePhotoItem | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    requiresReconnect: boolean;
+    requiresLogout: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    requiresReconnect: false,
+    requiresLogout: false,
+  });
+
+  const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
+    const apiError = err as APIError;
+    const errorData = apiError.data || {};
+    const errorMessage = apiError.message || err.message || 'An error occurred';
+
+    // Check for explicit flags from backend
+    const hasReconnectFlag = errorData.requires_reconnect === true;
+    const hasRefreshFlag = errorData.requires_refresh === true;
+    const hasLogoutFlag = errorData.requires_logout === true;
+
+    // For OAuth service endpoints, a 401 usually means OAuth token expired (reconnect needed)
+    // Unless explicitly marked as requires_refresh (session expired, needs logout)
+    const isOAuth401 = apiError.status === 401;
+
+    // Check message content for clues
+    const messageLower = errorMessage.toLowerCase();
+    const mentionsReconnect = messageLower.includes('reconnect') ||
+                             messageLower.includes('disconnect and reconnect') ||
+                             messageLower.includes('token expired') ||
+                             messageLower.includes('decrypt') ||
+                             messageLower.includes('unable to decrypt') ||
+                             messageLower.includes('oauth') ||
+                             messageLower.includes('invalid token');
+
+    const mentionsLogout = messageLower.includes('log out') ||
+                          messageLower.includes('log in again') ||
+                          messageLower.includes('session expired');
+
+    // Determine action needed
+    let requiresReconnect = hasReconnectFlag || mentionsReconnect;
+    let requiresLogout = hasLogoutFlag || hasRefreshFlag || mentionsLogout;
+
+    // For 401 on OAuth endpoints: default to reconnect unless explicitly marked as refresh
+    if (isOAuth401 && !hasRefreshFlag && !hasLogoutFlag && !mentionsLogout) {
+      requiresReconnect = true;
+      requiresLogout = false;
+    }
+
+    // Improve error message
+    let finalMessage = errorMessage;
+    if (isOAuth401 && requiresReconnect && !hasReconnectFlag) {
+      finalMessage = 'Your Google Photos connection has expired. Please reconnect your account in Settings.';
+    } else if (requiresReconnect && !finalMessage.toLowerCase().includes('reconnect')) {
+      finalMessage = `${finalMessage} Please reconnect your Google Photos account in Settings.`;
+    }
+
+    return {
+      message: finalMessage,
+      requiresReconnect,
+      requiresLogout,
+    };
+  };
+
+  const handleReconnect = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    try {
+      setReconnecting(true);
+      setError(''); // Clear any inline error
+
+      // Disconnect first
+      try {
+        await OAuthService.disconnect('googlephotos');
+      } catch (disconnectErr) {
+        // Ignore disconnect errors - service might already be disconnected
+        console.log('Disconnect error (may be expected):', disconnectErr);
+      }
+
+      // Wait a moment before reconnecting
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Initiate reconnect OAuth flow
+      const result = await OAuthService.connectGooglePhotos();
+
+      if (result.success) {
+        // Wait a moment for backend to process, then reload
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await loadItems(false, undefined, false);
+        setError('');
+      } else {
+        throw new Error(result.message || 'Failed to reconnect Google Photos');
+      }
+    } catch (err: any) {
+      console.error('Error reconnecting Google Photos:', err);
+      const parsedError = parseError(err);
+      setErrorModal({
+        visible: true,
+        title: 'Reconnect Failed',
+        message: parsedError.message,
+        requiresReconnect: parsedError.requiresReconnect,
+        requiresLogout: parsedError.requiresLogout,
+      });
+      setError(parsedError.message);
+    } finally {
+      setReconnecting(false);
+    }
+  };
 
   // Zoom state
   const baseScale = useRef(new Animated.Value(1)).current;
@@ -1904,6 +2489,16 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
     }
   }, [selectedPhoto, handleWebMouseMove, handleWebMouseUp]);
 
+  // Helper function to sort photos by creation time: most recent first (newest at top, oldest at bottom)
+  const sortPhotos = (photos: GooglePhotoItem[]): GooglePhotoItem[] => {
+    return [...photos].sort((a, b) => {
+      const timeA = a.mediaMetadata?.creationTime ? new Date(a.mediaMetadata.creationTime).getTime() : 0;
+      const timeB = b.mediaMetadata?.creationTime ? new Date(b.mediaMetadata.creationTime).getTime() : 0;
+      // Sort in descending order (newest first)
+      return timeB - timeA;
+    });
+  };
+
   const loadItems = useCallback(
     async (skipLoading = false, pageToken?: string, append: boolean = false) => {
       try {
@@ -1916,24 +2511,27 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
         const response = await DocumentService.listGooglePhotosMediaItems(pageToken);
         setNextPageToken(response.nextPageToken || null);
         if (append) {
-          setItems((prev) => [...prev, ...(response.items || [])]);
+          const newItems = response.items || [];
+          setItems((prev) => sortPhotos([...prev, ...newItems]));
         } else {
-          setItems(response.items || []);
+          const sortedItems = sortPhotos(response.items || []);
+          setItems(sortedItems);
         }
       } catch (err: any) {
         console.error('Error loading Google Photos media items:', err);
-        const errorData = err?.response?.data;
-        const errorMessage = errorData?.error || err?.message || 'Failed to load photos. Please try again.';
+        const parsedError = parseError(err, 'Google Photos');
 
-        if (errorData?.requires_refresh) {
-          setError(
-            'Session expired. Your Google Photos connection is still valid, but you need to refresh your session. Please log out and log back in.'
-          );
-        } else if (errorData?.requires_reconnect) {
-          setError('Unable to decrypt Google Photos tokens. Please disconnect and reconnect in Settings.');
-        } else {
-          setError(errorMessage);
-        }
+        // Show error modal instead of inline error
+        setErrorModal({
+          visible: true,
+          title: 'Error Loading Photos',
+          message: parsedError.message,
+          requiresReconnect: parsedError.requiresReconnect,
+          requiresLogout: parsedError.requiresLogout,
+        });
+
+        // Also set inline error for display
+        setError(parsedError.message);
       } finally {
         if (!skipLoading && !append) {
           setLoading(false);
@@ -2183,6 +2781,43 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
           </View>
         </GestureHandlerRootView>
       </Modal>
+
+      <AlertModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        type="error"
+        onClose={() => setErrorModal(prev => ({ ...prev, visible: false }))}
+        onConfirm={errorModal.requiresReconnect ? handleReconnect : errorModal.requiresLogout ? async () => {
+          setErrorModal(prev => ({ ...prev, visible: false }));
+          try {
+            await AuthService.logout();
+            router.replace('/(auth)/login');
+          } catch (err) {
+            console.error('Error during logout:', err);
+            router.replace('/(auth)/login');
+          }
+        } : () => setErrorModal(prev => ({ ...prev, visible: false }))}
+        confirmText={errorModal.requiresReconnect ? (reconnecting ? 'Reconnecting...' : 'Reconnect') : errorModal.requiresLogout ? 'Logout' : 'OK'}
+        showCancel={errorModal.requiresReconnect || errorModal.requiresLogout}
+        cancelText="Cancel"
+      />
+
+      {reconnecting && (
+        <Modal visible={true} transparent animationType="fade">
+          <View style={styles.reconnectOverlay}>
+            <View style={[styles.reconnectModal, { backgroundColor: colors.surface }]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.reconnectText, { color: colors.text }]}>
+                Reconnecting Google Photos...
+              </Text>
+              <Text style={[styles.reconnectSubtext, { color: colors.textSecondary }]}>
+                Please complete the authorization in your browser
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -2572,39 +3207,81 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  filterSortContainer: {
+  titleBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    flexWrap: 'wrap',
+  },
+  documentsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  breadcrumbInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    flex: 1,
+  },
+  searchSortContainer: {
     padding: 12,
     borderBottomWidth: 1,
     gap: 12,
+    overflow: 'visible',
   },
-  filterSortGroup: {
-    gap: 6,
-  },
-  filterSortLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 8,
-    fontSize: 14,
-  },
-  sortControls: {
+  sortContainer: {
     flexDirection: 'row',
     gap: 8,
-  },
-  sortButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    minWidth: 60,
     alignItems: 'center',
+    overflow: 'visible',
   },
-  sortButtonText: {
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 44,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
     fontSize: 14,
-    fontWeight: '500',
+    padding: 0,
+    borderWidth: 0,
+    height: 44,
+    paddingVertical: 8,
+  },
+  searchIcon: {
+    marginLeft: 4,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  sortDropdownWrapper: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  sortPicker: {
+    height: 44,
+    width: '100%',
+  },
+  sortOrderButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    minHeight: 44,
   },
   section: {
     padding: 8,
@@ -2726,5 +3403,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  reconnectOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  reconnectModal: {
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    minWidth: 280,
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  reconnectText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  reconnectSubtext: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  reconnectOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  reconnectModal: {
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    minWidth: 280,
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  reconnectText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  reconnectSubtext: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
 });
+
 

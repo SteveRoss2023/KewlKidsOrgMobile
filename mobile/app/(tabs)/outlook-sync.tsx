@@ -9,18 +9,59 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import oauthService, { OAuthConnectionStatus } from '../../services/oauthService';
+import AlertModal from '../../components/AlertModal';
+import AuthService from '../../services/authService';
+import { APIError } from '../../services/api';
 
 export default function OutlookSyncScreen() {
   const { colors } = useTheme();
+  const router = useRouter();
   const { selectedFamily } = useFamily();
   const [loading, setLoading] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<OAuthConnectionStatus>({ connected: false });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    requiresReconnect: boolean;
+    requiresLogout: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    requiresReconnect: false,
+    requiresLogout: false,
+  });
+
+  const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
+    const apiError = err as APIError;
+    const errorData = apiError.data || {};
+    const errorMessage = apiError.message || err.message || 'An error occurred';
+
+    const requiresReconnect = errorData.requires_reconnect ||
+                            errorMessage.toLowerCase().includes('reconnect') ||
+                            errorMessage.toLowerCase().includes('disconnect and reconnect') ||
+                            errorMessage.toLowerCase().includes('token expired') ||
+                            errorMessage.toLowerCase().includes('decrypt');
+
+    const requiresLogout = errorData.requires_logout ||
+                          errorMessage.toLowerCase().includes('log out') ||
+                          errorMessage.toLowerCase().includes('log in again') ||
+                          (apiError.status === 401 && !requiresReconnect);
+
+    return {
+      message: errorMessage,
+      requiresReconnect,
+      requiresLogout,
+    };
+  };
 
   useEffect(() => {
     checkConnection();
@@ -56,7 +97,16 @@ export default function OutlookSyncScreen() {
       }
     } catch (err: any) {
       console.error('Error checking Outlook connection:', err);
-      setError(err.message || 'Failed to check connection status');
+      const parsedError = parseError(err);
+
+      setErrorModal({
+        visible: true,
+        title: 'Connection Error',
+        message: parsedError.message,
+        requiresReconnect: parsedError.requiresReconnect,
+        requiresLogout: parsedError.requiresLogout,
+      });
+
       setConnectionStatus({ connected: false });
     } finally {
       setLoading(false);
@@ -103,7 +153,15 @@ export default function OutlookSyncScreen() {
       }
     } catch (err: any) {
       console.error('Error connecting Outlook:', err);
-      setError(err.message || 'Failed to connect Outlook calendar. Please try again.');
+      const parsedError = parseError(err);
+
+      setErrorModal({
+        visible: true,
+        title: 'Connection Failed',
+        message: parsedError.message,
+        requiresReconnect: parsedError.requiresReconnect,
+        requiresLogout: parsedError.requiresLogout,
+      });
     } finally {
       setConnecting(false);
     }
@@ -124,7 +182,14 @@ export default function OutlookSyncScreen() {
               // TODO: Implement disconnect endpoint for Outlook
               setError('Disconnect not yet implemented for Outlook');
             } catch (err: any) {
-              setError(err.message || 'Failed to disconnect');
+              const parsedError = parseError(err);
+              setErrorModal({
+                visible: true,
+                title: 'Disconnect Failed',
+                message: parsedError.message,
+                requiresReconnect: false,
+                requiresLogout: parsedError.requiresLogout,
+              });
             } finally {
               setLoading(false);
               await checkConnection();
@@ -133,6 +198,41 @@ export default function OutlookSyncScreen() {
         },
       ]
     );
+  };
+
+  const handleErrorModalClose = () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleReconnect = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    // Outlook doesn't have a disconnect endpoint, so just try to reconnect
+    try {
+      setConnecting(true);
+      await handleConnect();
+    } catch (err: any) {
+      const parsedError = parseError(err);
+      setErrorModal({
+        visible: true,
+        title: 'Reconnect Failed',
+        message: parsedError.message,
+        requiresReconnect: false,
+        requiresLogout: parsedError.requiresLogout,
+      });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setErrorModal(prev => ({ ...prev, visible: false }));
+    try {
+      await AuthService.logout();
+      router.replace('/(auth)/login');
+    } catch (err) {
+      console.error('Error during logout:', err);
+      router.replace('/(auth)/login');
+    }
   };
 
   if (!selectedFamily) {
@@ -252,6 +352,18 @@ export default function OutlookSyncScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      <AlertModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        type="error"
+        onClose={handleErrorModalClose}
+        onConfirm={errorModal.requiresReconnect ? handleReconnect : errorModal.requiresLogout ? handleLogout : handleErrorModalClose}
+        confirmText={errorModal.requiresReconnect ? 'Reconnect' : errorModal.requiresLogout ? 'Logout' : 'OK'}
+        showCancel={errorModal.requiresReconnect || errorModal.requiresLogout}
+        cancelText="Cancel"
+      />
     </ScrollView>
   );
 }
