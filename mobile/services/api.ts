@@ -89,14 +89,11 @@ apiClient.interceptors.request.use(
 
     // Log request details in development
     if (__DEV__) {
-      console.log('API Request:', {
-        method: config.method?.toUpperCase(),
-        url: config.url,
-        baseURL: config.baseURL,
-        fullUrl: `${config.baseURL}${config.url}`,
-        hasData: !!config.data,
-        dataType: config.data instanceof FormData ? 'FormData' : typeof config.data,
-      });
+      const method = config.method?.toUpperCase() || 'GET';
+      const url = config.url || '';
+      const baseURL = config.baseURL || '';
+      const fullUrl = `${baseURL}${url}`;
+      console.log(`API Request: ${method} ${fullUrl}`);
     }
 
     return config;

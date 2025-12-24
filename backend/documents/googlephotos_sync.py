@@ -25,16 +25,16 @@ class GooglePhotosClient:
         if not self.refresh_token:
             raise ValueError("No refresh token available")
 
-        # Prefer Google Photos specific client configuration if present
-        client_id = getattr(settings, "GOOGLE_PHOTOS_CLIENT_ID", None) or getattr(
+        # Use Google Drive OAuth client (consolidated - same client for both services)
+        client_id = getattr(settings, "GOOGLEDRIVE_CLIENT_ID", None) or getattr(
             settings, "GOOGLE_CLIENT_ID"
         )
         client_secret = getattr(
-            settings, "GOOGLE_PHOTOS_CLIENT_SECRET", None
+            settings, "GOOGLEDRIVE_CLIENT_SECRET", None
         ) or getattr(settings, "GOOGLE_CLIENT_SECRET")
 
         if not client_id or not client_secret:
-            raise ValueError("Google Photos OAuth client not configured")
+            raise ValueError("Google OAuth client not configured")
 
         token_url = "https://oauth2.googleapis.com/token"
         data = {

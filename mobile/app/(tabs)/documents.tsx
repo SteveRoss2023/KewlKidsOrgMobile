@@ -14,6 +14,7 @@ import {
   Image,
   useWindowDimensions,
   Animated,
+  Linking,
 } from 'react-native';
 import {
   PinchGestureHandler,
@@ -38,6 +39,27 @@ import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 
 type TabType = 'app' | 'onedrive' | 'googledrive' | 'googlephotos';
+
+// Helper function for short date format on mobile
+function formatShortDate(dateString: string | undefined): string {
+  if (!dateString) return 'Unknown';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Unknown';
+    // Format as MM/DD/YY H:MM AM/PM for mobile
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
+    let hours = date.getHours();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${month}/${day}/${year} ${hours}:${minutes} ${ampm}`;
+  } catch {
+    return 'Unknown';
+  }
+}
 
 export default function DocumentsScreen() {
   const { colors } = useTheme();
@@ -155,38 +177,80 @@ export default function DocumentsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Documents</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Access your files from OneDrive, Google Drive, or app storage
-        </Text>
-      </View>
 
       {/* Tabs */}
       <View style={[styles.tabsContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'app' && [styles.activeTab, { borderBottomColor: colors.primary }]]}
+          style={[
+            styles.tab,
+            activeTab === 'app' && [styles.activeTab, { backgroundColor: colors.primary + '15', borderBottomColor: colors.primary }]
+          ]}
           onPress={() => handleTabChange('app')}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'app' ? colors.primary : colors.textSecondary }]}>App Documents</Text>
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'app' ? colors.primary : colors.textSecondary },
+              activeTab === 'app' && styles.activeTabText
+            ]}
+            numberOfLines={2}
+          >
+            App Docs
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'onedrive' && [styles.activeTab, { borderBottomColor: colors.primary }]]}
+          style={[
+            styles.tab,
+            activeTab === 'onedrive' && [styles.activeTab, { backgroundColor: colors.primary + '15', borderBottomColor: colors.primary }]
+          ]}
           onPress={() => handleTabChange('onedrive')}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'onedrive' ? colors.primary : colors.textSecondary }]}>OneDrive</Text>
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'onedrive' ? colors.primary : colors.textSecondary },
+              activeTab === 'onedrive' && styles.activeTabText
+            ]}
+            numberOfLines={2}
+          >
+            OneDrive
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'googledrive' && [styles.activeTab, { borderBottomColor: colors.primary }]]}
+          style={[
+            styles.tab,
+            activeTab === 'googledrive' && [styles.activeTab, { backgroundColor: colors.primary + '15', borderBottomColor: colors.primary }]
+          ]}
           onPress={() => handleTabChange('googledrive')}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'googledrive' ? colors.primary : colors.textSecondary }]}>Google Drive</Text>
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'googledrive' ? colors.primary : colors.textSecondary },
+              activeTab === 'googledrive' && styles.activeTabText
+            ]}
+            numberOfLines={2}
+          >
+            Google Drive
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'googlephotos' && [styles.activeTab, { borderBottomColor: colors.primary }]]}
+          style={[
+            styles.tab,
+            activeTab === 'googlephotos' && [styles.activeTab, { backgroundColor: colors.primary + '15', borderBottomColor: colors.primary }]
+          ]}
           onPress={() => handleTabChange('googlephotos')}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'googlephotos' ? colors.primary : colors.textSecondary }]}>Google Photos</Text>
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'googlephotos' ? colors.primary : colors.textSecondary },
+              activeTab === 'googlephotos' && styles.activeTabText
+            ]}
+            numberOfLines={2}
+          >
+            Google Photos
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -271,10 +335,15 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
 
   const loadDocuments = useCallback(
     async (skipLoading = false) => {
-      if (!selectedFamily) return;
+      if (!selectedFamily) {
+        setDocuments([]);
+        return;
+      }
       try {
         if (!skipLoading) {
           setLoading(true);
@@ -284,10 +353,17 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
           selectedFamily.id,
           currentFolder ? currentFolder.id : null
         );
-        setDocuments(docs);
+        setDocuments(docs || []);
       } catch (err: any) {
         console.error('Error loading documents:', err);
-        setError(err?.response?.data?.error || err?.message || 'Failed to load documents. Please try again.');
+        console.error('Family ID:', selectedFamily?.id);
+        console.error('Current Folder ID:', currentFolder?.id);
+        // Set empty array on error to show empty state instead of stale data
+        setDocuments([]);
+        // Set error message for user feedback
+        if (err?.response?.status !== 404) {
+          setError(err?.response?.data?.error || err?.message || 'Failed to load documents. Please try again.');
+        }
       } finally {
         if (!skipLoading) {
           setLoading(false);
@@ -299,15 +375,28 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
 
   const loadFolders = useCallback(
     async () => {
-      if (!selectedFamily) return;
+      if (!selectedFamily || !selectedFamily.id) {
+        console.warn('Cannot load folders: no family selected');
+        setFolders([]);
+        return;
+      }
       try {
         const foldersList = await AppDocumentsService.listFolders(
           selectedFamily.id,
           currentFolder ? currentFolder.id : null
         );
-        setFolders(foldersList);
+        setFolders(foldersList || []);
       } catch (err: any) {
         console.error('Error loading folders:', err);
+        console.error('Family ID:', selectedFamily?.id);
+        console.error('Current Folder ID:', currentFolder?.id);
+        console.error('Error response:', err?.response?.data);
+        // Set empty array on error to show empty state instead of stale data
+        setFolders([]);
+        // Set error message for user feedback
+        if (err?.response?.status !== 404) {
+          setError(err?.response?.data?.error || err?.message || 'Failed to load folders. Please try again.');
+        }
       }
     },
     [selectedFamily, currentFolder]
@@ -361,11 +450,16 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
   }, [loadDocuments, loadFolders, loadAllDocuments, loadAllFolders]);
 
   const navigateToFolder = (folder: AppFolder) => {
+    // Clear error state when navigating
+    setError('');
     setCurrentFolder(folder);
-    setFolderPath([...folderPath, folder]);
+    setFolderPath((prevPath) => [...prevPath, folder]);
   };
 
   const navigateToPath = (index: number) => {
+    // Clear error state when navigating
+    setError('');
+
     if (index === -1) {
       setCurrentFolder(null);
       setFolderPath([]);
@@ -374,6 +468,7 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
       setCurrentFolder(targetFolder);
       setFolderPath(folderPath.slice(0, index + 1));
     }
+    // Data will reload automatically via useEffect when currentFolder changes
   };
 
   // Get folders to display - if searching, search all folders, otherwise show current folder's folders
@@ -656,8 +751,13 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
   const handleView = async (doc: AppDocument) => {
     try {
       const { url } = await AppDocumentsService.getViewToken(doc.id);
-      // In React Native, we'd open this URL in a browser or document viewer
-      Alert.alert('View Document', `Document URL: ${url}`);
+      // Open the document URL in the device's browser or document viewer
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Error', 'Unable to open this document. The URL may be invalid.');
+      }
     } catch (err: any) {
       console.error('Error viewing document:', err);
       Alert.alert('Error', err?.response?.data?.detail || 'Failed to view document. Please try again.');
@@ -683,75 +783,82 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
 
   return (
     <View style={[styles.tabContent, { backgroundColor: colors.background }]}>
-      {/* Title with Breadcrumb */}
+      {/* Title with Breadcrumb and Actions */}
       <View style={[styles.titleBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <Text style={[styles.documentsTitle, { color: colors.text }]}>Documents</Text>
-        {(folderPath.length > 0 || currentFolder) && (
-          <View style={styles.breadcrumbInline}>
-            <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-            <TouchableOpacity onPress={() => navigateToPath(-1)}>
-              <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.documentsTitle, { color: colors.text }]}>Documents</Text>
+          <View style={styles.titleActions}>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                if (showFolderForm) {
+                  setShowFolderForm(false);
+                  setEditingFolder(null);
+                  setFolderFormData({ name: '', description: '' });
+                } else {
+                  setShowFolderForm(true);
+                  setEditingFolder(null);
+                  setFolderFormData({ name: '', description: '' });
+                }
+              }}
+              disabled={uploading || updating}
+            >
+              <FontAwesome name="folder-open" size={16} color="#fff" />
             </TouchableOpacity>
-            {folderPath.map((folder, index) => (
-              <React.Fragment key={folder.id}>
-                <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-                <TouchableOpacity onPress={() => navigateToPath(index)}>
-                  <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
-                </TouchableOpacity>
-              </React.Fragment>
-            ))}
-            {currentFolder && !folderPath.find((f) => f.id === currentFolder.id) && (
-              <>
-                <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
-                <Text style={[styles.breadcrumbItem, { color: colors.text }]}>{currentFolder.name}</Text>
-              </>
-            )}
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                if (showUploadForm) {
+                  setShowUploadForm(false);
+                  setEditingDocument(null);
+                  setUploadFormData({ name: '', description: '', fileUri: '', fileName: '', mimeType: '' });
+                } else {
+                  setShowUploadForm(true);
+                  setEditingDocument(null);
+                  setUploadFormData({ name: '', description: '', fileUri: '', fileName: '', mimeType: '' });
+                }
+              }}
+              disabled={uploading || updating}
+            >
+              <FontAwesome name="upload" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowSummary(!showSummary)}
+            >
+              <FontAwesome name="info-circle" size={16} color="#fff" />
+            </TouchableOpacity>
           </View>
-        )}
+        </View>
+        <View style={[styles.breadcrumbInline, { borderTopColor: colors.border }]}>
+          {folderPath.length === 0 && !currentFolder ? (
+            <Text style={[styles.breadcrumbItem, { color: colors.text }]}>Home</Text>
+          ) : (
+            <>
+              <TouchableOpacity onPress={() => navigateToPath(-1)}>
+                <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>Home</Text>
+              </TouchableOpacity>
+              {folderPath.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                  <TouchableOpacity onPress={() => navigateToPath(index)}>
+                    <Text style={[styles.breadcrumbItem, { color: colors.primary }]}>{folder.name}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              ))}
+              {currentFolder && !folderPath.find((f) => f.id === currentFolder.id) && (
+                <>
+                  <Text style={[styles.breadcrumbSeparator, { color: colors.textSecondary }]}> / </Text>
+                  <Text style={[styles.breadcrumbItem, { color: colors.text }]}>{currentFolder.name}</Text>
+                </>
+              )}
+            </>
+          )}
+        </View>
       </View>
 
-      {/* Header Actions */}
-      <View style={[styles.headerActions, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: colors.primary }]}
-          onPress={() => {
-            if (showFolderForm) {
-              setShowFolderForm(false);
-              setEditingFolder(null);
-              setFolderFormData({ name: '', description: '' });
-            } else {
-              setShowFolderForm(true);
-              setEditingFolder(null);
-              setFolderFormData({ name: '', description: '' });
-            }
-          }}
-          disabled={uploading || updating}
-        >
-          <FontAwesome name="folder-open" size={16} color="#fff" />
-          <Text style={styles.actionButtonText}>{showFolderForm ? 'Cancel' : 'New Folder'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: colors.primary }]}
-          onPress={() => {
-            if (showUploadForm) {
-              setShowUploadForm(false);
-              setEditingDocument(null);
-              setUploadFormData({ name: '', description: '', fileUri: '', fileName: '', mimeType: '' });
-            } else {
-              setShowUploadForm(true);
-              setEditingDocument(null);
-              setUploadFormData({ name: '', description: '', fileUri: '', fileName: '', mimeType: '' });
-            }
-          }}
-          disabled={uploading || updating}
-        >
-          <FontAwesome name="upload" size={16} color="#fff" />
-          <Text style={styles.actionButtonText}>{showUploadForm ? 'Cancel' : 'Upload Document'}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Summary Statistics */}
-      {!loading && (
+      {/* Summary Statistics - Shown when info button is clicked */}
+      {!loading && showSummary && (
         <View style={[styles.summary, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <View style={styles.summaryItem}>
             <FontAwesome name="folder" size={20} color={colors.primary} />
@@ -950,9 +1057,9 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
           <>
             {/* Search and Sort Controls */}
             <View style={[styles.searchSortContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-              <View style={styles.searchContainer}>
+              <View style={[styles.searchContainer, { borderColor: colors.border, backgroundColor: colors.background }]}>
                 <TextInput
-                  style={[styles.searchInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  style={[styles.searchInput, { color: colors.text }]}
                   placeholder="Search folders and documents..."
                   placeholderTextColor={colors.textSecondary}
                   value={searchQuery}
@@ -992,14 +1099,71 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                     <option value="date">Date</option>
                     <option value="size">Size</option>
                   </select>
+                ) : Platform.OS === 'android' ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
+                      onPress={() => setShowSortModal(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.sortDropdownText, { color: colors.text }]}>
+                        {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
+                      </Text>
+                      <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                    <Modal
+                      visible={showSortModal}
+                      transparent
+                      animationType="fade"
+                      onRequestClose={() => setShowSortModal(false)}
+                    >
+                      <TouchableOpacity
+                        style={styles.sortModalOverlay}
+                        activeOpacity={1}
+                        onPress={() => setShowSortModal(false)}
+                      >
+                        <View style={[styles.sortModalContent, { backgroundColor: colors.surface }]}>
+                          <View style={styles.sortModalHeader}>
+                            <Text style={[styles.sortModalTitle, { color: colors.text }]}>Sort By</Text>
+                            <TouchableOpacity
+                              onPress={() => setShowSortModal(false)}
+                              style={styles.sortModalCloseButton}
+                            >
+                              <FontAwesome name="times" size={20} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+                          {(['name', 'date', 'size'] as const).map((option) => (
+                            <TouchableOpacity
+                              key={option}
+                              style={[
+                                styles.sortModalOption,
+                                sortBy === option && { backgroundColor: colors.primary + '20' },
+                              ]}
+                              onPress={() => {
+                                setSortBy(option);
+                                setShowSortModal(false);
+                              }}
+                            >
+                              <Text style={[styles.sortModalOptionText, { color: colors.text }]}>
+                                {option.charAt(0).toUpperCase() + option.slice(1)}
+                              </Text>
+                              {sortBy === option && (
+                                <FontAwesome name="check" size={16} color={colors.primary} />
+                              )}
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </TouchableOpacity>
+                    </Modal>
+                  </>
                 ) : (
                   <View style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}>
                     <Picker
                       selectedValue={sortBy}
                       onValueChange={(value) => setSortBy(value as 'name' | 'date' | 'size')}
-                      style={[styles.sortPicker, { color: colors.text }]}
+                      style={[styles.sortPicker, { color: colors.text, backgroundColor: 'transparent' }]}
                       dropdownIconColor={colors.textSecondary}
-                      mode={Platform.OS === 'android' ? 'dropdown' : 'default'}
+                      itemStyle={{ height: 50, fontSize: 16 }}
                     >
                       <Picker.Item label="Name" value="name" color={colors.text} />
                       <Picker.Item label="Date" value="date" color={colors.text} />
@@ -1166,35 +1330,44 @@ function AppDocumentItem({
       <View style={styles.fileIcon}>
         <FontAwesome name="file" size={24} color={colors.primary} />
       </View>
-      <View style={styles.fileInfo}>
-        <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
-          {document.name}
-        </Text>
-        {document.description && (
-          <Text style={[styles.fileDescription, { color: colors.textSecondary }]} numberOfLines={1}>
-            {document.description}
-          </Text>
-        )}
-        <View style={styles.fileMeta}>
-          {document.file_size && (
-            <>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-                {AppDocumentsService.formatFileSize(document.file_size)}
+      <View style={styles.fileInfoContainer}>
+        <View style={styles.fileInfo}>
+          <View style={styles.fileInfoTop}>
+            <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+              {document.name}
+            </Text>
+            {document.description && (
+              <Text style={[styles.fileDescription, { color: colors.textSecondary }]} numberOfLines={1}>
+                {document.description}
               </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
-            </>
-          )}
-          {document.mime_type && (
-            <>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-                {AppDocumentsService.getFileTypeName(document.mime_type, document.name)}
-              </Text>
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
-            </>
-          )}
-          <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-            {AppDocumentsService.formatDate(document.created_at)}
-          </Text>
+            )}
+          </View>
+        </View>
+        <View style={styles.fileMetaRow}>
+          <View style={styles.fileMeta}>
+            {document.file_size && (
+              <>
+                <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+                  {AppDocumentsService.formatFileSize(document.file_size)}
+                </Text>
+                <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
+              </>
+            )}
+            {document.mime_type && (
+              <>
+                <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+                  {AppDocumentsService.getFileTypeName(document.mime_type, document.name)}
+                </Text>
+                <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>
+              </>
+            )}
+            <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+              {Platform.OS === 'web'
+                ? AppDocumentsService.formatDate(document.created_at)
+                : formatShortDate(document.created_at)
+              }
+            </Text>
+          </View>
         </View>
       </View>
       <View style={styles.fileActions}>
@@ -1270,18 +1443,8 @@ function GooglePhotosTab({
   connected: boolean;
   colors: any;
 }) {
-  if (!connected) {
-    return (
-      <ScrollView style={[styles.tabContent, { backgroundColor: colors.background }]}>
-        <View style={styles.placeholder}>
-          <Text style={[styles.placeholderText, { color: colors.textSecondary }]}>
-            Google Photos is not connected. Please connect your Google Photos account from the settings or connection screen.
-          </Text>
-        </View>
-      </ScrollView>
-    );
-  }
-
+  // Google Photos can now use Google Drive connection automatically
+  // So we always show the browser - it will handle the error if neither is connected
   return <GooglePhotosBrowser colors={colors} />;
 }
 
@@ -2316,45 +2479,31 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
     const errorData = apiError.data || {};
     const errorMessage = apiError.message || err.message || 'An error occurred';
 
-    // Check for explicit flags from backend
-    const hasReconnectFlag = errorData.requires_reconnect === true;
-    const hasRefreshFlag = errorData.requires_refresh === true;
-    const hasLogoutFlag = errorData.requires_logout === true;
-
-    // For OAuth service endpoints, a 401 usually means OAuth token expired (reconnect needed)
-    // Unless explicitly marked as requires_refresh (session expired, needs logout)
+    const hasReconnectFlag = errorData.requires_reconnect || errorData.requires_reconnect === true;
+    const hasRefreshFlag = errorData.requires_refresh || errorData.requires_refresh === true;
     const isOAuth401 = apiError.status === 401;
 
-    // Check message content for clues
-    const messageLower = errorMessage.toLowerCase();
-    const mentionsReconnect = messageLower.includes('reconnect') ||
-                             messageLower.includes('disconnect and reconnect') ||
-                             messageLower.includes('token expired') ||
-                             messageLower.includes('decrypt') ||
-                             messageLower.includes('unable to decrypt') ||
-                             messageLower.includes('oauth') ||
-                             messageLower.includes('invalid token');
+    const requiresReconnect = hasReconnectFlag ||
+                            (isOAuth401 && !hasRefreshFlag) ||
+                            errorMessage.toLowerCase().includes('reconnect') ||
+                            errorMessage.toLowerCase().includes('disconnect and reconnect') ||
+                            errorMessage.toLowerCase().includes('token expired') ||
+                            errorMessage.toLowerCase().includes('decrypt') ||
+                            errorMessage.toLowerCase().includes('unable to decrypt') ||
+                            errorMessage.toLowerCase().includes('oauth') ||
+                            errorMessage.toLowerCase().includes('invalid token');
 
-    const mentionsLogout = messageLower.includes('log out') ||
-                          messageLower.includes('log in again') ||
-                          messageLower.includes('session expired');
+    const requiresLogout = hasRefreshFlag ||
+                          errorData.requires_logout ||
+                          errorMessage.toLowerCase().includes('log out') ||
+                          errorMessage.toLowerCase().includes('log in again') ||
+                          errorMessage.toLowerCase().includes('session expired');
 
-    // Determine action needed
-    let requiresReconnect = hasReconnectFlag || mentionsReconnect;
-    let requiresLogout = hasLogoutFlag || hasRefreshFlag || mentionsLogout;
-
-    // For 401 on OAuth endpoints: default to reconnect unless explicitly marked as refresh
-    if (isOAuth401 && !hasRefreshFlag && !hasLogoutFlag && !mentionsLogout) {
-      requiresReconnect = true;
-      requiresLogout = false;
-    }
-
-    // Improve error message
     let finalMessage = errorMessage;
-    if (isOAuth401 && requiresReconnect && !hasReconnectFlag) {
+    if (isOAuth401 && !hasReconnectFlag && !hasRefreshFlag) {
       finalMessage = 'Your Google Photos connection has expired. Please reconnect your account in Settings.';
-    } else if (requiresReconnect && !finalMessage.toLowerCase().includes('reconnect')) {
-      finalMessage = `${finalMessage} Please reconnect your Google Photos account in Settings.`;
+    } else if (isOAuth401 && hasReconnectFlag) {
+      finalMessage = errorMessage || 'Your Google Photos connection needs to be reconnected. Please disconnect and reconnect in Settings.';
     }
 
     return {
@@ -2948,20 +3097,31 @@ const styles = StyleSheet.create({
   tabsContainer: {
     flexDirection: 'row',
     borderBottomWidth: 1,
+    paddingHorizontal: 4,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
+    borderRadius: 8,
+    marginHorizontal: 2,
+    minHeight: 50,
   },
   activeTab: {
     borderBottomWidth: 2,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  activeTabText: {
+    fontWeight: '600',
   },
   content: {
     flex: 1,
@@ -3045,7 +3205,7 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     borderRadius: 8,
     borderBottomWidth: 1,
-    alignItems: 'center',
+    alignItems: 'flex-start', // Changed from 'center' to allow proper layout
   },
   fileIcon: {
     width: 40,
@@ -3057,20 +3217,38 @@ const styles = StyleSheet.create({
   fileIconText: {
     fontSize: 24,
   },
-  fileInfo: {
+  fileInfoContainer: {
     flex: 1,
+    flexShrink: 1,
+    marginRight: 8,
+    minWidth: 0,
+    alignSelf: 'stretch', // Ensure it takes full available height
+  },
+  fileInfo: {
+    width: '100%',
+  },
+  fileInfoTop: {
+    width: '100%',
   },
   fileName: {
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 4,
   },
+  fileMetaRow: {
+    width: '100%',
+    marginTop: 4,
+    alignSelf: 'stretch', // Use full width
+  },
   fileMeta: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'nowrap', // Prevent wrapping - keep on one line
+    width: '100%',
   },
   fileMetaText: {
-    fontSize: 12,
+    fontSize: 10,
+    opacity: 0.7, // Make it more subtle
   },
   fileAction: {
     padding: 8,
@@ -3208,35 +3386,55 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   titleBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    flexWrap: 'wrap',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   documentsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginRight: 8,
+    flex: 1,
+  },
+  titleActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   breadcrumbInline: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    flex: 1,
+    width: '100%',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    minHeight: 32,
   },
   searchSortContainer: {
     padding: 12,
     borderBottomWidth: 1,
     gap: 12,
-    overflow: 'visible',
+    zIndex: 1,
   },
   sortContainer: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
     overflow: 'visible',
+    zIndex: 1000,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -3266,12 +3464,96 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     height: 44,
-    justifyContent: 'center',
-    overflow: 'visible',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+  },
+  sortDropdownText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
   },
   sortPicker: {
-    height: 44,
     width: '100%',
+    height: 44,
+  },
+  sortModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+    paddingBottom: 20,
+  },
+  sortModalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 30,
+    maxHeight: '50%',
+    marginBottom: 20,
+  },
+  sortModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  sortModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  sortModalCloseButton: {
+    padding: 8,
+  },
+  sortModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  sortModalOptionText: {
+    fontSize: 16,
+  },
+  sortPickerText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  sortModalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '50%',
+  },
+  sortModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  sortModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  sortModalOptionText: {
+    fontSize: 16,
+  },
+  sortModalCancel: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  sortModalCancelText: {
+    fontSize: 16,
+    fontWeight: '500',
   },
   sortOrderButton: {
     paddingHorizontal: 12,
@@ -3298,10 +3580,13 @@ const styles = StyleSheet.create({
   },
   fileActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
+    flexShrink: 0, // Prevent buttons from shrinking
+    alignItems: 'center',
   },
   fileActionButton: {
     padding: 8,
+    minWidth: 36, // Ensure buttons have minimum width
   },
   photosGridContainer: {
     padding: 8,

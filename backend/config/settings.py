@@ -352,9 +352,12 @@ elif GOOGLEDRIVE_REDIRECT_URI_DEV and DEBUG:
 else:
     GOOGLEDRIVE_REDIRECT_URI = GOOGLEDRIVE_REDIRECT_URI_FALLBACK
 
-# Google Photos OAuth Settings (can reuse Google settings if same app)
-GOOGLE_PHOTOS_CLIENT_ID = os.getenv('GOOGLE_PHOTOS_CLIENT_ID', '') or GOOGLE_CLIENT_ID
-GOOGLE_PHOTOS_CLIENT_SECRET = os.getenv('GOOGLE_PHOTOS_CLIENT_SECRET', '') or GOOGLE_CLIENT_SECRET
+# Google Photos OAuth Settings
+# NOTE: Google Photos now uses the same OAuth client as Google Drive (GOOGLEDRIVE_CLIENT_ID)
+# This is because Google Photos uses Google Drive API to list photos, so they share the same scope.
+# The separate GOOGLE_PHOTOS_CLIENT_ID setting is kept for backward compatibility but falls back to GOOGLEDRIVE_CLIENT_ID.
+GOOGLE_PHOTOS_CLIENT_ID = os.getenv('GOOGLE_PHOTOS_CLIENT_ID', '') or GOOGLEDRIVE_CLIENT_ID or GOOGLE_CLIENT_ID
+GOOGLE_PHOTOS_CLIENT_SECRET = os.getenv('GOOGLE_PHOTOS_CLIENT_SECRET', '') or GOOGLEDRIVE_CLIENT_SECRET or GOOGLE_CLIENT_SECRET
 
 # Support both development and production redirect URIs
 GOOGLE_PHOTOS_REDIRECT_URI_DEV = os.getenv('GOOGLE_PHOTOS_REDIRECT_URI_DEV', 'http://localhost:8900/api/googlephotos/oauth/callback/')

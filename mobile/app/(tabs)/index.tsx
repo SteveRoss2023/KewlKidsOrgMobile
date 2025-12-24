@@ -242,6 +242,15 @@ export default function HomeScreen() {
     }
   }, [userMemberIds, loadChatUnreadCount]);
 
+  // Store handler in ref to avoid reconnecting when handleNotification changes
+  const handleNotificationRef = useRef(handleNotification);
+  handleNotificationRef.current = handleNotification;
+
+  // Create a stable handler function that won't change
+  const stableNotificationHandler = useCallback((notification: any) => {
+    handleNotificationRef.current(notification);
+  }, []);
+
   // Connect to notification WebSocket on mount
   useEffect(() => {
     const connectNotifications = async () => {
@@ -249,7 +258,7 @@ export default function HomeScreen() {
         const token = await tokenStorage.getAccessToken();
         if (token) {
           console.log('[Home] Connecting to notification WebSocket...');
-          websocketService.setNotificationHandler(handleNotification);
+          websocketService.setNotificationHandler(stableNotificationHandler);
           await websocketService.connectToNotifications(token);
           console.log('[Home] Notification WebSocket connected');
         } else {
@@ -265,14 +274,13 @@ export default function HomeScreen() {
     // Cleanup on unmount
     return () => {
       console.log('[Home] Removing notification handler');
-      websocketService.removeNotificationHandler(handleNotification);
-      // Don't disconnect - other screens might be using it
+      websocketService.removeNotificationHandler(stableNotificationHandler);
       // Only disconnect if no handlers remain
       if (!websocketService.hasNotificationHandlers()) {
         websocketService.disconnectFromNotifications();
       }
     };
-  }, [handleNotification]);
+  }, [stableNotificationHandler]);
 
   useEffect(() => {
     loadUserData();

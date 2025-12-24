@@ -103,16 +103,30 @@ class WebSocketService {
       };
 
       ws.onerror = (error) => {
+        // Extract more useful error information
+        // In React Native, WebSocket errors are typically Error objects or plain objects
+        const errorInfo = error instanceof Error
+          ? { message: error.message, name: error.name }
+          : error && typeof error === 'object' && 'type' in error
+          ? { type: (error as any).type }
+          : { error: String(error) };
+
+        console.warn('[WebSocketService] Room WebSocket error:', errorInfo);
+        // Don't reject immediately - let onclose handle cleanup
         if (this.errorHandler) {
           this.errorHandler(error);
         }
-        reject(error);
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         this.roomSocket = null;
         if (this.disconnectHandler) {
           this.disconnectHandler();
+        }
+
+        // Only reject if we haven't resolved yet (connection failed before opening)
+        if (ws.readyState !== WebSocket.OPEN) {
+          reject(new Error(`WebSocket closed before opening (code: ${event.code})`));
         }
       };
     });
@@ -192,16 +206,40 @@ class WebSocketService {
       };
 
       ws.onerror = (error) => {
-        console.error('[WebSocketService] Notification WebSocket error:', error);
+        // Extract more useful error information
+        // In React Native, WebSocket errors are typically Error objects or plain objects
+        const errorInfo = error instanceof Error
+          ? { message: error.message, name: error.name, stack: error.stack }
+          : error && typeof error === 'object' && 'type' in error
+          ? { type: (error as any).type, target: (error as any).target }
+          : { error: String(error) };
+
+        console.warn('[WebSocketService] Notification WebSocket error:', errorInfo);
+        // Don't reject immediately - let onclose handle cleanup
+        // This prevents unhandled promise rejections
         if (this.errorHandler) {
           this.errorHandler(error);
         }
-        reject(error);
       };
 
-      ws.onclose = () => {
-        console.log('[WebSocketService] Notification WebSocket closed');
+      ws.onclose = (event) => {
+        const wasClean = event.wasClean;
+        const code = event.code;
+        const reason = event.reason;
+
+        if (!wasClean && code !== 1000) {
+          // Only log if it wasn't a clean close
+          console.log(`[WebSocketService] Notification WebSocket closed (code: ${code}, reason: ${reason || 'none'})`);
+        } else {
+          console.log('[WebSocketService] Notification WebSocket closed');
+        }
+
         this.notificationSocket = null;
+
+        // Only reject if we haven't resolved yet (connection failed before opening)
+        if (ws.readyState !== WebSocket.OPEN) {
+          reject(new Error(`WebSocket closed before opening (code: ${code})`));
+        }
       };
     });
   }

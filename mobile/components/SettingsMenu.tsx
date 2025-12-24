@@ -56,24 +56,25 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
     const checkOAuthConnections = async () => {
       try {
         // Check all OAuth connections in parallel
-        const [outlookStatus, onedriveStatus, googledriveStatus, googlephotosStatus] = await Promise.all([
+        // Note: Google Photos check removed - it uses Google Drive tokens automatically
+        const [outlookStatus, onedriveStatus, googledriveStatus] = await Promise.all([
           oauthService.checkConnection('outlook').catch(() => ({ connected: false })),
           oauthService.checkConnection('onedrive').catch(() => ({ connected: false })),
           oauthService.checkConnection('googledrive').catch(() => ({ connected: false })),
-          oauthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
+          // oauthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
         ]);
 
         setOutlookConnected(outlookStatus.connected);
         setOnedriveConnected(onedriveStatus.connected);
         setGoogledriveConnected(googledriveStatus.connected);
-        setGooglephotosConnected(googlephotosStatus.connected);
+        // setGooglephotosConnected(googlephotosStatus.connected);
       } catch (error) {
         console.error('Error checking OAuth connections:', error);
         // On error, assume not connected
         setOutlookConnected(false);
         setOnedriveConnected(false);
         setGoogledriveConnected(false);
-        setGooglephotosConnected(false);
+        // setGooglephotosConnected(false);
       }
     };
 
@@ -148,18 +149,20 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
       },
       {
         id: 'googledrive',
-        label: 'Google Drive Connect',
+        label: 'Google Drive/Photos Connect',
         icon: 'google',
         route: '/(tabs)/googledrive-connect',
         connected: googledriveConnected,
       },
-      {
-        id: 'googlephotos',
-        label: 'Google Photos Connect',
-        icon: 'photo',
-        route: '/(tabs)/googlephotos-connect',
-        connected: googlephotosConnected,
-      },
+      // Google Photos Connect - Hidden until Google Photos Library API is implemented
+      // Google Photos currently uses Google Drive tokens automatically
+      // {
+      //   id: 'googlephotos',
+      //   label: 'Google Photos Connect',
+      //   icon: 'photo',
+      //   route: '/(tabs)/googlephotos-connect',
+      //   connected: googlephotosConnected,
+      // },
     ];
 
     return (

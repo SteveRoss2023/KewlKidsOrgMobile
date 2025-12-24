@@ -3114,15 +3114,20 @@ def GoogleDriveDeleteItemView(request, item_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def GooglePhotosOAuthInitiateView(request):
-    """Initiate OAuth flow for Google Photos."""
+    """Initiate OAuth flow for Google Photos.
+
+    Uses the same OAuth client and scope as Google Drive for consolidation.
+    Google Photos uses Google Drive API to list photos, so drive scope is sufficient.
+    """
     from django.conf import settings
     from encryption.utils import get_session_user_key
 
-    client_id = settings.GOOGLE_PHOTOS_CLIENT_ID
+    # Use Google Drive OAuth client (consolidated)
+    client_id = settings.GOOGLEDRIVE_CLIENT_ID
     redirect_uri = settings.GOOGLE_PHOTOS_REDIRECT_URI
 
     if not client_id:
-        return Response({'error': 'Google Photos OAuth not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': 'Google OAuth not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # Ensure encryption key is in cache (refresh if exists, error if not)
     user_key = get_session_user_key(request.user.id, auto_refresh=True)
@@ -3146,12 +3151,13 @@ def GooglePhotosOAuthInitiateView(request):
     is_mobile = 'Mobile' in user_agent or 'Expo' in user_agent or request.GET.get('mobile') == 'true'
     cache.set(f'googlephotos_oauth_mobile_{state}', is_mobile, timeout=600)
 
+    # Use same scope as Google Drive (drive read/write) - Google Photos uses Drive API
     auth_url = (
         f"https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={client_id}&"
         f"redirect_uri={quote(redirect_uri)}&"
         f"response_type=code&"
-        f"scope=https://www.googleapis.com/auth/drive.readonly&"
+        f"scope=https://www.googleapis.com/auth/drive&"
         f"access_type=offline&"
         f"prompt=consent&"
         f"state={state}"
@@ -3211,10 +3217,11 @@ def GooglePhotosOAuthCallbackView(request):
         }, status=status.HTTP_401_UNAUTHORIZED)
 
     # Exchange code for tokens
+    # Use Google Drive OAuth client (consolidated - same client for both services)
     token_url = 'https://oauth2.googleapis.com/token'
     token_data = {
-        'client_id': settings.GOOGLE_PHOTOS_CLIENT_ID,
-        'client_secret': settings.GOOGLE_PHOTOS_CLIENT_SECRET,
+        'client_id': settings.GOOGLEDRIVE_CLIENT_ID,
+        'client_secret': settings.GOOGLEDRIVE_CLIENT_SECRET,
         'code': code,
         'grant_type': 'authorization_code',
         'redirect_uri': settings.GOOGLE_PHOTOS_REDIRECT_URI,
@@ -3395,14 +3402,28 @@ def GooglePhotosListMediaItemsView(request):
 
     This powers the Documents > Google Photos tab and returns normalized
     items with viewable image URLs (baseUrl).
+
+    Since Google Photos now uses the same OAuth client and scope as Google Drive,
+    if Google Drive is connected, we can use those tokens automatically.
     """
     member = Member.objects.filter(user=request.user).first()
     if not member:
         return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # First check for Google Photos sync record
     sync_record = GooglePhotosSync.objects.filter(member=member, is_active=True).first()
+
+    # If no Google Photos sync, check if Google Drive is connected (can reuse tokens)
+    # Since they use the same OAuth client and scope, we can share tokens
+    is_using_drive_tokens = False
     if not sync_record:
-        return Response({'error': 'Google Photos not connected'}, status=status.HTTP_400_BAD_REQUEST)
+        drive_sync = GoogleDriveSync.objects.filter(member=member, is_active=True).first()
+        if drive_sync:
+            # Use Google Drive tokens for Google Photos (same OAuth client/scope)
+            sync_record = drive_sync
+            is_using_drive_tokens = True
+        else:
+            return Response({'error': 'Google Photos not connected. Please connect Google Drive or Google Photos.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # Debug: tokeninfo fields we want to include in both success and error responses
     tokeninfo_scopes = None
@@ -3458,7 +3479,8 @@ def GooglePhotosListMediaItemsView(request):
             )
 
         # Persist refreshed tokens if they changed
-        if drive_client.access_token != access_token:
+        # Only update if this is a GooglePhotosSync record (don't update GoogleDriveSync when using shared tokens)
+        if drive_client.access_token != access_token and not is_using_drive_tokens:
             sync_record.update_tokens(
                 drive_client.access_token,
                 drive_client.refresh_token if drive_client.refresh_token else refresh_token,
@@ -3476,6 +3498,40 @@ def GooglePhotosListMediaItemsView(request):
             },
             status=status.HTTP_200_OK,
         )
+    except ValueError as e:
+        error_msg = str(e).lower()
+        # Check if it's a session key issue (not OAuth expiration)
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            # Session key expired - user needs to refresh/login, not reconnect OAuth
+            return Response(
+                {
+                    'error': 'Session expired. Please refresh the page or log in again.',
+                    'detail': 'Your session key has expired. Your Google Photos connection is still valid.',
+                    'requires_refresh': True,
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        # Check if it's a decryption failure (wrong key, corrupted data)
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Photos decryption error: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Unable to decrypt Google Photos tokens. Please disconnect and reconnect.',
+                    'detail': str(e),
+                    'requires_reconnect': True,
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        else:
+            # Other ValueError - log and return generic error
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Photos list media items error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         # Special handling for HTTP errors from Google so we can see the real error
         import logging
@@ -3506,37 +3562,6 @@ def GooglePhotosListMediaItemsView(request):
 
         logger.error(f"Google Photos list media items error: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    except ValueError as e:
-        error_msg = str(e).lower()
-        # Session key / encryption-key issues
-        if 'not in session' in error_msg or 'password required' in error_msg:
-            return Response(
-                {
-                    'error': 'Session expired. Please refresh the page or log in again.',
-                    'detail': 'Your session key has expired. Your Google Photos connection is still valid.',
-                    'requires_refresh': True,
-                },
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.error(f"Google Photos decryption error: {str(e)}", exc_info=True)
-            return Response(
-                {
-                    'error': 'Unable to decrypt Google Photos tokens. Please disconnect and reconnect.',
-                    'detail': str(e),
-                    'requires_reconnect': True,
-                },
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        else:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.error(f"Google Photos list media items error: {str(e)}", exc_info=True)
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ============================================================================

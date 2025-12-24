@@ -63,6 +63,9 @@ class AppDocumentsService {
    */
   async listFolders(familyId: number, parentFolderId?: number | null): Promise<AppFolder[]> {
     try {
+      if (!familyId) {
+        throw new Error('Family ID is required');
+      }
       const params: any = { family: familyId };
       if (parentFolderId !== undefined) {
         params.parent_folder = parentFolderId === null ? 'null' : parentFolderId;
@@ -71,6 +74,9 @@ class AppDocumentsService {
       return response.data.results || response.data || [];
     } catch (error: any) {
       console.error('Error listing folders:', error);
+      console.error('Request URL:', error?.config?.url);
+      console.error('Request params:', error?.config?.params);
+      console.error('Full URL:', error?.config?.baseURL + error?.config?.url);
       throw error;
     }
   }
