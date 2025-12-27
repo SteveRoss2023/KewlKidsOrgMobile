@@ -76,6 +76,7 @@ export default function MapBoxScreen() {
   const [initialCenter, setInitialCenter] = useState<[number, number]>([0, 0]);
   const [initialZoom, setInitialZoom] = useState(4);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [animateCamera, setAnimateCamera] = useState(false);
   const initialCenterSetRef = useRef(false);
   const mapboxToken = getMapboxToken();
 
@@ -141,15 +142,16 @@ export default function MapBoxScreen() {
     const center = calculateCenter();
     const centerArray: [number, number] = [center.longitude, center.latitude];
 
-    // Update the center state which will trigger a re-render with new camera position
-    setInitialCenter(centerArray);
-    setInitialZoom(4);
-    setHasUserInteracted(false);
-
-    // For native MapBox, try to animate camera if map is ready
-    if (Platform.OS !== 'web' && mapRef.current) {
-      // The Camera component will handle the animation when center/zoom change
-      // This is a no-op, but kept for potential future direct map manipulation
+    // For native MapBox, enable animation and update center/zoom
+    if (Platform.OS !== 'web') {
+      setAnimateCamera(true);
+      setInitialCenter(centerArray);
+      setInitialZoom(4);
+      setHasUserInteracted(false);
+      // Reset animation flag after a short delay
+      setTimeout(() => {
+        setAnimateCamera(false);
+      }, 1100); // Slightly longer than animation duration
     } else if (Platform.OS === 'web' && webMapRef.current) {
       // For web, use resetView method if available
       if ((webMapRef.current as any).resetView) {
@@ -399,12 +401,13 @@ export default function MapBoxScreen() {
           </View>
         )}
 
-        {initialCenter[0] !== 0 && initialCenter[1] !== 0 && Platform.OS !== 'web' && MapBoxMapView && (
+        {initialCenter[0] !== 0 && initialCenter[1] !== 0 && Platform.OS !== 'web' && MapBoxMapView ? (
           <MapBoxMapView
             accessToken={mapboxToken}
             initialCenter={initialCenter}
             initialZoom={initialZoom}
             mapType={mapType}
+            animateCamera={animateCamera}
             onMapReady={(map) => {
               mapRef.current = map;
             }}
@@ -443,7 +446,16 @@ export default function MapBoxScreen() {
               ) : null;
             })}
           </MapBoxMapView>
-        )}
+        ) : Platform.OS !== 'web' ? (
+          <View style={[styles.map, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+            <Text style={[styles.emptyStateText, { color: colors.text }]}>
+              MapBox native library not available.{'\n\n'}
+              To use MapBox on mobile, you need to:{'\n'}
+              1. Install @rnmapbox/maps: npm install @rnmapbox/maps{'\n'}
+              2. Rebuild the app: npm run dev:android
+            </Text>
+          </View>
+        ) : null}
 
         {initialCenter[0] !== 0 && initialCenter[1] !== 0 && Platform.OS === 'web' && (
           <MapBoxWebView

@@ -37,6 +37,7 @@ interface MapBoxMapViewProps {
   onMapReady?: (map: any) => void;
   children?: React.ReactNode;
   style?: any;
+  animateCamera?: boolean; // Whether to animate camera changes
 }
 
 export default function MapBoxMapView({
@@ -48,6 +49,7 @@ export default function MapBoxMapView({
   onMapReady,
   children,
   style,
+  animateCamera = false,
 }: MapBoxMapViewProps) {
   const mapRef = useRef<any>(null);
 
@@ -62,7 +64,15 @@ export default function MapBoxMapView({
   }
 
   if (!MapboxGL || !mapboxLoaded) {
-    return <View style={[styles.container, style]} />;
+    console.error('MapBoxMapView: @rnmapbox/maps is not installed. Please install it: npm install @rnmapbox/maps');
+    return (
+      <View style={[styles.container, style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Text style={{ color: '#666', textAlign: 'center' }}>
+          MapBox native library not installed.{'\n'}
+          Please install @rnmapbox/maps and rebuild the app.
+        </Text>
+      </View>
+    );
   }
 
   const { MapView, Camera } = MapboxGL;
@@ -99,6 +109,7 @@ export default function MapBoxMapView({
         ref={mapRef}
         styleURL={getStyleURL()}
         style={styles.map}
+        scaleBarEnabled={false}
         onDidFinishLoadingMap={() => {
           console.log('MapBox map finished loading');
           if (onMapReady && mapRef.current) {
@@ -110,10 +121,11 @@ export default function MapBoxMapView({
         }}
       >
         <Camera
-          key={`${initialCenter[0]}-${initialCenter[1]}-${initialZoom}`}
+          key={`${initialCenter[0]}-${initialCenter[1]}-${initialZoom}-${animateCamera}`}
           zoomLevel={initialZoom}
           centerCoordinate={initialCenter}
-          animationMode="none"
+          animationMode={animateCamera ? "flyTo" : "none"}
+          animationDuration={animateCamera ? 1000 : 0}
         />
         {children}
       </MapView>

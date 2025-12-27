@@ -15,6 +15,7 @@ import { getTotalUnreadCount, getRoomLastSeen } from '../../utils/messageTrackin
 import MessageBadge from '../../components/MessageBadge';
 import websocketService from '../../services/websocketService';
 import { tokenStorage } from '../../utils/storage';
+import Logo from '../../components/Logo';
 
 interface FeatureCard {
   id: string;
@@ -433,6 +434,9 @@ export default function HomeScreen() {
       <GlobalNavBar />
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.headerTop}>
+          <View style={styles.logoContainer}>
+            <Logo width={32} height={32} color={colors.primary} />
+          </View>
           <View style={styles.titleContainer}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
           </View>
@@ -543,6 +547,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+  },
+  logoContainer: {
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   titleContainer: {
     flex: 1,

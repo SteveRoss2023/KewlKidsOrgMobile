@@ -19,17 +19,25 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.http import HttpResponse
 
 # Customize admin site
 admin.site.site_header = "KewlKids Organizer Admin"
 admin.site.site_title = "KewlKids Admin"
 admin.site.index_title = "Welcome to KewlKids Organizer Administration"
 
+# Simple view to handle favicon.ico requests (prevents 500 errors)
+def favicon_view(request):
+    # Return 204 No Content to stop browser from requesting it
+    return HttpResponse(status=204)
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
     path('api/', include('families.urls')),
     path('api/', include('lists.urls')),
+    # Handle favicon.ico requests to prevent 500 errors
+    path('favicon.ico', favicon_view, name='favicon'),
 ]
 
 # Serve static and media files in development
