@@ -30,6 +30,7 @@ export default function MapBoxWebView({
 }: MapBoxWebViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]); // Track marker instances for cleanup
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -84,6 +85,10 @@ export default function MapBoxWebView({
           setIsLoaded(true);
           mapInstanceRef.current = map;
 
+          // Clear existing markers before adding new ones
+          markersRef.current.forEach(marker => marker.remove());
+          markersRef.current = [];
+
           // Add markers
           markers.forEach((marker) => {
             const el = document.createElement('div');
@@ -95,7 +100,7 @@ export default function MapBoxWebView({
             el.style.border = '2px solid white';
             el.style.cursor = 'pointer';
 
-            new mapboxgl.Marker(el)
+            const markerInstance = new mapboxgl.Marker(el)
               .setLngLat(marker.position)
               .setPopup(
                 new mapboxgl.Popup({ offset: 25 }).setHTML(
@@ -106,6 +111,8 @@ export default function MapBoxWebView({
                 )
               )
               .addTo(map);
+
+            markersRef.current.push(markerInstance);
           });
 
           if (onMapReady) {
@@ -129,6 +136,10 @@ export default function MapBoxWebView({
     loadMapbox();
 
     return () => {
+      // Remove all markers first
+      markersRef.current.forEach(marker => marker.remove());
+      markersRef.current = [];
+
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -138,12 +149,39 @@ export default function MapBoxWebView({
 
   // Update markers when they change
   useEffect(() => {
-    if (!isLoaded || !mapInstanceRef.current || Platform.OS === 'web') return;
+    if (!isLoaded || !mapInstanceRef.current || Platform.OS !== 'web') return;
 
-    // Clear existing markers and add new ones
     const map = mapInstanceRef.current;
-    // Note: In a real implementation, you'd track marker instances to remove them
-    // For now, we'll rely on the map reloading when markers change significantly
+
+    // Clear existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Add new markers
+    markers.forEach((marker) => {
+      const el = document.createElement('div');
+      el.className = 'marker';
+      el.style.width = '30px';
+      el.style.height = '30px';
+      el.style.borderRadius = '50%';
+      el.style.backgroundColor = marker.id === 'user-location' ? '#3b82f6' : '#ef4444';
+      el.style.border = '2px solid white';
+      el.style.cursor = 'pointer';
+
+      const markerInstance = new (window as any).mapboxgl.Marker(el)
+        .setLngLat(marker.position)
+        .setPopup(
+          new (window as any).mapboxgl.Popup({ offset: 25 }).setHTML(
+            `<div>
+              <strong>${marker.title}</strong>
+              ${marker.lastUpdate ? `<br/><small>Updated: ${new Date(marker.lastUpdate).toLocaleString()}</small>` : ''}
+            </div>`
+          )
+        )
+        .addTo(map);
+
+      markersRef.current.push(markerInstance);
+    });
   }, [markers, isLoaded]);
 
   if (Platform.OS !== 'web') {

@@ -131,6 +131,11 @@ export default function ChatScreen() {
   const processedMessageIds = useRef<Set<number>>(new Set());
   // Fallback deduplication: track room_id + created_at for messages without message_id
   const processedNotifications = useRef<Set<string>>(new Set());
+  // Track timestamps for cleanup
+  const processedMessageTimestamps = useRef<Map<number, number>>(new Map());
+  const processedNotificationTimestamps = useRef<Map<string, number>>(new Map());
+  const MAX_PROCESSED_IDS = 1000; // Limit to prevent memory growth
+  const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   // Handle notification WebSocket messages for real-time badge updates
   const handleNotification = useCallback(async (notification: any) => {
@@ -156,10 +161,13 @@ export default function ChatScreen() {
 
       // Mark as processed IMMEDIATELY to prevent race conditions with duplicate notifications
       // This must happen before any async operations
+      const now = Date.now();
       if (messageIdNum) {
         processedMessageIds.current.add(messageIdNum);
+        processedMessageTimestamps.current.set(messageIdNum, now);
       }
       processedNotifications.current.add(notificationKey);
+      processedNotificationTimestamps.current.set(notificationKey, now);
 
       console.log('[ChatList] Processing room_message notification:', { room_id: roomIdNum, sender, created_at, message_id: messageIdNum });
 
@@ -278,6 +286,59 @@ export default function ChatScreen() {
       }
     };
   }, []); // Empty dependencies - only run once on mount
+
+  // Cleanup processed message IDs and notifications to prevent memory leaks
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+
+      // Remove old message IDs (older than 24 hours)
+      processedMessageTimestamps.current.forEach((timestamp, id) => {
+        if (now - timestamp > MAX_AGE_MS) {
+          processedMessageIds.current.delete(id);
+          processedMessageTimestamps.current.delete(id);
+        }
+      });
+
+      // Remove old notifications (older than 24 hours)
+      processedNotificationTimestamps.current.forEach((timestamp, key) => {
+        if (now - timestamp > MAX_AGE_MS) {
+          processedNotifications.current.delete(key);
+          processedNotificationTimestamps.current.delete(key);
+        }
+      });
+
+      // Keep only the most recent message IDs if size exceeds limit
+      if (processedMessageIds.current.size > MAX_PROCESSED_IDS) {
+        const entries = Array.from(processedMessageTimestamps.current.entries())
+          .sort((a, b) => b[1] - a[1]) // Sort by timestamp, newest first
+          .slice(0, MAX_PROCESSED_IDS);
+
+        processedMessageIds.current.clear();
+        processedMessageTimestamps.current.clear();
+        entries.forEach(([id, timestamp]) => {
+          processedMessageIds.current.add(id);
+          processedMessageTimestamps.current.set(id, timestamp);
+        });
+      }
+
+      // Keep only the most recent notifications if size exceeds limit
+      if (processedNotifications.current.size > MAX_PROCESSED_IDS) {
+        const entries = Array.from(processedNotificationTimestamps.current.entries())
+          .sort((a, b) => b[1] - a[1]) // Sort by timestamp, newest first
+          .slice(0, MAX_PROCESSED_IDS);
+
+        processedNotifications.current.clear();
+        processedNotificationTimestamps.current.clear();
+        entries.forEach(([key, timestamp]) => {
+          processedNotifications.current.add(key);
+          processedNotificationTimestamps.current.set(key, timestamp);
+        });
+      }
+    }, 60 * 60 * 1000); // Run every hour
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
   // Load rooms once on mount
   useEffect(() => {

@@ -488,27 +488,33 @@ export default function ConversationScreen() {
           return timeA - timeB;
         });
 
+        // Limit messages array size to prevent memory leaks (keep only most recent 500)
+        const MAX_MESSAGES = 500;
+        const limitedMessages = merged.length > MAX_MESSAGES
+          ? merged.slice(-MAX_MESSAGES)
+          : merged;
+
         // Update last_seen to the latest message timestamp (only for messages from other users)
         // Only update if the screen is actually focused (user is viewing the room)
         // Don't mark as seen when just loading messages - only when user is actively viewing
-        if (merged.length > 0 && userMemberId && isFocusedRef.current) {
+        if (limitedMessages.length > 0 && userMemberId && isFocusedRef.current) {
           // Find the latest message from another user
-          const otherUserMessages = merged.filter(msg => msg.sender !== userMemberId);
+          const otherUserMessages = limitedMessages.filter(msg => msg.sender !== userMemberId);
           if (otherUserMessages.length > 0) {
             const latestMessage = otherUserMessages[otherUserMessages.length - 1];
             setRoomLastSeen(roomId, new Date(latestMessage.created_at));
           } else {
             // If all messages are from the user, still mark as seen
-            const latestMessage = merged[merged.length - 1];
+            const latestMessage = limitedMessages[limitedMessages.length - 1];
             setRoomLastSeen(roomId, new Date(latestMessage.created_at));
           }
-        } else if (merged.length > 0 && isFocusedRef.current) {
+        } else if (limitedMessages.length > 0 && isFocusedRef.current) {
           // If we don't have userMemberId yet, mark with latest message anyway
-          const latestMessage = merged[merged.length - 1];
+          const latestMessage = limitedMessages[limitedMessages.length - 1];
           setRoomLastSeen(roomId, new Date(latestMessage.created_at));
         }
 
-        return merged;
+        return limitedMessages;
       });
     } catch (err) {
       const apiError = err as APIError;
@@ -673,7 +679,7 @@ export default function ConversationScreen() {
             // Message exists - update it if the existing one failed to decrypt or if this one is successfully decrypted
             const existing = prev[existingIndex];
             if (existing.decrypted?.startsWith('[Unable to decrypt') ||
-                (newMessage.decrypted && !newMessage.decrypted.startsWith('[Unable to decrypt'))) {
+              (newMessage.decrypted && !newMessage.decrypted.startsWith('[Unable to decrypt'))) {
               const updated = [...prev];
               updated[existingIndex] = newMessage;
 
@@ -1093,21 +1099,21 @@ export default function ConversationScreen() {
             <FontAwesome name="send" size={16} color="#fff" />
           )}
         </TouchableOpacity>
-        </View>
+      </View>
 
-        <ConfirmModal
-          visible={showDeleteMessageModal}
-          title="Delete Message"
-          message="Are you sure you want to delete this message? This action cannot be undone."
-          onClose={cancelDeleteMessage}
-          onConfirm={confirmDeleteMessage}
-          confirmText="Delete"
-          cancelText="Cancel"
-          type="danger"
-        />
-      </KeyboardAvoidingView>
-    );
-  }
+      <ConfirmModal
+        visible={showDeleteMessageModal}
+        title="Delete Message"
+        message="Are you sure you want to delete this message? This action cannot be undone."
+        onClose={cancelDeleteMessage}
+        onConfirm={confirmDeleteMessage}
+        confirmText="Delete"
+        cancelText="Cancel"
+        type="danger"
+      />
+    </KeyboardAvoidingView>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
