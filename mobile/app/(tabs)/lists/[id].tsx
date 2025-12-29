@@ -103,6 +103,10 @@ export default function ListDetailScreen() {
   const isGroceryList = list?.list_type === 'grocery';
   const isShoppingList = list?.list_type === 'shopping';
   const isTodoList = list?.list_type === 'todo';
+  const isIdeasList = list?.list_type === 'ideas';
+  const isOtherList = list?.list_type === 'other';
+  // Lists that support drag and drop, reordering, and move item features
+  const supportsDragAndDrop = isTodoList || isIdeasList || isOtherList;
 
   // Load list and categories when screen comes into focus
   useFocusEffect(
@@ -483,12 +487,12 @@ export default function ListDetailScreen() {
     }
 
     // Filter out editing item when using the main edit form (not inline in draggable list)
-    if (editingItem && (Platform.OS === 'web' || !isTodoList)) {
+    if (editingItem && (Platform.OS === 'web' || !supportsDragAndDrop)) {
       items = items.filter((item) => item.id !== editingItem.id);
     }
 
     return items;
-  }, [listItems, selectedRecipeFilter, editingItem, isTodoList, Platform.OS]);
+  }, [listItems, selectedRecipeFilter, editingItem, supportsDragAndDrop, Platform.OS]);
 
   // Group items by category
   const groupedItems = useMemo(() => {
@@ -714,7 +718,7 @@ export default function ListDetailScreen() {
   };
 
   const handleDragEnd = async (draggedId: string, droppedId: string) => {
-    if (!isTodoList) return;
+    if (!supportsDragAndDrop) return;
 
     const sortedItems = [...filteredItems].sort((a, b) => {
       if (a.order !== b.order) {
@@ -939,10 +943,10 @@ export default function ListDetailScreen() {
         onMove={() => handleOpenMoveModal(item)}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
-        onMoveUp={Platform.OS !== 'web' && isTodoList ? () => {
+        onMoveUp={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
           handleMoveItem(item.id, 'up');
         } : undefined}
-        onMoveDown={Platform.OS !== 'web' && isTodoList ? () => {
+        onMoveDown={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
           handleMoveItem(item.id, 'down');
         } : undefined}
       />
@@ -1024,7 +1028,7 @@ export default function ListDetailScreen() {
                   </TouchableOpacity>
                 )}
               </>
-            ) : editingItem && (!isTodoList || !DraggableFlatList || !GestureHandlerRootView) ? (
+            ) : editingItem && (!supportsDragAndDrop || !DraggableFlatList || !GestureHandlerRootView) ? (
               <TouchableOpacity
                 onPress={() => {
                   setEditingItem(null);
@@ -1115,7 +1119,7 @@ export default function ListDetailScreen() {
         </ScrollView>
       )}
 
-      {editingItem && (Platform.OS === 'web' || !isTodoList) && (
+      {editingItem && (Platform.OS === 'web' || !supportsDragAndDrop) && (
         <Modal
           visible={true}
           animationType="fade"
@@ -1254,7 +1258,7 @@ export default function ListDetailScreen() {
             );
           })}
         </ScrollView>
-      ) : isTodoList && Platform.OS !== 'web' ? (
+      ) : supportsDragAndDrop && Platform.OS !== 'web' ? (
         <GestureHandlerRootView style={{ flex: 1 }}>
           <DraxProvider>
             <FlatList
@@ -1321,7 +1325,7 @@ export default function ListDetailScreen() {
           refreshing={refreshing}
           onRefresh={handleRefresh}
           renderItem={({ item, index }) => {
-            if (Platform.OS === 'web' && isTodoList) {
+            if (Platform.OS === 'web' && supportsDragAndDrop) {
               return (
                 <DraggableListItem
                   item={item}
@@ -1355,10 +1359,10 @@ export default function ListDetailScreen() {
                 onDelete={() => handleDeleteItem(item)}
                 isGroceryList={isGroceryList}
                 isTodoList={isTodoList}
-                onMoveUp={Platform.OS !== 'web' && isTodoList ? () => {
+                onMoveUp={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
                   handleMoveItem(item.id, 'up');
                 } : undefined}
-                onMoveDown={Platform.OS !== 'web' && isTodoList ? () => {
+                onMoveDown={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
                   handleMoveItem(item.id, 'down');
                 } : undefined}
               />

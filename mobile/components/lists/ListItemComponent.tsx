@@ -18,6 +18,7 @@ interface ListItemComponentProps {
   onDrag?: () => void; // For mobile drag-and-drop
   onMoveUp?: () => void; // For simple mobile reordering
   onMoveDown?: () => void; // For simple mobile reordering
+  showDragHandle?: boolean; // Explicitly show drag handle (for web drag-and-drop)
 }
 
 export default function ListItemComponent({
@@ -34,6 +35,7 @@ export default function ListItemComponent({
   onDrag,
   onMoveUp,
   onMoveDown,
+  showDragHandle = false,
 }: ListItemComponentProps) {
   const { colors } = useTheme();
   const editButtonRef = useRef<any>(null);
@@ -89,7 +91,7 @@ export default function ListItemComponent({
         !item.category && isGroceryList && styles.uncategorizedItem,
       ]}
     >
-      {isTodoList && (
+      {(onDrag || onMoveUp || onMoveDown || showDragHandle) && (
         <View style={styles.dragHandleContainer}>
           {onDrag ? (
             <TouchableOpacity
@@ -221,7 +223,7 @@ export default function ListItemComponent({
             </Text>
           )}
         </View>
-        
+
         {item.notes && !item.notes.startsWith('From recipe:') && (
           <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
             {item.notes}

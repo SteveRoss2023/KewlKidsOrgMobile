@@ -60,7 +60,7 @@ export default function DraggableListItem({
       };
 
       const domNode = getDOMNode(viewRef.current);
-      
+
       if (domNode) {
         // Set draggable attribute
         domNode.setAttribute('draggable', 'true');
@@ -69,16 +69,16 @@ export default function DraggableListItem({
 
         const handleDragStart = (e: DragEvent) => {
           const target = e.target as HTMLElement;
-          
+
           // Check if the click originated from a button or no-drag element
           const isButton = target.closest('[data-no-drag="true"], button, [role="button"]');
-          
+
           if (isButton) {
             e.preventDefault();
             e.stopPropagation();
             return;
           }
-          
+
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', item.id.toString());
@@ -122,7 +122,7 @@ export default function DraggableListItem({
         const handleMouseDown = (e: MouseEvent) => {
           const target = e.target as HTMLElement;
           const isButton = target.closest('[data-no-drag="true"], button, [role="button"]');
-          
+
           if (!isButton) {
             // Set cursor to grabbing immediately
             domNode.style.cursor = 'grabbing';
@@ -205,6 +205,7 @@ export default function DraggableListItem({
         onMove={onMove}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
+        showDragHandle={true}
       />
     </View>
   );
