@@ -7,7 +7,7 @@ export default function DevToolsBanner() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
-  // Only show in development and not on web
+  // Only show banner in development, but NOT on web (web doesn't need it, mobile uses icon in header)
   if (!__DEV__ || Platform.OS === 'web') {
     return null;
   }
@@ -45,12 +45,17 @@ export default function DevToolsBanner() {
     }
   };
 
+  // Estimate tab bar height: ~49px on iOS, ~56px on Android, plus safe area insets
+  const tabBarHeight = Platform.OS === 'ios' ? 49 : 56;
+  const totalBottomOffset = tabBarHeight + insets.bottom;
+
   return (
     <View style={[
       styles.banner,
       {
         backgroundColor: colors.primary,
-        paddingBottom: Math.max(insets.bottom, 8),
+        bottom: totalBottomOffset,
+        paddingBottom: 8,
       }
     ]}>
       <TouchableOpacity
@@ -69,7 +74,6 @@ export default function DevToolsBanner() {
 const styles = StyleSheet.create({
   banner: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
     paddingHorizontal: 16,

@@ -14,7 +14,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FamilyProvider } from '../contexts/FamilyContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import navigationService from '../services/navigationService';
-import DevToolsBanner from '../components/DevToolsBanner';
 
 export default function RootLayout() {
   const router = useRouter();
@@ -208,13 +207,13 @@ export default function RootLayout() {
             <Stack
               screenOptions={{
                 headerShown: false,
+                animation: 'slide_from_right',
               }}
             >
               <Stack.Screen name="index" />
               <Stack.Screen name="(auth)" options={{ headerShown: false }} />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             </Stack>
-            <DevToolsBanner />
           </View>
         </FamilyProvider>
       </ThemeProvider>

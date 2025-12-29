@@ -101,6 +101,7 @@ export default function ListDetailScreen() {
   const [pendingAction, setPendingAction] = useState<'delete' | 'update' | null>(null);
 
   const isGroceryList = list?.list_type === 'grocery';
+  const isShoppingList = list?.list_type === 'shopping';
   const isTodoList = list?.list_type === 'todo';
 
   // Load list and categories when screen comes into focus
@@ -919,6 +920,7 @@ export default function ListDetailScreen() {
             listId={list!.id}
             categories={categories}
             isGroceryList={isGroceryList}
+            isShoppingList={isShoppingList}
             isTodoList={isTodoList}
             loading={updatingItem}
           />
@@ -1022,16 +1024,6 @@ export default function ListDetailScreen() {
                   </TouchableOpacity>
                 )}
               </>
-            ) : showAddItem && !editingItem ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setShowAddItem(false);
-                }}
-                style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
-              >
-                <FontAwesome name="times" size={16} color="#fff" />
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
             ) : editingItem && (!isTodoList || !DraggableFlatList || !GestureHandlerRootView) ? (
               <TouchableOpacity
                 onPress={() => {
@@ -1116,6 +1108,7 @@ export default function ListDetailScreen() {
             listId={list.id}
             categories={categories}
             isGroceryList={isGroceryList}
+            isShoppingList={isShoppingList}
             isTodoList={isTodoList}
             loading={adding}
           />
@@ -1166,6 +1159,7 @@ export default function ListDetailScreen() {
                     listId={list.id}
                     categories={categories}
                     isGroceryList={isGroceryList}
+                    isShoppingList={isShoppingList}
                     isTodoList={isTodoList}
                     loading={updatingItem}
                   />

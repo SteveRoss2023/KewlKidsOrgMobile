@@ -1,12 +1,10 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   StyleSheet,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -14,44 +12,17 @@ import AuthService from '../services/authService';
 import { useTheme } from '../contexts/ThemeContext';
 import oauthService from '../services/oauthService';
 
-interface SettingsMenuProps {
-  onClose?: () => void;
-  showButton?: boolean;
-  autoOpen?: boolean;
-}
-
-export interface SettingsMenuRef {
-  openModal: () => void;
-}
-
-const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
-  ({ onClose, showButton = true, autoOpen = false }, ref) => {
-    const router = useRouter();
-    const { colors } = useTheme();
-    const [modalVisible, setModalVisible] = useState(false);
-    const [servicesSubmenuOpen, setServicesSubmenuOpen] = useState(false);
-    const [onedriveConnected, setOnedriveConnected] = useState(false);
-    const [googledriveConnected, setGoogledriveConnected] = useState(false);
-    const [outlookConnected, setOutlookConnected] = useState(false);
-    const [googlephotosConnected, setGooglephotosConnected] = useState(false);
-
-    useImperativeHandle(ref, () => ({
-      openModal: () => {
-        setModalVisible(true);
-      },
-    }));
+const SettingsMenu = () => {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const [servicesSubmenuOpen, setServicesSubmenuOpen] = useState(false);
+  const [onedriveConnected, setOnedriveConnected] = useState(false);
+  const [googledriveConnected, setGoogledriveConnected] = useState(false);
+  const [outlookConnected, setOutlookConnected] = useState(false);
 
     useEffect(() => {
-      if (autoOpen) {
-        setModalVisible(true);
-      }
-    }, [autoOpen]);
-
-    useEffect(() => {
-      if (modalVisible) {
-        checkOAuthConnections();
-      }
-    }, [modalVisible]);
+      checkOAuthConnections();
+    }, []);
 
     const checkOAuthConnections = async () => {
       try {
@@ -78,29 +49,21 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
       }
     };
 
-    const handleClose = () => {
-      setModalVisible(false);
-      setServicesSubmenuOpen(false);
-      if (onClose) onClose();
+    const handleBack = () => {
+      router.back();
     };
 
     const handleNavigate = (route: string) => {
-      setModalVisible(false);
       setServicesSubmenuOpen(false);
-      if (onClose) onClose();
       router.push(route as any);
     };
 
     const handleLogout = async () => {
       try {
         await AuthService.logout();
-        setModalVisible(false);
-        if (onClose) onClose();
         router.replace('/(auth)/login');
       } catch (error) {
         console.error('Error during logout:', error);
-        setModalVisible(false);
-        if (onClose) onClose();
         router.replace('/(auth)/login');
       }
     };
@@ -166,172 +129,105 @@ const SettingsMenu = forwardRef<SettingsMenuRef, SettingsMenuProps>(
     ];
 
     return (
-      <>
-        {showButton && (
+      <View style={[styles.container, { backgroundColor: colors.surface }]}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
           <TouchableOpacity
-            onPress={() => setModalVisible(true)}
-            style={styles.settingsButton}
-            activeOpacity={0.7}
+            onPress={handleBack}
+            style={styles.backButton}
           >
-            <FontAwesome name="cog" size={20} color={colors.text} />
+            <FontAwesome name="arrow-left" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
-        )}
+        </View>
 
-        <Modal
-          visible={modalVisible}
-          transparent={true}
-          animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
-          onRequestClose={handleClose}
+        <ScrollView
+          style={styles.menuList}
+          contentContainerStyle={styles.menuListContent}
+          showsVerticalScrollIndicator={true}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-              <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Settings</Text>
-                <TouchableOpacity
-                  onPress={handleClose}
-                  style={styles.closeButton}
-                >
-                  <FontAwesome name="times" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
+          {menuItems.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.menuItem, { borderBottomColor: colors.border }]}
+              onPress={() => handleNavigate(item.route)}
+            >
+              <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>{item.label}</Text>
+              <FontAwesome name="chevron-right" size={12} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ))}
 
-              <ScrollView
-                style={styles.menuList}
-                contentContainerStyle={styles.menuListContent}
-                showsVerticalScrollIndicator={true}
-              >
-                {menuItems.map((item) => (
+          <View style={[styles.menuSection, { borderTopColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border }]}
+              onPress={() => setServicesSubmenuOpen(!servicesSubmenuOpen)}
+            >
+              <FontAwesome name="plug" size={16} color={colors.text} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Services</Text>
+              <FontAwesome
+                name={servicesSubmenuOpen ? 'chevron-up' : 'chevron-down'}
+                size={12}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+
+            {servicesSubmenuOpen && (
+              <View style={[styles.submenu, { backgroundColor: colors.background }]}>
+                {serviceItems.map((item) => (
                   <TouchableOpacity
                     key={item.id}
-                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    style={[styles.submenuItem, { borderBottomColor: colors.border }]}
                     onPress={() => handleNavigate(item.route)}
                   >
                     <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>{item.label}</Text>
-                    <FontAwesome name="chevron-right" size={12} color={colors.textSecondary} />
+                    <Text style={[styles.submenuItemText, { color: colors.textSecondary }]}>{item.label}</Text>
+                    {item.connected ? (
+                      <View style={styles.connectedIndicator}>
+                        <FontAwesome name="check-circle" size={12} color={colors.success} />
+                      </View>
+                    ) : (
+                      <View style={styles.disconnectedIndicator}>
+                        <FontAwesome name="times-circle" size={12} color={colors.error} />
+                      </View>
+                    )}
                   </TouchableOpacity>
                 ))}
-
-                <View style={[styles.menuSection, { borderTopColor: colors.border }]}>
-                  <TouchableOpacity
-                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                    onPress={() => setServicesSubmenuOpen(!servicesSubmenuOpen)}
-                  >
-                    <FontAwesome name="plug" size={16} color={colors.text} style={styles.menuIcon} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>Services</Text>
-                    <FontAwesome
-                      name={servicesSubmenuOpen ? 'chevron-up' : 'chevron-down'}
-                      size={12}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-
-                  {servicesSubmenuOpen && (
-                    <View style={[styles.submenu, { backgroundColor: colors.background }]}>
-                      {serviceItems.map((item) => (
-                        <TouchableOpacity
-                          key={item.id}
-                          style={[styles.submenuItem, { borderBottomColor: colors.border }]}
-                          onPress={() => handleNavigate(item.route)}
-                        >
-                          <FontAwesome name={item.icon as any} size={16} color={colors.text} style={styles.menuIcon} />
-                          <Text style={[styles.submenuItemText, { color: colors.textSecondary }]}>{item.label}</Text>
-                          {item.connected ? (
-                            <View style={styles.connectedIndicator}>
-                              <FontAwesome name="check-circle" size={12} color={colors.success} />
-                            </View>
-                          ) : (
-                            <View style={styles.disconnectedIndicator}>
-                              <FontAwesome name="times-circle" size={12} color={colors.error} />
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.menuItem, styles.logoutItem, { borderTopColor: colors.border }]}
-                  onPress={handleLogout}
-                >
-                  <FontAwesome name="sign-out" size={16} color={colors.error} style={styles.menuIcon} />
-                  <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>Logout</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
+              </View>
+            )}
           </View>
-        </Modal>
-      </>
+
+          <TouchableOpacity
+            style={[styles.menuItem, styles.logoutItem, { borderTopColor: colors.border }]}
+            onPress={handleLogout}
+          >
+            <FontAwesome name="sign-out" size={16} color={colors.error} style={styles.menuIcon} />
+            <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>Logout</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
     );
-  }
-);
+  };
 
 const styles = StyleSheet.create({
-  settingsButton: {
-    padding: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalOverlay: {
+  container: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    ...Platform.select({
-      web: {
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
-      },
-      default: {
-        justifyContent: 'flex-end',
-      },
-    }),
   },
-  modalContent: {
-    width: '100%',
-    flexDirection: 'column',
-    ...Platform.select({
-      web: {
-        borderRadius: 12,
-        maxWidth: 400,
-        maxHeight: '80vh',
-        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
-      },
-      default: {
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        height: '95%',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 8,
-      },
-    }),
-  },
-  modalHeader: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
   },
-  modalTitle: {
+  title: {
     fontSize: 20,
     fontWeight: 'bold',
   },
-  closeButton: {
+  backButton: {
     padding: 4,
   },
   menuList: {
-    ...Platform.select({
-      web: {
-        maxHeight: 'calc(80vh - 80px)',
-      },
-      default: {
-        flex: 1,
-      },
-    }),
+    flex: 1,
   },
   menuListContent: {
     paddingBottom: 40,

@@ -2,7 +2,7 @@
  * TypeScript types for Lists feature
  */
 
-export type ListType = 'shopping' | 'grocery' | 'todo' | 'other';
+export type ListType = 'shopping' | 'grocery' | 'todo' | 'ideas' | 'other';
 
 export interface List {
   id: number;

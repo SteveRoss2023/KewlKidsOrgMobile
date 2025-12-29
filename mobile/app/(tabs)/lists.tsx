@@ -26,7 +26,7 @@ import { speak } from '../../utils/voiceFeedback';
 import { parseCreateList } from '../../utils/voiceCommands';
 import VoiceButton from '../../components/VoiceButton';
 
-type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'other';
+type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'ideas' | 'other';
 
 export default function ListsScreen() {
   const router = useRouter();
@@ -85,8 +85,8 @@ export default function ListsScreen() {
         // Handle list type selection if we're waiting for it (check this FIRST)
         if (awaitingListType) {
           // Ignore if this looks like the prompt message being repeated back
-          if (text.includes('what type of list') || text.includes('say todo') || text.includes('say grocery') || 
-              text.includes('say shopping') || text.includes('say other')) {
+          if (text.includes('what type of list') || text.includes('say todo') || text.includes('say grocery') ||
+              text.includes('say shopping') || text.includes('say ideas') || text.includes('say other')) {
             console.log('🎤 [LISTS] Ignoring prompt message:', text);
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -99,22 +99,24 @@ export default function ListsScreen() {
 
           const normalizedType = text.toLowerCase().trim();
           let listType: ListType | null = null;
-          
+
           // Normalize "to do" variations
           const normalizedForTodo = normalizedType.replace(/\s+/g, ' '); // Normalize spaces
-          
+
           // Check for exact matches first (most common case)
           // Handle "to do" as two words
-          if (normalizedType === 'todo' || normalizedType === 'to do' || normalizedType === 'to-do' || 
+          if (normalizedType === 'todo' || normalizedType === 'to do' || normalizedType === 'to-do' ||
               normalizedType === '1' || normalizedType === 'one' || normalizedForTodo === 'to do') {
             listType = 'todo';
           } else if (normalizedType === 'grocery' || normalizedType === '2' || normalizedType === 'two') {
             listType = 'grocery';
           } else if (normalizedType === 'shopping' || normalizedType === '3' || normalizedType === 'three') {
             listType = 'shopping';
-          } else if (normalizedType === 'other' || normalizedType === '4' || normalizedType === 'four') {
+          } else if (normalizedType === 'ideas' || normalizedType === 'idea' || normalizedType === '5' || normalizedType === 'five') {
+            listType = 'ideas';
+          } else if (normalizedType === 'other' || normalizedType === '6' || normalizedType === 'six') {
             listType = 'other';
-          } 
+          }
           // Check for partial matches (but be careful not to match "say todo" etc.)
           else if (normalizedType.includes('todo') || normalizedType.includes('to do') || normalizedType.includes('to-do')) {
             // Make sure it's not part of "say todo" or similar
@@ -125,14 +127,16 @@ export default function ListsScreen() {
             listType = 'grocery';
           } else if (normalizedType.includes('shopping') && !normalizedType.includes('say')) {
             listType = 'shopping';
+          } else if ((normalizedType.includes('ideas') || normalizedType.includes('idea')) && !normalizedType.includes('say')) {
+            listType = 'ideas';
           } else if (normalizedType.includes('other') && !normalizedType.includes('say')) {
             listType = 'other';
           }
-          
+
           if (!listType) {
             // Invalid selection - ask again but don't reset everything
             console.log('🎤 [LISTS] Invalid list type response:', text);
-            speak('Invalid selection. Please say: to do, grocery, shopping, or other', () => {
+            speak('Invalid selection. Please say: to do, grocery, shopping, ideas, or other', () => {
               setTimeout(() => {
                 start({ ignoreTranscriptsForMs: 2000 });
               }, 300); // Reduced from 500ms to 300ms
@@ -144,7 +148,7 @@ export default function ListsScreen() {
 
           stop();
           setAwaitingListType(false);
-          
+
           if (pendingListName) {
             try {
               setCreating(true);
@@ -214,7 +218,7 @@ export default function ListsScreen() {
           setAwaitingListType(true);
           lastProcessedTranscriptRef.current = '';
           reset(); // Clear transcript before speaking
-          speak('What type of list? Say: to do, grocery, shopping, or other', () => {
+          speak('What type of list? Say: to do, grocery, shopping, ideas, or other', () => {
             // Start listening quickly but ignore the prompt message
             setTimeout(() => {
               start({ ignoreTranscriptsForMs: 2000 }); // Ignore transcripts for 2 seconds after prompt
@@ -477,7 +481,7 @@ export default function ListsScreen() {
               <FontAwesome name={showCreateForm ? 'times' : 'plus'} size={Platform.OS === 'web' ? 20 : 18} color="#fff" />
             </TouchableOpacity>
             <Text style={[styles.iconLabel, { color: colors.textSecondary }]}>
-              {showCreateForm ? 'Cancel' : 'Add Item'}
+              {showCreateForm ? 'Cancel' : 'Add List'}
             </Text>
           </View>
         </View>
@@ -525,6 +529,7 @@ export default function ListsScreen() {
               }}
               familyId={selectedFamily.id}
               loading={creating || updating}
+              defaultListType={editingList ? undefined : (activeTab as ListType)}
             />
           </View>
         </Modal>
@@ -532,7 +537,7 @@ export default function ListsScreen() {
 
       <View style={[styles.tabsContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-          {(['todo', 'grocery', 'shopping', 'other'] as ActiveTab[]).map((tab) => (
+          {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
             <TouchableOpacity
               key={tab}
               style={[

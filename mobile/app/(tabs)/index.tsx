@@ -16,6 +16,7 @@ import MessageBadge from '../../components/MessageBadge';
 import websocketService from '../../services/websocketService';
 import { tokenStorage } from '../../utils/storage';
 import Logo from '../../components/Logo';
+import DevToolsIcon from '../../components/DevToolsIcon';
 
 interface FeatureCard {
   id: string;
@@ -110,10 +111,11 @@ export default function HomeScreen() {
       description: 'Location sharing and tracking',
       icon: '🗺️',
       color: '#a855f7',
+      hidden: true,
     },
     {
       id: 'mapbox',
-      title: 'Map(MapBox)',
+      title: 'Map',
       description: 'MapBox location sharing and tracking',
       icon: '🗺️',
       color: '#0066ff',
@@ -501,17 +503,20 @@ export default function HomeScreen() {
           <View style={styles.titleContainer}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>Welcome to KewlKidsOrganizer</Text>
           </View>
-          <TouchableOpacity
-            onPress={handleRefresh}
-            style={[styles.refreshButton, { borderColor: colors.border }]}
-            disabled={refreshing || loading}
-          >
-            <FontAwesome
-              name="refresh"
-              size={16}
-              color={refreshing || loading ? colors.textSecondary : colors.text}
-            />
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            <DevToolsIcon />
+            <TouchableOpacity
+              onPress={handleRefresh}
+              style={[styles.refreshButton, { borderColor: colors.border }]}
+              disabled={refreshing || loading}
+            >
+              <FontAwesome
+                name="refresh"
+                size={16}
+                color={refreshing || loading ? colors.textSecondary : colors.text}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Manage your family's activities, events, and communication in one place
@@ -617,6 +622,11 @@ const styles = StyleSheet.create({
   titleContainer: {
     flex: 1,
     marginRight: 8,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
   },
   refreshButton: {
     padding: 8,

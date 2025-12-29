@@ -38,6 +38,7 @@ class List(models.Model):
         ('shopping', 'Shopping List'),
         ('grocery', 'Grocery List'),
         ('todo', 'To-Do List'),
+        ('ideas', 'Ideas'),
         ('other', 'Other'),
     ]
 

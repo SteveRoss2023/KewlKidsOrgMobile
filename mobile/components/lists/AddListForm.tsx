@@ -18,6 +18,7 @@ const LIST_TYPES: { label: string; value: ListType }[] = [
   { label: 'Shopping', value: 'shopping' },
   { label: 'Grocery', value: 'grocery' },
   { label: 'To-Do', value: 'todo' },
+  { label: 'Ideas', value: 'ideas' },
   { label: 'Other', value: 'other' },
 ];
 

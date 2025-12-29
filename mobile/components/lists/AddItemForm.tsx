@@ -13,6 +13,7 @@ interface AddItemFormProps {
   listId: number;
   categories?: GroceryCategory[];
   isGroceryList?: boolean;
+  isShoppingList?: boolean;
   isTodoList?: boolean;
   loading?: boolean;
 }
@@ -24,6 +25,7 @@ export default function AddItemForm({
   listId,
   categories = [],
   isGroceryList = false,
+  isShoppingList = false,
   isTodoList = false,
   loading = false,
 }: AddItemFormProps) {
@@ -123,15 +125,19 @@ export default function AddItemForm({
           </>
         )}
 
-        <Text style={[styles.label, { color: colors.text }]}>Quantity</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-          value={quantity}
-          onChangeText={setQuantity}
-          placeholder="Optional quantity"
-          placeholderTextColor={colors.textSecondary}
-          editable={!loading}
-        />
+        {(isGroceryList || isShoppingList) && (
+          <>
+            <Text style={[styles.label, { color: colors.text }]}>Quantity</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+              value={quantity}
+              onChangeText={setQuantity}
+              placeholder="Optional quantity"
+              placeholderTextColor={colors.textSecondary}
+              editable={!loading}
+            />
+          </>
+        )}
 
         {isTodoList && (
           <>

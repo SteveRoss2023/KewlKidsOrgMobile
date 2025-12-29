@@ -256,6 +256,13 @@ export default function OutlookSyncScreen() {
       <View style={styles.header}>
         <FontAwesome name="calendar" size={24} color={colors.text} />
         <Text style={[styles.title, { color: colors.text }]}>Outlook Calendar Sync</Text>
+        <TouchableOpacity
+          onPress={() => router.push('/(tabs)/settings')}
+          style={styles.settingsButton}
+          activeOpacity={0.7}
+        >
+          <FontAwesome name="cog" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       {error && (
@@ -380,6 +387,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
     gap: 12,
+  },
+  settingsButton: {
+    marginLeft: 'auto',
+    padding: 8,
   },
   title: {
     fontSize: 24,
