@@ -13,8 +13,22 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { DraxProvider, DraxView } from 'react-native-drax';
+
+// Conditionally import DraggableFlatList to handle cases where reanimated isn't initialized
+let DraggableFlatList: any = null;
+let ScaleDecorator: any = null;
+let RenderItemParams: any = null;
+
+if (Platform.OS !== 'web') {
+  try {
+    const DraggableFlatListModule = require('react-native-draggable-flatlist');
+    DraggableFlatList = DraggableFlatListModule.default;
+    ScaleDecorator = DraggableFlatListModule.ScaleDecorator;
+    RenderItemParams = DraggableFlatListModule.RenderItemParams;
+  } catch (error) {
+    console.warn('react-native-draggable-flatlist not available (reanimated may not be initialized):', error);
+  }
+}
 import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useFamily } from '../../../contexts/FamilyContext';
@@ -751,6 +765,24 @@ export default function ListDetailScreen() {
     }
   };
 
+  // Mobile drag-and-drop handler for DraggableFlatList
+  const handleMobileDragEnd = async (data: ListItem[]) => {
+    if (!supportsDragAndDrop) return;
+
+    // Update order values based on new positions
+    const updatePromises = data.map((item, index) =>
+      ListService.updateListItem(item.id, { order: index })
+    );
+
+    try {
+      await Promise.all(updatePromises);
+      await fetchListItems();
+    } catch (err) {
+      console.error('Error reordering items:', err);
+      await fetchListItems(); // Revert by refetching
+    }
+  };
+
   // Web drag-and-drop handlers
   const handleWebDragStart = (itemId: number) => {
     setDraggedItemId(itemId);
@@ -912,7 +944,7 @@ export default function ListDetailScreen() {
     }
   };
 
-  const renderItem = ({ item, index }: { item: ListItem; index: number }) => {
+  const renderItem = ({ item, index, useDraxView = false }: { item: ListItem; index: number; useDraxView?: boolean }) => {
     // On web, use modal instead of inline editing
     if (editingItem && editingItem.id === item.id && Platform.OS !== 'web') {
       return (
@@ -943,16 +975,15 @@ export default function ListDetailScreen() {
         onMove={() => handleOpenMoveModal(item)}
         isGroceryList={isGroceryList}
         isTodoList={isTodoList}
-        onMoveUp={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
+        showDragHandle={useDraxView}
+        onMoveUp={!useDraxView && Platform.OS !== 'web' && supportsDragAndDrop ? () => {
           handleMoveItem(item.id, 'up');
         } : undefined}
-        onMoveDown={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
+        onMoveDown={!useDraxView && Platform.OS !== 'web' && supportsDragAndDrop ? () => {
           handleMoveItem(item.id, 'down');
         } : undefined}
       />
     );
-
-    return itemComponent;
   };
 
   if (loading) {
@@ -1028,7 +1059,7 @@ export default function ListDetailScreen() {
                   </TouchableOpacity>
                 )}
               </>
-            ) : editingItem && (!supportsDragAndDrop || !DraggableFlatList || !GestureHandlerRootView) ? (
+            ) : editingItem && !supportsDragAndDrop ? (
               <TouchableOpacity
                 onPress={() => {
                   setEditingItem(null);
@@ -1065,7 +1096,7 @@ export default function ListDetailScreen() {
             <View style={styles.pickerWrapper}>
               <ThemeAwarePicker
                 selectedValue={selectedRecipeFilter}
-                onValueChange={setSelectedRecipeFilter}
+                onValueChange={(value) => setSelectedRecipeFilter(value as string)}
                 options={[
                   { label: 'All items', value: '' },
                   ...availableRecipes.map(recipe => ({ label: recipe, value: recipe })),
@@ -1104,7 +1135,7 @@ export default function ListDetailScreen() {
         >
           <AddItemForm
             onSubmit={(data) => {
-              handleAddItem(data);
+              handleAddItem(data as CreateListItemData);
             }}
             onCancel={() => {
               setShowAddItem(false);
@@ -1119,7 +1150,7 @@ export default function ListDetailScreen() {
         </ScrollView>
       )}
 
-      {editingItem && (Platform.OS === 'web' || !supportsDragAndDrop) && (
+      {editingItem && (
         <Modal
           visible={true}
           animationType="fade"
@@ -1148,14 +1179,14 @@ export default function ListDetailScreen() {
                   </TouchableOpacity>
                 </View>
                 <ScrollView
-                  style={styles.modalContent}
+                  style={styles.modalContentScroll}
                   keyboardShouldPersistTaps="handled"
                   contentContainerStyle={styles.modalContentContainer}
                 >
                   <AddItemForm
                     editingItem={editingItem}
                     onSubmit={(data) => {
-                      handleUpdateItem(data);
+                      handleUpdateItem(data as UpdateListItemData);
                     }}
                     onCancel={() => {
                       setEditingItem(null);
@@ -1182,18 +1213,18 @@ export default function ListDetailScreen() {
                 </TouchableOpacity>
               </View>
               <ScrollView
-                style={styles.modalContent}
+                style={styles.modalContentScroll}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.modalContentContainer}
               >
-                  <AddItemForm
-                    editingItem={editingItem}
-                    onSubmit={(data) => {
-                      handleUpdateItem(data);
-                    }}
-                    onCancel={() => {
-                      setEditingItem(null);
-                    }}
+                <AddItemForm
+                  editingItem={editingItem}
+                  onSubmit={(data) => {
+                    handleUpdateItem(data as UpdateListItemData);
+                  }}
+                  onCancel={() => {
+                    setEditingItem(null);
+                  }}
                   listId={list.id}
                   categories={categories}
                   isGroceryList={isGroceryList}
@@ -1258,62 +1289,8 @@ export default function ListDetailScreen() {
             );
           })}
         </ScrollView>
-      ) : supportsDragAndDrop && Platform.OS !== 'web' ? (
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <DraxProvider>
-            <FlatList
-              data={[...filteredItems].sort((a, b) => {
-                if (a.order !== b.order) {
-                  return (a.order || 0) - (b.order || 0);
-                }
-                return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-              })}
-              keyExtractor={(item) => item.id.toString()}
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              renderItem={({ item, index }) => {
-                const sortedItems = [...filteredItems].sort((a, b) => {
-                  if (a.order !== b.order) {
-                    return (a.order || 0) - (b.order || 0);
-                  }
-                  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-                });
-                const nextItem = sortedItems[index + 1];
-                const dropId = nextItem ? nextItem.id.toString() : null;
-
-                return (
-                  <DraxView
-                    draggable
-                    payload={item.id.toString()}
-                    onReceiveDragDrop={({ dragged }) => {
-                      const draggedId = dragged.payload as string;
-                      if (dropId) {
-                        handleDragEnd(draggedId, dropId);
-                      } else {
-                        // Drop at end
-                        const lastItem = sortedItems[sortedItems.length - 1];
-                        if (lastItem) {
-                          handleDragEnd(draggedId, lastItem.id.toString());
-                        }
-                      }
-                    }}
-                  >
-                    <DraxView
-                      onReceiveDragDrop={({ dragged }) => {
-                        const draggedId = dragged.payload as string;
-                        handleDragEnd(draggedId, item.id.toString());
-                      }}
-                    >
-                      {renderItem({ item, index })}
-                    </DraxView>
-                  </DraxView>
-                );
-              }}
-              contentContainerStyle={styles.itemsContainer}
-            />
-          </DraxProvider>
-        </GestureHandlerRootView>
-      ) : (
+      ) : Platform.OS === 'web' && supportsDragAndDrop ? (
+        // Web drag-and-drop: Use FlatList with DraggableListItem
         <FlatList
           data={[...filteredItems].sort((a, b) => {
             if (a.order !== b.order) {
@@ -1324,32 +1301,44 @@ export default function ListDetailScreen() {
           keyExtractor={(item) => item.id.toString()}
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          renderItem={({ item, index }) => {
-            if (Platform.OS === 'web' && supportsDragAndDrop) {
-              return (
-                <DraggableListItem
-                  item={item}
-                  index={index}
-                  draggedItemId={draggedItemId}
-                  dragOverIndex={dragOverIndex}
-                  onDragStart={handleWebDragStart}
-                  onDragOver={handleWebDragOver}
-                  onDragLeave={handleWebDragLeave}
-                  onDrop={handleWebDrop}
-                  onDragEnd={handleWebDragEnd}
-                  onToggleComplete={() => toggleItemComplete(item)}
-                  onEdit={() => {
-                    setEditingItem(item);
-                  }}
-                  onDelete={() => handleDeleteItem(item)}
-                  onMove={() => handleOpenMoveModal(item)}
-                  isGroceryList={isGroceryList}
-                  isTodoList={isTodoList}
-                />
-              );
+          renderItem={({ item, index }) => (
+            <DraggableListItem
+              item={item}
+              index={index}
+              draggedItemId={draggedItemId}
+              dragOverIndex={dragOverIndex}
+              onDragStart={handleWebDragStart}
+              onDragOver={handleWebDragOver}
+              onDragLeave={handleWebDragLeave}
+              onDrop={handleWebDrop}
+              onDragEnd={handleWebDragEnd}
+              onToggleComplete={() => toggleItemComplete(item)}
+              onEdit={() => {
+                setEditingItem(item);
+              }}
+              onDelete={() => handleDeleteItem(item)}
+              onMove={() => handleOpenMoveModal(item)}
+              isGroceryList={isGroceryList}
+              isTodoList={isTodoList}
+            />
+          )}
+          contentContainerStyle={styles.itemsContainer}
+        />
+      ) : Platform.OS !== 'web' && supportsDragAndDrop && DraggableFlatList ? (
+        // Mobile drag-and-drop: Use DraggableFlatList (if available)
+        <DraggableFlatList
+          data={[...filteredItems].sort((a, b) => {
+            if (a.order !== b.order) {
+              return (a.order || 0) - (b.order || 0);
             }
-
-            return (
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          })}
+          keyExtractor={(item: ListItem) => item.id.toString()}
+          onDragEnd={({ data }: { data: ListItem[] }) => handleMobileDragEnd(data)}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          renderItem={({ item, drag }: any) => (
+            <ScaleDecorator>
               <ListItemComponent
                 item={item}
                 onToggleComplete={() => toggleItemComplete(item)}
@@ -1357,17 +1346,40 @@ export default function ListDetailScreen() {
                   setEditingItem(item);
                 }}
                 onDelete={() => handleDeleteItem(item)}
+                onMove={() => handleOpenMoveModal(item)}
                 isGroceryList={isGroceryList}
                 isTodoList={isTodoList}
-                onMoveUp={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
-                  handleMoveItem(item.id, 'up');
-                } : undefined}
-                onMoveDown={Platform.OS !== 'web' && supportsDragAndDrop ? () => {
-                  handleMoveItem(item.id, 'down');
-                } : undefined}
+                onDrag={drag}
+                showDragHandle={true}
               />
-            );
-          }}
+            </ScaleDecorator>
+          )}
+          contentContainerStyle={styles.itemsContainer}
+        />
+      ) : (
+        // Mobile without drag-and-drop: Use regular FlatList (for Grocery/Shopping lists)
+        <FlatList
+          data={[...filteredItems].sort((a, b) => {
+            if (a.order !== b.order) {
+              return (a.order || 0) - (b.order || 0);
+            }
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          })}
+          keyExtractor={(item) => item.id.toString()}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          renderItem={({ item }) => (
+            <ListItemComponent
+              item={item}
+              onToggleComplete={() => toggleItemComplete(item)}
+              onEdit={() => {
+                setEditingItem(item);
+              }}
+              onDelete={() => handleDeleteItem(item)}
+              isGroceryList={isGroceryList}
+              isTodoList={isTodoList}
+            />
+          )}
           contentContainerStyle={styles.itemsContainer}
         />
       )}
@@ -1400,12 +1412,12 @@ export default function ListDetailScreen() {
         onRequestClose={() => setMoveItemModal({ isOpen: false, item: null })}
       >
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Move Item</Text>
+          <View style={[styles.modalContentSecondary, { backgroundColor: colors.surface }]}>
+            <View style={styles.modalHeaderSecondary}>
+              <Text style={[styles.modalTitleSecondary, { color: colors.text }]}>Move Item</Text>
               <TouchableOpacity
                 onPress={() => setMoveItemModal({ isOpen: false, item: null })}
-                style={styles.modalCloseButton}
+                style={styles.modalCloseButtonSecondary}
               >
                 <FontAwesome name="times" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -1433,7 +1445,13 @@ export default function ListDetailScreen() {
                   <Text style={[styles.pickerLabel, { color: colors.text }]}>Move to list:</Text>
                   <ThemeAwarePicker
                     selectedValue={selectedTargetListId}
-                    onValueChange={(value) => setSelectedTargetListId(value as number)}
+                    onValueChange={(value) => {
+                      if (value === null || value === '') {
+                        setSelectedTargetListId(null);
+                      } else {
+                        setSelectedTargetListId(Number(value));
+                      }
+                    }}
                     options={availableLists.map((l) => ({
                       label: l.name,
                       value: l.id,
@@ -1443,10 +1461,10 @@ export default function ListDetailScreen() {
                   />
                 </View>
 
-                <View style={styles.modalButtons}>
+                <View style={[styles.modalButtons, { marginTop: 24 }]}>
                   <TouchableOpacity
                     onPress={() => setMoveItemModal({ isOpen: false, item: null })}
-                    style={[styles.modalButton, styles.cancelButton, { borderColor: colors.border }]}
+                    style={[styles.modalButton, styles.cancelButtonSecondary, { borderColor: colors.border }]}
                   >
                     <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
                   </TouchableOpacity>
@@ -1484,6 +1502,7 @@ export default function ListDetailScreen() {
   );
 }
 
+// @ts-ignore - Web-specific styles cause type conflicts
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1547,41 +1566,41 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { minWidth: 120, flexShrink: 0 }
       : {
-          width: '100%',
-          marginBottom: 4,
-        }
+        width: '100%',
+        marginBottom: 4,
+      }
     ),
   },
   pickerWrapper: {
     ...(Platform.OS === 'web'
       ? { flex: 1, minWidth: 150 }
       : {
-          flex: 2, // Give more flex space to dropdown
-          minWidth: 200, // Increased width to prevent text wrapping
-          minHeight: 40, // Smaller height for mobile
-          marginRight: 8, // Add spacing before delete button if present
-          marginBottom: 0, // No bottom margin
-          flexShrink: 1,
-        }
+        flex: 2, // Give more flex space to dropdown
+        minWidth: 200, // Increased width to prevent text wrapping
+        minHeight: 40, // Smaller height for mobile
+        marginRight: 8, // Add spacing before delete button if present
+        marginBottom: 0, // No bottom margin
+        flexShrink: 1,
+      }
     ),
   },
   spacer: {
     ...(Platform.OS === 'web'
       ? {}
       : {
-          height: 16, // Explicit spacer to push delete button down
-          width: '100%',
-        }
+        height: 16, // Explicit spacer to push delete button down
+        width: '100%',
+      }
     ),
   },
   deleteButtonWrapper: {
     ...(Platform.OS === 'web'
       ? {}
       : {
-          flexShrink: 0, // Don't shrink delete button
-          marginLeft: 8, // Add spacing from dropdown
-          alignItems: 'flex-start', // Align button to left, not full width
-        }
+        flexShrink: 0, // Don't shrink delete button
+        marginLeft: 8, // Add spacing from dropdown
+        alignItems: 'flex-start', // Align button to left, not full width
+      }
     ),
   },
   deleteRecipeButton: {
@@ -1595,9 +1614,9 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { flexShrink: 0 }
       : {
-          alignSelf: 'flex-start', // Don't stretch to full width
-          marginTop: 0,
-        }
+        alignSelf: 'flex-start', // Don't stretch to full width
+        marginTop: 0,
+      }
     ),
   },
   deleteRecipeButtonText: {
@@ -1667,12 +1686,14 @@ const styles = StyleSheet.create({
     fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },
+  // @ts-ignore - Web-specific styles in Platform.select
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    // @ts-ignore - Web-specific styles
     ...Platform.select({
       web: {
         position: 'fixed',
@@ -1687,7 +1708,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  // @ts-ignore - Web-specific styles in Platform.select
   modalContainer: {
+    // @ts-ignore - Web-specific styles
     ...Platform.select({
       web: {
         borderRadius: 12,
@@ -1726,7 +1749,9 @@ const styles = StyleSheet.create({
   modalCloseButton: {
     padding: 8,
   },
-  modalContent: {
+  // @ts-ignore - Web-specific styles in Platform.select
+  modalContentScroll: {
+    // @ts-ignore - Web-specific styles
     ...Platform.select({
       web: {
         maxHeight: 'calc(90vh - 80px)',
@@ -1779,8 +1804,6 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-  },
-  scrollView: {
     ...(Platform.OS !== 'web' ? {
       zIndex: 200,
       position: 'relative',
@@ -1832,19 +1855,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flexShrink: 0,
   },
-  modalOverlay: {
+  modalOverlaySecondary: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  modalContent: {
+  modalContentSecondary: {
     borderRadius: 16,
     padding: 24,
     width: '100%',
     maxWidth: 400,
     ...Platform.select({
       web: {
+        // @ts-ignore - web-specific boxShadow
         boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
       },
       default: {
@@ -1856,17 +1880,17 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  modalHeader: {
+  modalHeaderSecondary: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
   },
-  modalTitle: {
+  modalTitleSecondary: {
     fontSize: 20,
     fontWeight: 'bold',
   },
-  modalCloseButton: {
+  modalCloseButtonSecondary: {
     padding: 4,
   },
   itemPreview: {
@@ -1908,7 +1932,7 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
-  cancelButton: {
+  cancelButtonSecondary: {
     borderWidth: 1,
   },
   confirmButton: {
@@ -1926,5 +1950,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-});
+}) as any; // Type assertion to bypass web-specific style type errors
 

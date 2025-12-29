@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Pressable } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { ListItem } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -90,6 +90,7 @@ export default function ListItemComponent({
         item.completed && styles.itemCompleted,
         !item.category && isGroceryList && styles.uncategorizedItem,
       ]}
+      collapsable={false}
     >
       {(onDrag || onMoveUp || onMoveDown || showDragHandle) && (
         <View style={styles.dragHandleContainer}>
@@ -155,102 +156,214 @@ export default function ListItemComponent({
         </View>
       </TouchableOpacity>
 
-      <View style={styles.itemContent}>
-        <View style={styles.itemHeader}>
-          <View style={styles.itemNameRow}>
-            <Text
-              style={[
-                styles.itemName,
-                { color: colors.text },
-                item.completed && styles.itemNameCompleted,
-              ]}
-              numberOfLines={Platform.OS === 'web' ? 2 : 2}
-            >
-              {item.name}
-            </Text>
-            {/* Edit, Move, and Delete buttons on same line as name on mobile */}
-            {Platform.OS !== 'web' && (
-              <View style={styles.itemActionsInline}>
-                {onEdit && (
-                  <TouchableOpacity
-                    ref={editButtonRef}
-                    style={styles.actionButton}
-                    onPress={onEdit}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    accessibilityLabel="Edit item"
-                    accessibilityHint="Opens the edit form for this item"
+      {/* Wrap content in Pressable to enable drag from anywhere on mobile */}
+      {onDrag && Platform.OS !== 'web' ? (
+        <View style={{ flex: 1, flexDirection: 'row' }}>
+          <Pressable
+            onLongPress={onDrag}
+            style={{ flex: 1 }}
+            delayLongPress={300}
+          >
+            <View style={styles.itemContent}>
+              <View style={styles.itemHeader}>
+                <View style={styles.itemNameRow}>
+                  <Text
+                    style={[
+                      styles.itemName,
+                      { color: colors.text },
+                      item.completed && styles.itemNameCompleted,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 2 : 2}
                   >
-                    <FontAwesome name="edit" size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-                {onMove && (
-                  <TouchableOpacity
-                    ref={moveButtonRef}
-                    style={styles.actionButton}
-                    onPress={onMove}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    accessibilityLabel="Move item"
-                    accessibilityHint="Move this item to a different list"
-                  >
-                    <FontAwesome name="arrows-alt" size={20} color={colors.primary} />
-                  </TouchableOpacity>
-                )}
-                {onDelete && (
-                  <TouchableOpacity
-                    ref={deleteButtonRef}
-                    style={styles.actionButton}
-                    onPress={onDelete}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    accessibilityLabel="Delete item"
-                    accessibilityHint="Permanently delete this item"
-                  >
-                    <FontAwesome name="trash" size={20} color="#FF3B30" />
-                  </TouchableOpacity>
-                )}
+                    {item.name}
+                  </Text>
+                  {/* Edit, Move, and Delete buttons on same line as name on mobile */}
+                  {Platform.OS !== 'web' && (
+                    <View
+                      style={styles.itemActionsInline}
+                      onStartShouldSetResponder={() => true}
+                      onResponderTerminationRequest={() => false}
+                    >
+                      {onEdit && (
+                        <TouchableOpacity
+                          ref={editButtonRef}
+                          style={styles.actionButton}
+                          onPress={onEdit}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel="Edit item"
+                          accessibilityHint="Opens the edit form for this item"
+                        >
+                          <FontAwesome name="edit" size={20} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      {onMove && (
+                        <TouchableOpacity
+                          ref={moveButtonRef}
+                          style={styles.actionButton}
+                          onPress={onMove}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel="Move item"
+                          accessibilityHint="Move this item to a different list"
+                        >
+                          <FontAwesome name="arrows-alt" size={20} color={colors.primary} />
+                        </TouchableOpacity>
+                      )}
+                      {onDelete && (
+                        <TouchableOpacity
+                          ref={deleteButtonRef}
+                          style={styles.actionButton}
+                          onPress={onDelete}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel="Delete item"
+                          accessibilityHint="Permanently delete this item"
+                        >
+                          <FontAwesome name="trash" size={20} color="#FF3B30" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </View>
               </View>
+              {/* Quantity on mobile - show below name for grocery lists */}
+              {item.quantity && isGroceryList && Platform.OS !== 'web' && (
+                <Text style={[styles.quantityMobile, { color: colors.textSecondary }]}>
+                  Qty: {item.quantity}
+                </Text>
+              )}
+              {/* Quantity on web or for non-grocery lists - show inline */}
+              {item.quantity && Platform.OS === 'web' && (
+                <Text style={[styles.quantity, { color: colors.textSecondary }]}>
+                  Qty: {item.quantity}
+                </Text>
+              )}
+
+              {item.notes && !item.notes.startsWith('From recipe:') && (
+                <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
+                  {item.notes}
+                </Text>
+              )}
+              {item.notes && item.notes.startsWith('From recipe:') && (
+                <View style={styles.recipeBadge}>
+                  <Text style={[styles.recipeText, { color: colors.primary }]}>
+                    {item.notes.replace('From recipe: ', '')}
+                  </Text>
+                </View>
+              )}
+              {isTodoList && item.due_date && (
+                <Text
+                  style={[
+                    styles.dueDate,
+                    { color: isOverdue ? '#FF3B30' : colors.textSecondary },
+                  ]}
+                >
+                  Due: {new Date(item.due_date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </Text>
+              )}
+            </View>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.itemContent}>
+          <View style={styles.itemHeader}>
+            <View style={styles.itemNameRow}>
+              <Text
+                style={[
+                  styles.itemName,
+                  { color: colors.text },
+                  item.completed && styles.itemNameCompleted,
+                ]}
+                numberOfLines={Platform.OS === 'web' ? 2 : 2}
+              >
+                {item.name}
+              </Text>
+              {/* Edit, Move, and Delete buttons on same line as name on mobile */}
+              {Platform.OS !== 'web' && (
+                <View style={styles.itemActionsInline}>
+                  {onEdit && (
+                    <TouchableOpacity
+                      ref={editButtonRef}
+                      style={styles.actionButton}
+                      onPress={onEdit}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel="Edit item"
+                      accessibilityHint="Opens the edit form for this item"
+                    >
+                      <FontAwesome name="edit" size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                  {onMove && (
+                    <TouchableOpacity
+                      ref={moveButtonRef}
+                      style={styles.actionButton}
+                      onPress={onMove}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel="Move item"
+                      accessibilityHint="Move this item to a different list"
+                    >
+                      <FontAwesome name="arrows-alt" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                  )}
+                  {onDelete && (
+                    <TouchableOpacity
+                      ref={deleteButtonRef}
+                      style={styles.actionButton}
+                      onPress={onDelete}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel="Delete item"
+                      accessibilityHint="Permanently delete this item"
+                    >
+                      <FontAwesome name="trash" size={20} color="#FF3B30" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+            {/* Quantity on mobile - show below name for grocery lists */}
+            {item.quantity && isGroceryList && Platform.OS !== 'web' && (
+              <Text style={[styles.quantityMobile, { color: colors.textSecondary }]}>
+                Qty: {item.quantity}
+              </Text>
+            )}
+            {/* Quantity on web or for non-grocery lists - show inline */}
+            {item.quantity && Platform.OS === 'web' && (
+              <Text style={[styles.quantity, { color: colors.textSecondary }]}>
+                Qty: {item.quantity}
+              </Text>
             )}
           </View>
-          {/* Quantity on mobile - show below name for grocery lists */}
-          {item.quantity && isGroceryList && Platform.OS !== 'web' && (
-            <Text style={[styles.quantityMobile, { color: colors.textSecondary }]}>
-              Qty: {item.quantity}
+
+          {item.notes && !item.notes.startsWith('From recipe:') && (
+            <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
+              {item.notes}
             </Text>
           )}
-          {/* Quantity on web or for non-grocery lists - show inline */}
-          {item.quantity && Platform.OS === 'web' && (
-            <Text style={[styles.quantity, { color: colors.textSecondary }]}>
-              Qty: {item.quantity}
+          {item.notes && item.notes.startsWith('From recipe:') && (
+            <View style={styles.recipeBadge}>
+              <Text style={[styles.recipeText, { color: colors.primary }]}>
+                {item.notes.replace('From recipe: ', '')}
+              </Text>
+            </View>
+          )}
+          {isTodoList && item.due_date && (
+            <Text
+              style={[
+                styles.dueDate,
+                { color: isOverdue ? '#FF3B30' : colors.textSecondary },
+              ]}
+            >
+              Due: {new Date(item.due_date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
             </Text>
           )}
         </View>
-
-        {item.notes && !item.notes.startsWith('From recipe:') && (
-          <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
-            {item.notes}
-          </Text>
-        )}
-        {item.notes && item.notes.startsWith('From recipe:') && (
-          <View style={styles.recipeBadge}>
-            <Text style={[styles.recipeText, { color: colors.primary }]}>
-              {item.notes.replace('From recipe: ', '')}
-            </Text>
-          </View>
-        )}
-        {isTodoList && item.due_date && (
-          <Text
-            style={[
-              styles.dueDate,
-              { color: isOverdue ? '#FF3B30' : colors.textSecondary },
-            ]}
-          >
-            Due: {new Date(item.due_date).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </Text>
-        )}
-      </View>
+      )}
 
       {/* Actions on web - show on the right */}
       {Platform.OS === 'web' && (

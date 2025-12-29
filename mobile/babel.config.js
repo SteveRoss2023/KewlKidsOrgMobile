@@ -3,7 +3,7 @@ module.exports = function(api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      // Removed react-native-reanimated/plugin - no longer using reanimated
+      'react-native-reanimated/plugin', // Required for react-native-draggable-flatlist
     ],
   };
 };
