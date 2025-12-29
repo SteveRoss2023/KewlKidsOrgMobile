@@ -536,28 +536,56 @@ export default function ListsScreen() {
       )}
 
       <View style={[styles.tabsContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-          {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[
-                styles.tab,
-                activeTab === tab && { backgroundColor: colors.primary },
-                { borderColor: colors.border },
-              ]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text
+        {Platform.OS === 'web' ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+            {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
+              <TouchableOpacity
+                key={tab}
                 style={[
-                  styles.tabText,
-                  { color: activeTab === tab ? '#fff' : colors.text },
+                  styles.tab,
+                  activeTab === tab && { backgroundColor: colors.primary },
+                  { borderColor: colors.border },
                 ]}
+                onPress={() => setActiveTab(tab)}
               >
-                {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+                <Text
+                  style={[
+                    styles.tabText,
+                    { color: activeTab === tab ? '#fff' : colors.text },
+                  ]}
+                >
+                  {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.tabs}>
+            {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.tab,
+                  styles.tabMobile,
+                  activeTab === tab && { backgroundColor: colors.primary },
+                  { borderColor: colors.border },
+                ]}
+                onPress={() => setActiveTab(tab)}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    styles.tabTextMobile,
+                    { color: activeTab === tab ? '#fff' : colors.text },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
       {loading ? (
@@ -689,21 +717,40 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   tabs: {
-    paddingHorizontal: 16,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
     paddingVertical: 12,
-    gap: 8,
+    gap: Platform.OS === 'web' ? 8 : 4,
+    ...(Platform.OS !== 'web' ? {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    } : {}),
   },
   tab: {
-    paddingHorizontal: 20,
+    paddingHorizontal: Platform.OS === 'web' ? 20 : 8,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    marginRight: 8,
+    marginRight: Platform.OS === 'web' ? 8 : 0,
+    ...(Platform.OS !== 'web' ? {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    } : {}),
+  },
+  tabMobile: {
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    marginHorizontal: 2,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'web' ? 14 : 11,
     fontWeight: '600',
     textTransform: 'capitalize',
+  },
+  tabTextMobile: {
+    fontSize: 11,
   },
   loadingContainer: {
     flex: 1,
