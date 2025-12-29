@@ -590,8 +590,8 @@ export default function ListDetailScreen() {
   };
 
   const toggleItemComplete = async (item: ListItem) => {
-    // For grocery lists, completing an item will delete it and save to history
-    if (isGroceryList && !item.completed) {
+    // For all list types, completing an item will delete it and save to history
+    if (!item.completed) {
       // Optimistic update - remove item immediately
       setListItems((prevItems) => prevItems.filter((prevItem) => prevItem.id !== item.id));
 
@@ -600,7 +600,7 @@ export default function ListDetailScreen() {
         // Refresh list items to ensure sync
         await fetchListItems(true);
       } catch (err) {
-        console.error('Error completing grocery item:', err);
+        console.error('Error completing item:', err);
         // Revert on error - re-add the item
         setListItems((prevItems) => {
           const newItems = [...prevItems, item];
@@ -609,7 +609,7 @@ export default function ListDetailScreen() {
         });
       }
     } else {
-      // For non-grocery lists or uncompleting items, use normal toggle
+      // For uncompleting items, use normal toggle
       // Optimistic update
       setListItems((prevItems) =>
         prevItems.map((prevItem) =>

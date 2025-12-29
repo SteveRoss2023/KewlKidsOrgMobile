@@ -254,3 +254,4 @@ mobile/
 5. Natural language understanding works for common phrasings
 6. Graceful error handling with voice feedback
 
+

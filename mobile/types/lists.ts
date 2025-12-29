@@ -53,15 +53,18 @@ export interface GroceryCategory {
   updated_at: string;
 }
 
-export interface CompletedGroceryItem {
+export interface CompletedListItem {
   id: number;
   user: number;
   family: number;
   list_name: string;
   item_name: string;
+  list_type: ListType;
   category_name: string | null;
   quantity: string | null;
   recipe_name: string | null;
+  notes: string | null;
+  due_date: string | null;
   completed_date: string;
 }
 

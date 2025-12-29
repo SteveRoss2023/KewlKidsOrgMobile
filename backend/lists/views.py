@@ -8,8 +8,8 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Max, F
-from .models import List, ListItem, GroceryCategory, CompletedGroceryItem
-from .serializers import ListSerializer, ListItemSerializer, GroceryCategorySerializer, CompletedGroceryItemSerializer
+from .models import List, ListItem, GroceryCategory, CompletedListItem
+from .serializers import ListSerializer, ListItemSerializer, GroceryCategorySerializer, CompletedListItemSerializer
 from families.models import Family, Member
 from django.contrib.auth import get_user_model
 from datetime import datetime, timedelta
@@ -193,51 +193,58 @@ class ListItemViewSet(viewsets.ModelViewSet):
             assign_category_to_item(item, list_obj.family)
 
     def update(self, request, *args, **kwargs):
-        """Update item - special handling for grocery list completion."""
+        """Update item - special handling for list completion (all list types)."""
         instance = self.get_object()
         list_obj = instance.list
-        
-        # Check if this is a grocery list item being completed
-        if list_obj.list_type == 'grocery' and request.data.get('completed') is True and not instance.completed:
+
+        # Check if this is a list item being completed (all list types now save to history)
+        if request.data.get('completed') is True and not instance.completed:
             # Get the member for the current user
             member = get_object_or_404(Member, user=request.user, family=list_obj.family)
-            
+
             # Extract recipe name from notes if present
             recipe_name = None
-            if instance.notes and instance.notes.startswith('From recipe: '):
-                recipe_name = instance.notes.replace('From recipe: ', '').strip()
-            
-            # Get category name
+            notes = None
+            if instance.notes:
+                if instance.notes.startswith('From recipe: '):
+                    recipe_name = instance.notes.replace('From recipe: ', '').strip()
+                else:
+                    notes = instance.notes
+
+            # Get category name (for grocery lists)
             category_name = instance.category.name if instance.category else None
-            
-            # Create CompletedGroceryItem
-            CompletedGroceryItem.objects.create(
+
+            # Create CompletedListItem
+            CompletedListItem.objects.create(
                 user=request.user,
                 family=list_obj.family,
                 list_name=list_obj.name,
                 item_name=instance.name,
+                list_type=list_obj.list_type,
                 category_name=category_name,
                 quantity=instance.quantity,
                 recipe_name=recipe_name,
+                notes=notes,
+                due_date=instance.due_date,
             )
-            
+
             # Delete the item instead of marking as completed
             instance.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
-        
-            # For non-grocery lists or uncompleting items, use default behavior
+
+        # For uncompleting items, use default behavior
         return super().update(request, *args, **kwargs)
 
 
-class CompletedGroceryItemViewSet(viewsets.ReadOnlyModelViewSet):
-    """ViewSet for viewing completed grocery items history."""
-    serializer_class = CompletedGroceryItemSerializer
+class CompletedListItemViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing completed list items history."""
+    serializer_class = CompletedListItemSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         """Return completed items for the current user."""
         user = self.request.user
-        queryset = CompletedGroceryItem.objects.filter(user=user)
+        queryset = CompletedListItem.objects.filter(user=user)
 
         # Filter by family if provided
         family_id = self.request.query_params.get('family')
@@ -249,17 +256,22 @@ class CompletedGroceryItemViewSet(viewsets.ReadOnlyModelViewSet):
             except (ValueError, TypeError):
                 pass
 
+        # Filter by list_type if provided
+        list_type = self.request.query_params.get('list_type')
+        if list_type:
+            queryset = queryset.filter(list_type=list_type)
+
         # Filter by date range if provided
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
-        
+
         if start_date:
             try:
                 start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
                 queryset = queryset.filter(completed_date__gte=start_dt)
             except (ValueError, TypeError):
                 pass
-        
+
         if end_date:
             try:
                 end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))

@@ -3,7 +3,7 @@ import {
   List,
   ListItem,
   GroceryCategory,
-  CompletedGroceryItem,
+  CompletedListItem,
   CreateListData,
   UpdateListData,
   CreateListItemData,
@@ -201,13 +201,16 @@ class ListService {
   }
 
   /**
-   * Get completed grocery items history
+   * Get completed list items history
    */
-  async getCompletedGroceryItems(familyId?: number, startDate?: string, endDate?: string): Promise<CompletedGroceryItem[]> {
+  async getCompletedListItems(familyId?: number, listType?: ListType, startDate?: string, endDate?: string): Promise<CompletedListItem[]> {
     try {
       const params: any = {};
       if (familyId) {
         params.family = familyId;
+      }
+      if (listType) {
+        params.list_type = listType;
       }
       if (startDate) {
         params.start_date = startDate;
@@ -215,7 +218,7 @@ class ListService {
       if (endDate) {
         params.end_date = endDate;
       }
-      const response = await apiClient.get('/completed-grocery-items/', { params });
+      const response = await apiClient.get('/completed-list-items/', { params });
       // Handle pagination
       if (response.data && Array.isArray(response.data.results)) {
         return response.data.results;

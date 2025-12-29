@@ -111,31 +111,43 @@ class ListItem(models.Model):
         return f"{self.name} - {self.list.name}"
 
 
-class CompletedGroceryItem(models.Model):
-    """History of completed grocery list items."""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='completed_grocery_items')
-    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='completed_grocery_items')
-    
+class CompletedListItem(models.Model):
+    """History of completed list items."""
+    LIST_TYPE_CHOICES = [
+        ('shopping', 'Shopping List'),
+        ('grocery', 'Grocery List'),
+        ('todo', 'To-Do List'),
+        ('ideas', 'Ideas'),
+        ('other', 'Other'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='completed_list_items')
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='completed_list_items')
+
     # Encrypted fields
     list_name = EncryptedCharField(max_length=200)
     item_name = EncryptedCharField(max_length=200)
     quantity = EncryptedCharField(max_length=50, blank=True, null=True)
     recipe_name = EncryptedCharField(max_length=200, blank=True, null=True)
-    
+    notes = EncryptedTextField(blank=True, null=True)
+
     # Public fields
+    list_type = models.CharField(max_length=20, choices=LIST_TYPE_CHOICES, default='grocery')
     category_name = models.CharField(max_length=100, blank=True, null=True)
+    due_date = models.DateField(blank=True, null=True)
     completed_date = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['-completed_date']
         indexes = [
             models.Index(fields=['user', 'completed_date']),
             models.Index(fields=['family', 'completed_date']),
             models.Index(fields=['completed_date']),
+            models.Index(fields=['list_type']),
         ]
-        verbose_name = "Completed Grocery Item"
-        verbose_name_plural = "Completed Grocery Items"
-    
+        verbose_name = "Completed List Item"
+        verbose_name_plural = "Completed List Items"
+
     def __str__(self):
         return f"{self.item_name} - {self.completed_date.date()}"
 

@@ -1,0 +1,1220 @@
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  RefreshControl,
+  Platform,
+  TouchableOpacity,
+} from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { FontAwesome } from '@expo/vector-icons';
+import { useTheme } from '../../../contexts/ThemeContext';
+import { useFamily } from '../../../contexts/FamilyContext';
+import ListService from '../../../services/listService';
+import { CompletedListItem, ListType } from '../../../types/lists';
+import GlobalNavBar from '../../../components/GlobalNavBar';
+import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
+import AlertModal from '../../../components/AlertModal';
+
+// Helper function to safely convert any value to a string for rendering
+const safeString = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return String(value);
+  // If it's an object or array, don't try to stringify it - return empty string
+  if (typeof value === 'object') {
+    // Only allow Date objects
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    return '';
+  }
+  try {
+    const str = String(value);
+    // If the string representation looks like an object/array, return empty
+    if (str.startsWith('[object ') || str === '[object Object]') {
+      return '';
+    }
+    return str;
+  } catch {
+    return '';
+  }
+};
+
+export default function CompletedItemsScreen() {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const { selectedFamily } = useFamily();
+  const [completedItems, setCompletedItems] = useState<CompletedListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedListType, setSelectedListType] = useState<ListType | 'all'>('all');
+  const [groupBy, setGroupBy] = useState<'date' | 'category' | 'list' | 'none'>('date');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [addingItems, setAddingItems] = useState<Set<number>>(new Set()); // Track items being added
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+
+  const fetchCompletedItems = useCallback(async (skipLoading = false) => {
+    if (!selectedFamily) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (!skipLoading) {
+        setLoading(true);
+      }
+      setError(null);
+      // Clear items during transition to prevent rendering stale data
+      if (!skipLoading) {
+        setCompletedItems([]);
+      }
+      const listType = selectedListType === 'all' || !selectedListType ? undefined : selectedListType;
+      const items = await ListService.getCompletedListItems(selectedFamily.id, listType);
+      // Ensure items is always an array and filter out any invalid items
+      const validItems = Array.isArray(items) ? items.filter((item: any) => {
+        if (!item || typeof item !== 'object' || !item.id) return false;
+        return true;
+      }).map((item: any) => {
+        // Aggressively sanitize ALL fields to ensure they're primitives
+        // Remove any non-primitive properties that might cause rendering issues
+        const sanitized: any = {
+          id: typeof item.id === 'number' ? item.id : (typeof item.id === 'string' ? parseInt(item.id, 10) || 0 : 0),
+          user: typeof item.user === 'number' ? item.user : (typeof item.user === 'string' ? parseInt(item.user, 10) || 0 : 0),
+          family: typeof item.family === 'number' ? item.family : (typeof item.family === 'string' ? parseInt(item.family, 10) || 0 : 0),
+          list_type: typeof item.list_type === 'string' ? item.list_type : String(item.list_type || 'other'),
+          item_name: safeString(item.item_name),
+          list_name: safeString(item.list_name),
+          category_name: item.category_name ? safeString(item.category_name) : null,
+          quantity: item.quantity ? safeString(item.quantity) : null,
+          notes: item.notes ? safeString(item.notes) : null,
+          recipe_name: item.recipe_name ? safeString(item.recipe_name) : null,
+          due_date: item.due_date ? safeString(item.due_date) : null,
+          completed_date: safeString(item.completed_date || new Date().toISOString()),
+        };
+        // Remove any other properties that might be objects/arrays
+        Object.keys(sanitized).forEach(key => {
+          const val = sanitized[key];
+          if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+            sanitized[key] = null;
+          }
+        });
+        return sanitized;
+      }) : [];
+      console.log('Sanitized items:', JSON.stringify(validItems.slice(0, 2), null, 2));
+      setCompletedItems(validItems);
+    } catch (err: any) {
+      console.error('Error fetching completed items:', err);
+      setError(err?.message || 'Failed to load completed items.');
+    } finally {
+      if (!skipLoading) {
+        setLoading(false);
+      }
+    }
+  }, [selectedFamily, selectedListType]);
+
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedFamily) {
+        fetchCompletedItems();
+      }
+    }, [selectedFamily, fetchCompletedItems])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchCompletedItems(true);
+    setRefreshing(false);
+  }, [fetchCompletedItems]);
+
+  // Group items based on selected grouping option
+  const groupedItems = React.useMemo(() => {
+    const grouped: Record<string, CompletedListItem[]> = {};
+    // Safety check: ensure completedItems is an array
+    if (!Array.isArray(completedItems)) {
+      return grouped;
+    }
+
+    // Filter out any invalid items first
+    const validItems = completedItems.filter((item) => {
+      if (!item || typeof item !== 'object') return false;
+      if (!item.id || (typeof item.id !== 'number' && typeof item.id !== 'string')) return false;
+      return true;
+    });
+
+    if (groupBy === 'none') {
+      // No grouping - return all items under a single key
+      grouped['All Items'] = validItems;
+      return grouped;
+    }
+
+    validItems.forEach((item) => {
+      // Extra validation: ensure item is an object, not a string or other primitive
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        console.error('DEBUG: Invalid item type in forEach:', typeof item, item);
+        return; // Skip this item
+      }
+
+      let groupKey: string;
+
+      if (groupBy === 'date') {
+        try {
+          const date = new Date(safeString(item.completed_date));
+          groupKey = isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          });
+        } catch {
+          groupKey = 'Invalid Date';
+        }
+      } else if (groupBy === 'category') {
+        groupKey = item.category_name ? safeString(item.category_name) : 'Uncategorized';
+      } else if (groupBy === 'list') {
+        groupKey = item.list_name ? safeString(item.list_name) : 'Unknown List';
+      } else {
+        groupKey = 'All Items';
+      }
+
+      // Ensure groupKey is always a string
+      groupKey = safeString(groupKey);
+
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = [];
+      }
+
+      // Final validation before pushing
+      if (typeof item !== 'object' || Array.isArray(item) || item === null) {
+        console.error('DEBUG: Trying to push invalid item into grouped array!', typeof item, item, groupKey);
+        return; // Skip this item
+      }
+
+      grouped[groupKey].push(item);
+    });
+    return grouped;
+  }, [completedItems, groupBy]);
+
+  const sortedGroupKeys = React.useMemo(() => {
+    const keys = Object.keys(groupedItems);
+    console.log('DEBUG: sortedGroupKeys - keys:', keys, 'types:', keys.map(k => typeof k));
+
+    if (groupBy === 'date') {
+      // Sort dates descending (newest first)
+      return keys.sort((a, b) => {
+        const dateA = new Date(a);
+        const dateB = new Date(b);
+        return dateB.getTime() - dateA.getTime();
+      });
+    } else if (groupBy === 'category' || groupBy === 'list') {
+      // Sort alphabetically
+      return keys.sort((a, b) => a.localeCompare(b));
+    } else {
+      // No sorting needed for 'none'
+      return keys;
+    }
+  }, [groupedItems, groupBy]);
+
+  // Initialize expanded groups when grouping changes
+  React.useEffect(() => {
+    // Start with all groups collapsed by default
+    setExpandedGroups(new Set());
+  }, [groupBy, sortedGroupKeys]);
+
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupKey)) {
+        newSet.delete(groupKey);
+      } else {
+        newSet.add(groupKey);
+      }
+      return newSet;
+    });
+  };
+
+  const handleAddItemToList = async (item: CompletedListItem) => {
+    if (!selectedFamily) return;
+
+    setAddingItems((prev) => new Set(prev).add(item.id));
+
+    try {
+      // Get all lists for the family to find if the list exists
+      const allLists = await ListService.getLists(selectedFamily.id);
+
+      // Find list by name (case-insensitive comparison) and matching list_type
+      let targetList = allLists.find(
+        (list) => list.name.toLowerCase() === item.list_name.toLowerCase() && list.list_type === item.list_type
+      );
+
+      // If list doesn't exist, create it
+      if (!targetList) {
+        // Default colors for different list types
+        const colorMap: Record<ListType, string> = {
+          grocery: '#10b981',
+          shopping: '#3b82f6',
+          todo: '#f59e0b',
+          ideas: '#8b5cf6',
+          other: '#6b7280',
+        };
+        targetList = await ListService.createList({
+          name: item.list_name,
+          description: '',
+          list_type: item.list_type,
+          color: colorMap[item.list_type] || '#10b981',
+          family: selectedFamily.id,
+        });
+      }
+
+      // Get categories to find the category ID if category_name exists (only for grocery lists)
+      let categoryId: number | null = null;
+      if (item.list_type === 'grocery' && item.category_name) {
+        const categories = await ListService.getGroceryCategories(selectedFamily.id);
+        const category = categories.find((cat) => cat.name === item.category_name);
+        if (category) {
+          categoryId = category.id;
+        }
+      }
+
+      // Create the list item
+      const itemData: any = {
+        list: targetList.id,
+        name: item.item_name,
+        quantity: item.quantity || undefined,
+        category: categoryId || undefined,
+        notes: item.notes || undefined,
+        due_date: item.due_date || undefined,
+      };
+
+      // Add recipe name to notes if it exists (prepend to existing notes)
+      if (item.recipe_name) {
+        itemData.notes = item.notes
+          ? `From recipe: ${item.recipe_name}\n${item.notes}`
+          : `From recipe: ${item.recipe_name}`;
+      }
+
+      await ListService.createListItem(itemData);
+
+      // Show success message in modal
+      setModalMessage(`"${item.item_name}" has been added to "${item.list_name}"`);
+      setModalType('success');
+      setModalVisible(true);
+    } catch (err: any) {
+      console.error('Error adding item to list:', err);
+      const errorMessage = err?.message || 'Failed to add item to list';
+      setModalMessage(errorMessage);
+      setModalType('error');
+      setModalVisible(true);
+    } finally {
+      setAddingItems((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(item.id);
+        return newSet;
+      });
+    }
+  };
+
+  if (!selectedFamily) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <GlobalNavBar />
+        <View style={styles.emptyContainer}>
+          <Text style={[styles.emptyText, { color: colors.text }]}>
+            Please select a family to view completed items
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (loading && completedItems.length === 0) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <GlobalNavBar />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading completed items...
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <GlobalNavBar />
+      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            onPress={() => router.push('/(tabs)/lists')}
+            style={[styles.backButton, { borderColor: colors.border }]}
+            accessibilityLabel="Go back to lists"
+            accessibilityHint="Returns to the lists screen"
+          >
+            <FontAwesome name="arrow-left" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {(() => {
+              const listType = selectedListType || 'all';
+              if (listType === 'all') return 'Completed Items';
+              if (listType === 'todo') return 'Completed To-Do';
+              const typeStr = safeString(listType);
+              if (typeStr) {
+                const capitalized = typeStr.charAt(0).toUpperCase() + typeStr.slice(1);
+                return `Completed ${capitalized}`;
+              }
+              return 'Completed Items';
+            })()}
+          </Text>
+          <View style={{ width: Platform.OS === 'web' ? 44 : 40 }} /> {/* Spacer for alignment */}
+        </View>
+        <View style={styles.listTypeTabsContainer}>
+          {Platform.OS === 'web' ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listTypeTabs}>
+              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.listTypeTab,
+                    selectedListType === type ? { backgroundColor: colors.primary } : null,
+                    { borderColor: colors.border },
+                  ]}
+                  onPress={() => {
+                    if (type && (type === 'all' || ['grocery', 'shopping', 'todo', 'ideas', 'other'].includes(type))) {
+                      setSelectedListType(type);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.listTypeTabText,
+                      { color: selectedListType === type ? '#fff' : colors.text },
+                    ]}
+                  >
+                    {(() => {
+                      if (type === 'all') return 'All';
+                      if (type === 'todo') return 'To-Do';
+                      if (type && typeof type === 'string') {
+                        return type.charAt(0).toUpperCase() + type.slice(1);
+                      }
+                      return safeString(type);
+                    })()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.listTypeTabs}>
+              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.listTypeTab,
+                    styles.listTypeTabMobile,
+                    selectedListType === type ? { backgroundColor: colors.primary } : null,
+                    { borderColor: colors.border },
+                  ]}
+                  onPress={() => {
+                    if (type && (type === 'all' || ['grocery', 'shopping', 'todo', 'ideas', 'other'].includes(type))) {
+                      setSelectedListType(type);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.listTypeTabText,
+                      styles.listTypeTabTextMobile,
+                      { color: selectedListType === type ? '#fff' : colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {(() => {
+                      if (type === 'all') return 'All';
+                      if (type === 'todo') return 'To-Do';
+                      if (type && typeof type === 'string') {
+                        return type.charAt(0).toUpperCase() + type.slice(1);
+                      }
+                      return safeString(type);
+                    })()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+        <View style={styles.groupByContainer}>
+          <Text style={[styles.groupByLabel, { color: colors.textSecondary }]}>Group by:</Text>
+          <ThemeAwarePicker
+            selectedValue={groupBy}
+            onValueChange={(value) => setGroupBy(value as 'date' | 'category' | 'list' | 'none')}
+            options={[
+              { label: 'Date', value: 'date' },
+              { label: 'Category', value: 'category' },
+              { label: 'List', value: 'list' },
+              { label: 'None', value: 'none' },
+            ]}
+            placeholder="Select grouping"
+            enabled={true}
+          />
+        </View>
+      </View>
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+          />
+        }
+      >
+        {error ? (
+          <View style={[styles.errorContainer, { backgroundColor: colors.error + '20' }]}>
+            <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+          </View>
+        ) : null}
+
+        {loading && (!completedItems || completedItems.length === 0) ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary, marginTop: 16 }]}>
+              Loading...
+            </Text>
+          </View>
+        ) : !completedItems || completedItems.length === 0 ? (
+          <View style={styles.emptyState}>
+            <FontAwesome name="check-circle" size={48} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No completed items yet.
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+              {(() => {
+                const listType = selectedListType || 'all';
+                if (listType === 'all') {
+                  return 'Complete items from your lists to see them here.';
+                }
+                const listTypeText = listType === 'todo' ? 'to-do' : safeString(listType);
+                return `Complete items from your ${listTypeText} lists to see them here.`;
+              })()}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.content}>
+            {groupBy === 'none' ? (
+              // For 'none', show all items without accordions
+              (() => {
+                const allItems = groupedItems['All Items'];
+                if (typeof allItems === 'string') {
+                  console.error('DEBUG: groupedItems["All Items"] IS A STRING! This is bad data!', allItems);
+                  return null;
+                }
+                if (!Array.isArray(allItems)) {
+                  console.error('DEBUG: groupedItems["All Items"] is not an array!', typeof allItems, allItems);
+                  return null;
+                }
+                const validItems = allItems
+                  .filter((item) => {
+                    // Check for primitives first
+                    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                      console.error('DEBUG: Found primitive in allItems!', typeof item, item);
+                      return false;
+                    }
+                    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                      console.log('DEBUG: Filtered out invalid item:', typeof item, item);
+                      return false;
+                    }
+                    if (!item.id || (typeof item.id !== 'number' && typeof item.id !== 'string')) {
+                      console.log('DEBUG: Filtered out item with invalid id:', item);
+                      return false;
+                    }
+                    return true;
+                  })
+                  .map((item, index) => {
+                    // Double-check for primitives
+                    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                      console.error('DEBUG: Primitive in map! This should never happen!', typeof item, item);
+                      return null;
+                    }
+                    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                      console.log('DEBUG: Map returning null for invalid item');
+                      return null;
+                    }
+                    try {
+                      console.log('DEBUG: Rendering item:', item.id, item.item_name);
+                    } catch (e) {
+                      console.log('DEBUG: Error logging item:', e);
+                    }
+                    return (
+                      <View
+                        key={item?.id ? String(item.id) : `item-${index}`}
+                        style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      >
+                        <View style={styles.itemHeader}>
+                          <View style={styles.itemNameContainer}>
+                            <Text style={[styles.itemName, { color: colors.text }]}>
+                              {safeString(item?.item_name)}
+                            </Text>
+                            {item?.quantity ? (
+                              <Text style={[styles.itemQuantity, { color: colors.textSecondary }]}>
+                                Qty: {safeString(item.quantity)}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <View style={styles.addButtonContainer}>
+                            <TouchableOpacity
+                              onPress={() => handleAddItemToList(item)}
+                              disabled={addingItems.has(item.id)}
+                              style={[styles.addIconButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
+                            >
+                              {addingItems.has(item.id) ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                              ) : (
+                                <FontAwesome name="plus" size={Platform.OS === 'web' ? 12 : 10} color={colors.primary} />
+                              )}
+                            </TouchableOpacity>
+                            <Text style={[styles.addButtonLabel, { color: colors.textSecondary }]}>Add</Text>
+                          </View>
+                        </View>
+                        <View style={styles.itemMeta}>
+                          {item?.category_name ? (
+                            <View style={styles.metaItem}>
+                              <FontAwesome name="tag" size={12} color={colors.textSecondary} />
+                              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                                {safeString(item.category_name)}
+                              </Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.metaItem}>
+                            <FontAwesome name="list" size={12} color={colors.textSecondary} />
+                            <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                              {safeString(item?.list_name)}
+                            </Text>
+                          </View>
+                          <View style={styles.metaItem}>
+                            <FontAwesome name="calendar" size={12} color={colors.textSecondary} />
+                            <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                              {item?.completed_date ? (() => {
+                                try {
+                                  const date = new Date(item.completed_date as string);
+                                  return isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  });
+                                } catch {
+                                  return '';
+                                }
+                              })() : ''}
+                            </Text>
+                          </View>
+                          {item?.due_date ? (
+                            <View style={styles.metaItem}>
+                              <FontAwesome name="clock-o" size={12} color="#f59e0b" />
+                              <Text style={[styles.metaText, { color: '#f59e0b' }]}>
+                                Due: {(() => {
+                                  try {
+                                    const date = new Date(item.due_date as string);
+                                    return isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      year: 'numeric',
+                                    });
+                                  } catch {
+                                    return '';
+                                  }
+                                })()}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {item?.recipe_name ? (
+                            <View style={styles.metaItem}>
+                              <FontAwesome name="book" size={12} color={colors.primary} />
+                              <Text style={[styles.metaText, { color: colors.primary }]}>
+                                {safeString(item.recipe_name)}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        {(() => {
+                          const notes = item?.notes ? safeString(item.notes) : '';
+                          return notes.length > 0 && !notes.startsWith('From recipe:') ? (
+                            <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
+                              {notes}
+                            </Text>
+                          ) : null;
+                        })()}
+                      </View>
+                    );
+                  })
+                  .filter((item) => {
+                    // Filter out null and any primitives that might have slipped through
+                    if (item === null || item === undefined) return false;
+                    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                      console.error('DEBUG: Found primitive in validItems! This should never happen!', typeof item, item);
+                      return false;
+                    }
+                    return true;
+                  });
+                // On mobile, React Native is stricter - ensure we return a valid React element
+                if (validItems.length === 0) {
+                  return null;
+                }
+                // Final validation: ensure all items are valid React elements (not strings/primitives)
+                const validReactElements = validItems.filter((element) => {
+                  if (element === null || element === undefined) return false;
+                  if (typeof element === 'string' || typeof element === 'number' || typeof element === 'boolean') {
+                    console.error('DEBUG: Found primitive in final array! This should never happen!', typeof element, element);
+                    return false;
+                  }
+                  return true;
+                });
+                if (validReactElements.length === 0) {
+                  return null;
+                }
+                // Return wrapped in Fragment for mobile safety
+                return <React.Fragment>{validReactElements}</React.Fragment>;
+              })()
+            ) : (
+              // For other groupings, show accordions
+              (() => {
+                try {
+                  // Safety: ensure sortedGroupKeys is an array
+                  if (!Array.isArray(sortedGroupKeys)) {
+                    console.error('DEBUG: sortedGroupKeys is not an array!', typeof sortedGroupKeys, sortedGroupKeys);
+                    return null;
+                  }
+                  const result = sortedGroupKeys
+                    .filter((groupKey) => {
+                      // Safety check: ensure groupKey is a string
+                      if (typeof groupKey !== 'string') {
+                        console.error('DEBUG: groupKey is not a string!', groupKey, typeof groupKey);
+                        return false;
+                      }
+                      // Safety check: ensure groupedItems[groupKey] is an array
+                      const rawItems = groupedItems[groupKey];
+                      if (typeof rawItems === 'string') {
+                        console.error('DEBUG: groupedItems[groupKey] IS A STRING!', groupKey, rawItems);
+                        return false;
+                      }
+                      if (!Array.isArray(rawItems)) {
+                        console.error('DEBUG: groupedItems[groupKey] is not an array!', groupKey, typeof rawItems, rawItems);
+                        return false;
+                      }
+                      return true;
+                    })
+                    .map((groupKey) => {
+                      try {
+                        // Triple-check: ensure groupKey is still a string
+                        if (typeof groupKey !== 'string') {
+                          console.error('DEBUG: groupKey became non-string in map!', groupKey, typeof groupKey);
+                          return null;
+                        }
+                        const rawItems = groupedItems[groupKey];
+                        // Double-check: ensure it's an array (should already be filtered above, but be extra safe)
+                        if (typeof rawItems === 'string') {
+                          console.error('DEBUG: groupedItems[groupKey] IS A STRING! This is bad data!', groupKey, rawItems);
+                          return null; // Skip this group entirely
+                        }
+                        if (!Array.isArray(rawItems)) {
+                          console.error('DEBUG: groupedItems[groupKey] is not an array!', groupKey, typeof rawItems, rawItems);
+                          return null; // Skip this group entirely
+                        }
+                        const items = rawItems.filter((item) => {
+                          // Ensure item is an object, not a string or other primitive
+                          if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                            console.error('DEBUG: Found primitive in items array!', typeof item, item);
+                            return false;
+                          }
+                          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                            console.error('DEBUG: Found non-object item in array!', typeof item, item);
+                            return false;
+                          }
+                          if (!item.id || (typeof item.id !== 'number' && typeof item.id !== 'string')) {
+                            console.error('DEBUG: Found item with invalid id!', item);
+                            return false;
+                          }
+                          return true;
+                        });
+                        const isExpanded = expandedGroups.has(groupKey);
+                        const jsx = (
+                          <View key={String(groupKey)} style={[styles.accordion, { borderColor: colors.border }]}>
+                            <TouchableOpacity
+                              style={[styles.accordionHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+                              onPress={() => toggleGroup(groupKey)}
+                              activeOpacity={0.7}
+                            >
+                              <View style={styles.accordionHeaderLeft}>
+                                <Text style={[styles.accordionHeaderText, { color: colors.text }]}>
+                                  {safeString(groupKey)}
+                                </Text>
+                                <Text style={[styles.accordionItemCount, { color: colors.textSecondary }]}>
+                                  ({items.length})
+                                </Text>
+                              </View>
+                              <FontAwesome
+                                name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                                size={16}
+                                color={colors.textSecondary}
+                              />
+                            </TouchableOpacity>
+                            {isExpanded ? (
+                              <View style={styles.accordionContent}>
+                                {(() => {
+                                  // Final safety check: ensure items is an array
+                                  if (!Array.isArray(items)) {
+                                    console.error('DEBUG: items is not an array in render!', typeof items, items);
+                                    return null;
+                                  }
+                                  const mappedItems = items
+                                    .map((item, index) => {
+                                      // Item should already be validated, but double-check
+                                      if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                                        console.error('DEBUG: Primitive in map! This should never happen!', typeof item, item);
+                                        return null;
+                                      }
+                                      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                                        console.error('DEBUG: Invalid item in map!', typeof item, item);
+                                        return null;
+                                      }
+                                      return (
+                                        <View
+                                          key={item?.id ? String(item.id) : `item-${groupKey}-${index}`}
+                                          style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                                        >
+                                          <View style={styles.itemHeader}>
+                                            <View style={styles.itemNameContainer}>
+                                              <Text style={[styles.itemName, { color: colors.text }]}>
+                                                {safeString(item?.item_name)}
+                                              </Text>
+                                              {item?.quantity ? (
+                                                <Text style={[styles.itemQuantity, { color: colors.textSecondary }]}>
+                                                  Qty: {safeString(item.quantity)}
+                                                </Text>
+                                              ) : null}
+                                            </View>
+                                            <View style={styles.addButtonContainer}>
+                                              <TouchableOpacity
+                                                onPress={() => handleAddItemToList(item)}
+                                                disabled={addingItems.has(item.id)}
+                                                style={[styles.addIconButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
+                                              >
+                                                {addingItems.has(item.id) ? (
+                                                  <ActivityIndicator size="small" color={colors.primary} />
+                                                ) : (
+                                                  <FontAwesome name="plus" size={Platform.OS === 'web' ? 12 : 10} color={colors.primary} />
+                                                )}
+                                              </TouchableOpacity>
+                                              <Text style={[styles.addButtonLabel, { color: colors.textSecondary }]}>Add</Text>
+                                            </View>
+                                          </View>
+                                          <View style={styles.itemMeta}>
+                                            {groupBy !== 'category' && !!item?.category_name ? (
+                                              <View style={styles.metaItem}>
+                                                <FontAwesome name="tag" size={12} color={colors.textSecondary} />
+                                                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                                                  {safeString(item.category_name)}
+                                                </Text>
+                                              </View>
+                                            ) : null}
+                                            {groupBy !== 'list' ? (
+                                              <View style={styles.metaItem}>
+                                                <FontAwesome name="list" size={12} color={colors.textSecondary} />
+                                                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                                                  {safeString(item?.list_name)}
+                                                </Text>
+                                              </View>
+                                            ) : null}
+                                            {groupBy !== 'date' ? (
+                                              <View style={styles.metaItem}>
+                                                <FontAwesome name="calendar" size={12} color={colors.textSecondary} />
+                                                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                                                  {item?.completed_date ? (() => {
+                                                    try {
+                                                      const date = new Date(item.completed_date as string);
+                                                      return isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+                                                        year: 'numeric',
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                      });
+                                                    } catch {
+                                                      return '';
+                                                    }
+                                                  })() : ''}
+                                                </Text>
+                                              </View>
+                                            ) : null}
+                                            {item?.due_date ? (
+                                              <View style={styles.metaItem}>
+                                                <FontAwesome name="clock-o" size={12} color="#f59e0b" />
+                                                <Text style={[styles.metaText, { color: '#f59e0b' }]}>
+                                                  Due: {(() => {
+                                                    try {
+                                                      const date = new Date(item.due_date as string);
+                                                      return isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        year: 'numeric',
+                                                      });
+                                                    } catch {
+                                                      return '';
+                                                    }
+                                                  })()}
+                                                </Text>
+                                              </View>
+                                            ) : null}
+                                            {item?.recipe_name ? (
+                                              <View style={styles.metaItem}>
+                                                <FontAwesome name="book" size={12} color={colors.primary} />
+                                                <Text style={[styles.metaText, { color: colors.primary }]}>
+                                                  {safeString(item.recipe_name)}
+                                                </Text>
+                                              </View>
+                                            ) : null}
+                                          </View>
+                                          {(() => {
+                                            const notes = item?.notes ? safeString(item.notes) : '';
+                                            return notes.length > 0 && !notes.startsWith('From recipe:') ? (
+                                              <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
+                                                {notes}
+                                              </Text>
+                                            ) : null;
+                                          })()}
+                                        </View>
+                                      );
+                                    })
+                                    .filter((item) => {
+                                      // Filter out null and any primitives that might have slipped through
+                                      if (item === null || item === undefined) return false;
+                                      if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                                        console.error('DEBUG: Found primitive in map result! This should never happen!', typeof item, item);
+                                        return false;
+                                      }
+                                      return true;
+                                    });
+
+                                  // On mobile, React Native is stricter - ensure we return a valid React element
+                                  if (mappedItems.length === 0) {
+                                    return null;
+                                  }
+                                  // Final validation: ensure all items are valid React elements (not strings/primitives)
+                                  const validReactElements = mappedItems.filter((element) => {
+                                    if (element === null || element === undefined) return false;
+                                    if (typeof element === 'string' || typeof element === 'number' || typeof element === 'boolean') {
+                                      console.error('DEBUG: Found primitive in final array! This should never happen!', typeof element, element);
+                                      return false;
+                                    }
+                                    return true;
+                                  });
+                                  if (validReactElements.length === 0) {
+                                    return null;
+                                  }
+                                  // Return wrapped in Fragment for mobile safety
+                                  return <React.Fragment>{validReactElements}</React.Fragment>;
+                                })()}
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                        // Validate that we're returning JSX, not a string
+                        if (typeof jsx === 'string' || typeof jsx === 'number' || typeof jsx === 'boolean') {
+                          console.error('DEBUG: Map is returning a primitive instead of JSX!', typeof jsx, jsx);
+                          return null;
+                        }
+                        return jsx;
+                      } catch (error) {
+                        console.error('DEBUG: Error rendering accordion for groupKey:', groupKey, error);
+                        return null;
+                      }
+                    })
+                    .filter((item) => {
+                      // Ensure we only render valid React elements (objects) or filter out primitives
+                      if (item === null || item === undefined) return false;
+                      // Filter out any primitives (strings, numbers, booleans) that might have slipped through
+                      if (typeof item !== 'object') {
+                        console.error('DEBUG: Found primitive in filter (should be JSX)!', typeof item, item);
+                        return false;
+                      }
+                      return true;
+                    });
+                  // Final validation: ensure result is an array and all elements are valid
+                  if (!Array.isArray(result)) {
+                    console.error('DEBUG: Result is not an array!', typeof result, result);
+                    return null;
+                  }
+                  // Validate each element in the result
+                  const validatedResult = result.filter((element) => {
+                    if (element === null || element === undefined) return false;
+                    if (typeof element === 'string' || typeof element === 'number' || typeof element === 'boolean') {
+                      console.error('DEBUG: Found primitive in final result!', typeof element, element);
+                      return false;
+                    }
+                    return true;
+                  });
+                  return validatedResult.length > 0 ? validatedResult : null;
+                } catch (error) {
+                  console.error('DEBUG: Error in accordion rendering:', error);
+                  return null;
+                }
+              })()
+            )}
+          </View>
+        )}
+      </ScrollView>
+      <AlertModal
+        visible={modalVisible}
+        title={modalType === 'success' ? 'Item Added' : 'Error'}
+        message={modalMessage}
+        type={modalType}
+        onClose={() => setModalVisible(false)}
+        confirmText="OK"
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  backButton: {
+    width: Platform.OS === 'web' ? 44 : 40,
+    height: Platform.OS === 'web' ? 44 : 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    backgroundColor: 'transparent',
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+      },
+    }),
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  listTypeTabsContainer: {
+    marginBottom: 12,
+  },
+  listTypeTabs: {
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingVertical: 8,
+    gap: Platform.OS === 'web' ? 8 : 4,
+    ...(Platform.OS !== 'web' ? {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    } : {}),
+  },
+  listTypeTab: {
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginRight: Platform.OS === 'web' ? 8 : 0,
+    ...(Platform.OS !== 'web' ? {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginHorizontal: 2,
+    } : {}),
+  },
+  listTypeTabMobile: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  listTypeTabText: {
+    fontSize: Platform.OS === 'web' ? 13 : 10,
+    fontWeight: '600',
+  },
+  listTypeTabTextMobile: {
+    fontSize: 10,
+  },
+  groupByContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  groupByLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    minHeight: 400,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  errorContainer: {
+    padding: 12,
+    borderRadius: 8,
+    margin: 16,
+  },
+  errorText: {
+    fontSize: 14,
+  },
+  content: {
+    padding: 16,
+  },
+  accordion: {
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderBottomWidth: 1,
+  },
+  accordionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  accordionHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  accordionItemCount: {
+    fontSize: 14,
+  },
+  accordionContent: {
+    padding: 8,
+  },
+  itemCard: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  itemNameContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
+  itemName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  itemQuantity: {
+    fontSize: 12,
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  addButtonContainer: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  addIconButton: {
+    width: Platform.OS === 'web' ? 28 : 24,
+    height: Platform.OS === 'web' ? 28 : 24,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+      },
+    }),
+  },
+  addButtonLabel: {
+    fontSize: 9,
+    fontWeight: '500',
+  },
+  itemMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
+    fontSize: 12,
+  },
+  itemNotes: {
+    fontSize: 12,
+    marginTop: 8,
+    fontStyle: 'italic',
+    opacity: 0.8,
+  },
+});
+

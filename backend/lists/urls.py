@@ -9,7 +9,7 @@ router = DefaultRouter()
 router.register(r'lists', views.ListViewSet, basename='list')
 router.register(r'list-items', views.ListItemViewSet, basename='listitem')
 router.register(r'grocery-categories', views.GroceryCategoryViewSet, basename='grocerycategory')
-router.register(r'completed-grocery-items', views.CompletedGroceryItemViewSet, basename='completedgroceryitem')
+router.register(r'completed-list-items', views.CompletedListItemViewSet, basename='completedlistitem')
 
 urlpatterns = [
     path('', include(router.urls)),

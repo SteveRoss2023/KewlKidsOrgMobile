@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,22 +14,84 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useFamily } from '../../../contexts/FamilyContext';
 import ListService from '../../../services/listService';
-import { CompletedGroceryItem } from '../../../types/lists';
+import { CompletedListItem, ListType } from '../../../types/lists';
 import GlobalNavBar from '../../../components/GlobalNavBar';
 import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
 import AlertModal from '../../../components/AlertModal';
+
+// Helper function to safely convert value to string
+const safeString = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return String(value);
+  return '';
+};
+
+// Helper function to format date
+const formatDate = (dateString: string | null): string => {
+  if (!dateString) return '';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return '';
+  }
+};
+
+// Helper function to format date for grouping
+const formatDateForGroup = (dateString: string | null): string => {
+  if (!dateString) return 'Invalid Date';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return 'Invalid Date';
+  }
+};
+
+// Sanitize and validate item from API
+const sanitizeItem = (item: any): CompletedListItem | null => {
+  if (!item || typeof item !== 'object' || !item.id) return null;
+
+  return {
+    id: typeof item.id === 'number' ? item.id : parseInt(String(item.id), 10) || 0,
+    user: typeof item.user === 'number' ? item.user : parseInt(String(item.user), 10) || 0,
+    family: typeof item.family === 'number' ? item.family : parseInt(String(item.family), 10) || 0,
+    list_type: typeof item.list_type === 'string' ? item.list_type : String(item.list_type || 'other') as ListType,
+    item_name: safeString(item.item_name),
+    list_name: safeString(item.list_name),
+    category_name: item.category_name ? safeString(item.category_name) : null,
+    quantity: item.quantity ? safeString(item.quantity) : null,
+    notes: item.notes ? safeString(item.notes) : null,
+    recipe_name: item.recipe_name ? safeString(item.recipe_name) : null,
+    due_date: item.due_date ? safeString(item.due_date) : null,
+    completed_date: safeString(item.completed_date || new Date().toISOString()),
+  };
+};
 
 export default function CompletedItemsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
-  const [completedItems, setCompletedItems] = useState<CompletedGroceryItem[]>([]);
+  const [completedItems, setCompletedItems] = useState<CompletedListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedListType, setSelectedListType] = useState<ListType | 'all'>('all');
   const [groupBy, setGroupBy] = useState<'date' | 'category' | 'list' | 'none'>('date');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [addingItems, setAddingItems] = useState<Set<number>>(new Set()); // Track items being added
+  const [addingItems, setAddingItems] = useState<Set<number>>(new Set());
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [modalType, setModalType] = useState<'success' | 'error'>('success');
@@ -43,11 +105,25 @@ export default function CompletedItemsScreen() {
     try {
       if (!skipLoading) {
         setLoading(true);
+        setCompletedItems([]);
       }
       setError(null);
-      const items = await ListService.getCompletedGroceryItems(selectedFamily.id);
-      // Ensure items is always an array
-      setCompletedItems(Array.isArray(items) ? items : []);
+
+      const listType = selectedListType === 'all' ? undefined : selectedListType;
+      const items = await ListService.getCompletedListItems(selectedFamily.id, listType);
+
+      // Sanitize and validate all items once
+      const validItems: CompletedListItem[] = [];
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const sanitized = sanitizeItem(item);
+          if (sanitized) {
+            validItems.push(sanitized);
+          }
+        }
+      }
+
+      setCompletedItems(validItems);
     } catch (err: any) {
       console.error('Error fetching completed items:', err);
       setError(err?.message || 'Failed to load completed items.');
@@ -56,9 +132,8 @@ export default function CompletedItemsScreen() {
         setLoading(false);
       }
     }
-  }, [selectedFamily]);
+  }, [selectedFamily, selectedListType]);
 
-  // Refresh data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       if (selectedFamily) {
@@ -73,30 +148,24 @@ export default function CompletedItemsScreen() {
     setRefreshing(false);
   }, [fetchCompletedItems]);
 
-  // Group items based on selected grouping option
-  const groupedItems = React.useMemo(() => {
-    const grouped: Record<string, CompletedGroceryItem[]> = {};
-    // Safety check: ensure completedItems is an array
-    if (!Array.isArray(completedItems)) {
+  // Group items
+  const groupedItems = useMemo(() => {
+    const grouped: Record<string, CompletedListItem[]> = {};
+
+    if (!Array.isArray(completedItems) || completedItems.length === 0) {
       return grouped;
     }
 
     if (groupBy === 'none') {
-      // No grouping - return all items under a single key
       grouped['All Items'] = completedItems;
       return grouped;
     }
 
-    completedItems.forEach((item) => {
+    for (const item of completedItems) {
       let groupKey: string;
 
       if (groupBy === 'date') {
-        const date = new Date(item.completed_date);
-        groupKey = date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
+        groupKey = formatDateForGroup(item.completed_date);
       } else if (groupBy === 'category') {
         groupKey = item.category_name || 'Uncategorized';
       } else if (groupBy === 'list') {
@@ -109,34 +178,32 @@ export default function CompletedItemsScreen() {
         grouped[groupKey] = [];
       }
       grouped[groupKey].push(item);
-    });
+    }
+
     return grouped;
   }, [completedItems, groupBy]);
 
-  const sortedGroupKeys = React.useMemo(() => {
+  // Sort group keys
+  const sortedGroupKeys = useMemo(() => {
     const keys = Object.keys(groupedItems);
 
     if (groupBy === 'date') {
-      // Sort dates descending (newest first)
       return keys.sort((a, b) => {
         const dateA = new Date(a);
         const dateB = new Date(b);
         return dateB.getTime() - dateA.getTime();
       });
     } else if (groupBy === 'category' || groupBy === 'list') {
-      // Sort alphabetically
       return keys.sort((a, b) => a.localeCompare(b));
-    } else {
-      // No sorting needed for 'none'
-      return keys;
     }
+
+    return keys;
   }, [groupedItems, groupBy]);
 
-  // Initialize expanded groups when grouping changes
-  React.useEffect(() => {
-    // Start with all groups collapsed by default
+  // Reset expanded groups when grouping changes
+  useEffect(() => {
     setExpandedGroups(new Set());
-  }, [groupBy, sortedGroupKeys]);
+  }, [groupBy]);
 
   const toggleGroup = (groupKey: string) => {
     setExpandedGroups((prev) => {
@@ -150,34 +217,36 @@ export default function CompletedItemsScreen() {
     });
   };
 
-  const handleAddItemToList = async (item: CompletedGroceryItem) => {
+  const handleAddItemToList = async (item: CompletedListItem) => {
     if (!selectedFamily) return;
 
     setAddingItems((prev) => new Set(prev).add(item.id));
 
     try {
-      // Get all lists for the family to find if the list exists
       const allLists = await ListService.getLists(selectedFamily.id);
-
-      // Find list by name (case-insensitive comparison)
       let targetList = allLists.find(
-        (list) => list.name.toLowerCase() === item.list_name.toLowerCase() && list.list_type === 'grocery'
+        (list) => list.name.toLowerCase() === item.list_name.toLowerCase() && list.list_type === item.list_type
       );
 
-      // If list doesn't exist, create it
       if (!targetList) {
+        const colorMap: Record<ListType, string> = {
+          grocery: '#10b981',
+          shopping: '#3b82f6',
+          todo: '#f59e0b',
+          ideas: '#8b5cf6',
+          other: '#6b7280',
+        };
         targetList = await ListService.createList({
           name: item.list_name,
           description: '',
-          list_type: 'grocery',
-          color: '#10b981', // Default green color
+          list_type: item.list_type,
+          color: colorMap[item.list_type] || '#10b981',
           family: selectedFamily.id,
         });
       }
 
-      // Get categories to find the category ID if category_name exists
       let categoryId: number | null = null;
-      if (item.category_name) {
+      if (item.list_type === 'grocery' && item.category_name) {
         const categories = await ListService.getGroceryCategories(selectedFamily.id);
         const category = categories.find((cat) => cat.name === item.category_name);
         if (category) {
@@ -185,29 +254,29 @@ export default function CompletedItemsScreen() {
         }
       }
 
-      // Create the list item
       const itemData: any = {
         list: targetList.id,
         name: item.item_name,
         quantity: item.quantity || undefined,
         category: categoryId || undefined,
+        notes: item.notes || undefined,
+        due_date: item.due_date || undefined,
       };
 
-      // Add recipe name to notes if it exists
       if (item.recipe_name) {
-        itemData.notes = `From recipe: ${item.recipe_name}`;
+        itemData.notes = item.notes
+          ? `From recipe: ${item.recipe_name}\n${item.notes}`
+          : `From recipe: ${item.recipe_name}`;
       }
 
       await ListService.createListItem(itemData);
 
-      // Show success message in modal
       setModalMessage(`"${item.item_name}" has been added to "${item.list_name}"`);
       setModalType('success');
       setModalVisible(true);
     } catch (err: any) {
       console.error('Error adding item to list:', err);
-      const errorMessage = err?.message || 'Failed to add item to list';
-      setModalMessage(errorMessage);
+      setModalMessage(err?.message || 'Failed to add item to list');
       setModalType('error');
       setModalVisible(true);
     } finally {
@@ -217,6 +286,176 @@ export default function CompletedItemsScreen() {
         return newSet;
       });
     }
+  };
+
+  // Render a single item card
+  const renderItemCard = (item: CompletedListItem, index: number) => {
+    return (
+      <View
+        key={item.id || `item-${index}`}
+        style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <View style={styles.itemHeader}>
+          <View style={styles.itemNameContainer}>
+            <Text style={[styles.itemName, { color: colors.text }]}>
+              {item.item_name}
+            </Text>
+            {item.quantity ? (
+              <Text style={[styles.itemQuantity, { color: colors.textSecondary }]}>
+                Qty: {item.quantity}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.addButtonContainer}>
+            <TouchableOpacity
+              onPress={() => handleAddItemToList(item)}
+              disabled={addingItems.has(item.id)}
+              style={[styles.addIconButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
+            >
+              {addingItems.has(item.id) ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <FontAwesome name="plus" size={Platform.OS === 'web' ? 12 : 10} color={colors.primary} />
+              )}
+            </TouchableOpacity>
+            <Text style={[styles.addButtonLabel, { color: colors.textSecondary }]}>Add</Text>
+          </View>
+        </View>
+        <View style={styles.itemMeta}>
+          {groupBy !== 'category' && item.category_name ? (
+            <View style={styles.metaItem}>
+              <FontAwesome name="tag" size={12} color={colors.textSecondary} />
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                {item.category_name}
+              </Text>
+            </View>
+          ) : null}
+          {groupBy !== 'list' ? (
+            <View style={styles.metaItem}>
+              <FontAwesome name="list" size={12} color={colors.textSecondary} />
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                {item.list_name}
+              </Text>
+            </View>
+          ) : null}
+          {groupBy !== 'date' ? (
+            <View style={styles.metaItem}>
+              <FontAwesome name="calendar" size={12} color={colors.textSecondary} />
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                {formatDate(item.completed_date)}
+              </Text>
+            </View>
+          ) : null}
+          {item.due_date ? (
+            <View style={styles.metaItem}>
+              <FontAwesome name="clock-o" size={12} color="#f59e0b" />
+              <Text style={[styles.metaText, { color: '#f59e0b' }]}>
+                Due: {formatDate(item.due_date)}
+              </Text>
+            </View>
+          ) : null}
+          {item.recipe_name ? (
+            <View style={styles.metaItem}>
+              <FontAwesome name="book" size={12} color={colors.primary} />
+              <Text style={[styles.metaText, { color: colors.primary }]}>
+                {item.recipe_name}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        {item.notes && !item.notes.startsWith('From recipe:') ? (
+          <Text style={[styles.itemNotes, { color: colors.textSecondary }]} numberOfLines={2}>
+            {item.notes}
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
+
+  // Render ungrouped items (groupBy === 'none')
+  const renderUngroupedItems = () => {
+    const allItems = groupedItems['All Items'] || [];
+
+    if (allItems.length === 0) {
+      return null;
+    }
+
+    return (
+      <View>
+        {allItems.map((item, index) => renderItemCard(item, index))}
+      </View>
+    );
+  };
+
+  // Render grouped items with accordions
+  const renderGroupedItems = () => {
+    if (sortedGroupKeys.length === 0) {
+      return null;
+    }
+
+    return (
+      <View>
+        {sortedGroupKeys.map((groupKey) => {
+          const items = groupedItems[groupKey] || [];
+          if (items.length === 0) return null;
+
+          const isExpanded = expandedGroups.has(groupKey);
+
+          return (
+            <View key={groupKey} style={[styles.accordion, { borderColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.accordionHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+                onPress={() => toggleGroup(groupKey)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.accordionHeaderLeft}>
+                  <Text style={[styles.accordionHeaderText, { color: colors.text }]}>
+                    {groupKey}
+                  </Text>
+                  <Text style={[styles.accordionItemCount, { color: colors.textSecondary }]}>
+                    ({items.length})
+                  </Text>
+                </View>
+                <FontAwesome
+                  name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+              {isExpanded ? (
+                <View style={styles.accordionContent}>
+                  {items.map((item, index) => renderItemCard(item, index))}
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  // Get title text
+  const getTitle = () => {
+    if (selectedListType === 'all') return 'Completed Items';
+    if (selectedListType === 'todo') return 'Completed To-Do';
+    const capitalized = selectedListType.charAt(0).toUpperCase() + selectedListType.slice(1);
+    return `Completed ${capitalized}`;
+  };
+
+  // Get list type display text
+  const getListTypeText = (type: ListType | 'all') => {
+    if (type === 'all') return 'All';
+    if (type === 'todo') return 'To-Do';
+    return type.charAt(0).toUpperCase() + type.slice(1);
+  };
+
+  // Get empty state message
+  const getEmptyMessage = () => {
+    if (selectedListType === 'all') {
+      return 'Complete items from your lists to see them here.';
+    }
+    const listTypeText = selectedListType === 'todo' ? 'to-do' : selectedListType;
+    return `Complete items from your ${listTypeText} lists to see them here.`;
   };
 
   if (!selectedFamily) {
@@ -259,8 +498,62 @@ export default function CompletedItemsScreen() {
           >
             <FontAwesome name="arrow-left" size={Platform.OS === 'web' ? 20 : 18} color={colors.primary} />
           </TouchableOpacity>
-          <Text style={[styles.title, { color: colors.text }]}>Grocery History</Text>
-          <View style={{ width: Platform.OS === 'web' ? 44 : 40 }} /> {/* Spacer for alignment */}
+          <Text style={[styles.title, { color: colors.text }]}>
+            {getTitle()}
+          </Text>
+          <View style={{ width: Platform.OS === 'web' ? 44 : 40 }} />
+        </View>
+        <View style={styles.listTypeTabsContainer}>
+          {Platform.OS === 'web' ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listTypeTabs}>
+              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.listTypeTab,
+                    selectedListType === type ? { backgroundColor: colors.primary } : null,
+                    { borderColor: colors.border },
+                  ]}
+                  onPress={() => setSelectedListType(type)}
+                >
+                  <Text
+                    style={[
+                      styles.listTypeTabText,
+                      { color: selectedListType === type ? '#fff' : colors.text },
+                    ]}
+                  >
+                    {getListTypeText(type)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.listTypeTabs}>
+              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.listTypeTab,
+                    styles.listTypeTabMobile,
+                    selectedListType === type ? { backgroundColor: colors.primary } : null,
+                    { borderColor: colors.border },
+                  ]}
+                  onPress={() => setSelectedListType(type)}
+                >
+                  <Text
+                    style={[
+                      styles.listTypeTabText,
+                      styles.listTypeTabTextMobile,
+                      { color: selectedListType === type ? '#fff' : colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {getListTypeText(type)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
         <View style={styles.groupByContainer}>
           <Text style={[styles.groupByLabel, { color: colors.textSecondary }]}>Group by:</Text>
@@ -288,194 +581,32 @@ export default function CompletedItemsScreen() {
           />
         }
       >
-        {error && (
+        {error ? (
           <View style={[styles.errorContainer, { backgroundColor: colors.error + '20' }]}>
             <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
           </View>
-        )}
+        ) : null}
 
-        {completedItems.length === 0 ? (
+        {loading && completedItems.length === 0 ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary, marginTop: 16 }]}>
+              Loading...
+            </Text>
+          </View>
+        ) : completedItems.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="check-circle" size={48} color={colors.textSecondary} />
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               No completed items yet.
             </Text>
             <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-              Complete items from your grocery lists to see them here.
+              {getEmptyMessage()}
             </Text>
           </View>
         ) : (
           <View style={styles.content}>
-            {groupBy === 'none' ? (
-              // For 'none', show all items without accordions
-              (groupedItems['All Items'] || []).map((item) => (
-                <View
-                  key={item.id}
-                  style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                >
-                  <View style={styles.itemHeader}>
-                    <View style={styles.itemNameContainer}>
-                      <Text style={[styles.itemName, { color: colors.text }]}>{item.item_name}</Text>
-                      {item.quantity && (
-                        <Text style={[styles.itemQuantity, { color: colors.textSecondary }]}>
-                          Qty: {item.quantity}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.addButtonContainer}>
-                      <TouchableOpacity
-                        onPress={() => handleAddItemToList(item)}
-                        disabled={addingItems.has(item.id)}
-                        style={[styles.addIconButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
-                      >
-                        {addingItems.has(item.id) ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <FontAwesome name="plus" size={Platform.OS === 'web' ? 12 : 10} color={colors.primary} />
-                        )}
-                      </TouchableOpacity>
-                      <Text style={[styles.addButtonLabel, { color: colors.textSecondary }]}>Add</Text>
-                    </View>
-                  </View>
-                  <View style={styles.itemMeta}>
-                    {item.category_name && (
-                      <View style={styles.metaItem}>
-                        <FontAwesome name="tag" size={12} color={colors.textSecondary} />
-                        <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                          {item.category_name}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={styles.metaItem}>
-                      <FontAwesome name="list" size={12} color={colors.textSecondary} />
-                      <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                        {item.list_name}
-                      </Text>
-                    </View>
-                    <View style={styles.metaItem}>
-                      <FontAwesome name="calendar" size={12} color={colors.textSecondary} />
-                      <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                        {new Date(item.completed_date).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </Text>
-                    </View>
-                    {item.recipe_name && (
-                      <View style={styles.metaItem}>
-                        <FontAwesome name="book" size={12} color={colors.primary} />
-                        <Text style={[styles.metaText, { color: colors.primary }]}>
-                          {item.recipe_name}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))
-            ) : (
-              // For other groupings, show accordions
-              sortedGroupKeys.map((groupKey) => {
-                const items = groupedItems[groupKey];
-                const isExpanded = expandedGroups.has(groupKey);
-                return (
-                  <View key={groupKey} style={[styles.accordion, { borderColor: colors.border }]}>
-                    <TouchableOpacity
-                      style={[styles.accordionHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
-                      onPress={() => toggleGroup(groupKey)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.accordionHeaderLeft}>
-                        <Text style={[styles.accordionHeaderText, { color: colors.text }]}>
-                          {groupKey}
-                        </Text>
-                        <Text style={[styles.accordionItemCount, { color: colors.textSecondary }]}>
-                          ({items.length})
-                        </Text>
-                      </View>
-                      <FontAwesome
-                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={16}
-                        color={colors.textSecondary}
-                      />
-                    </TouchableOpacity>
-                    {isExpanded && (
-                      <View style={styles.accordionContent}>
-                        {items.map((item) => (
-                          <View
-                            key={item.id}
-                            style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                          >
-                            <View style={styles.itemHeader}>
-                              <View style={styles.itemNameContainer}>
-                                <Text style={[styles.itemName, { color: colors.text }]}>{item.item_name}</Text>
-                                {item.quantity && (
-                                  <Text style={[styles.itemQuantity, { color: colors.textSecondary }]}>
-                                    Qty: {item.quantity}
-                                  </Text>
-                                )}
-                              </View>
-                              <View style={styles.addButtonContainer}>
-                                <TouchableOpacity
-                                  onPress={() => handleAddItemToList(item)}
-                                  disabled={addingItems.has(item.id)}
-                                  style={[styles.addIconButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
-                                >
-                                  {addingItems.has(item.id) ? (
-                                    <ActivityIndicator size="small" color={colors.primary} />
-                                  ) : (
-                                    <FontAwesome name="plus" size={Platform.OS === 'web' ? 12 : 10} color={colors.primary} />
-                                  )}
-                                </TouchableOpacity>
-                                <Text style={[styles.addButtonLabel, { color: colors.textSecondary }]}>Add</Text>
-                              </View>
-                            </View>
-                            <View style={styles.itemMeta}>
-                              {groupBy !== 'category' && item.category_name && (
-                                <View style={styles.metaItem}>
-                                  <FontAwesome name="tag" size={12} color={colors.textSecondary} />
-                                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                                    {item.category_name}
-                                  </Text>
-                                </View>
-                              )}
-                              {groupBy !== 'list' && (
-                                <View style={styles.metaItem}>
-                                  <FontAwesome name="list" size={12} color={colors.textSecondary} />
-                                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                                    {item.list_name}
-                                  </Text>
-                                </View>
-                              )}
-                              {groupBy !== 'date' && (
-                                <View style={styles.metaItem}>
-                                  <FontAwesome name="calendar" size={12} color={colors.textSecondary} />
-                                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                                    {new Date(item.completed_date).toLocaleDateString('en-US', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric',
-                                    })}
-                                  </Text>
-                                </View>
-                              )}
-                              {item.recipe_name && (
-                                <View style={styles.metaItem}>
-                                  <FontAwesome name="book" size={12} color={colors.primary} />
-                                  <Text style={[styles.metaText, { color: colors.primary }]}>
-                                    {item.recipe_name}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                );
-              })
-            )}
+            {groupBy === 'none' ? renderUngroupedItems() : renderGroupedItems()}
           </View>
         )}
       </ScrollView>
@@ -532,6 +663,44 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     flex: 1,
     textAlign: 'center',
+  },
+  listTypeTabsContainer: {
+    marginBottom: 12,
+  },
+  listTypeTabs: {
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingVertical: 8,
+    gap: Platform.OS === 'web' ? 8 : 4,
+    ...(Platform.OS !== 'web' ? {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    } : {}),
+  },
+  listTypeTab: {
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginRight: Platform.OS === 'web' ? 8 : 0,
+    ...(Platform.OS !== 'web' ? {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginHorizontal: 2,
+    } : {}),
+  },
+  listTypeTabMobile: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  listTypeTabText: {
+    fontSize: Platform.OS === 'web' ? 13 : 10,
+    fontWeight: '600',
+  },
+  listTypeTabTextMobile: {
+    fontSize: 10,
   },
   groupByContainer: {
     flexDirection: 'row',
@@ -683,5 +852,10 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 12,
   },
+  itemNotes: {
+    fontSize: 12,
+    marginTop: 8,
+    fontStyle: 'italic',
+    opacity: 0.8,
+  },
 });
-
