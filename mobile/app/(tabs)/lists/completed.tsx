@@ -504,56 +504,31 @@ export default function CompletedItemsScreen() {
           <View style={{ width: Platform.OS === 'web' ? 44 : 40 }} />
         </View>
         <View style={styles.listTypeTabsContainer}>
-          {Platform.OS === 'web' ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listTypeTabs}>
-              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
-                <TouchableOpacity
-                  key={type}
+          <View style={styles.listTypeTabs}>
+            {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
+              <TouchableOpacity
+                key={type}
+                style={[
+                  styles.listTypeTab,
+                  styles.listTypeTabMobile,
+                  selectedListType === type ? { backgroundColor: colors.primary } : null,
+                  { borderColor: colors.border },
+                ]}
+                onPress={() => setSelectedListType(type)}
+              >
+                <Text
                   style={[
-                    styles.listTypeTab,
-                    selectedListType === type ? { backgroundColor: colors.primary } : null,
-                    { borderColor: colors.border },
+                    styles.listTypeTabText,
+                    styles.listTypeTabTextMobile,
+                    { color: selectedListType === type ? '#fff' : colors.text },
                   ]}
-                  onPress={() => setSelectedListType(type)}
+                  numberOfLines={1}
                 >
-                  <Text
-                    style={[
-                      styles.listTypeTabText,
-                      { color: selectedListType === type ? '#fff' : colors.text },
-                    ]}
-                  >
-                    {getListTypeText(type)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          ) : (
-            <View style={styles.listTypeTabs}>
-              {(['all', 'grocery', 'shopping', 'todo', 'ideas', 'other'] as (ListType | 'all')[]).map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.listTypeTab,
-                    styles.listTypeTabMobile,
-                    selectedListType === type ? { backgroundColor: colors.primary } : null,
-                    { borderColor: colors.border },
-                  ]}
-                  onPress={() => setSelectedListType(type)}
-                >
-                  <Text
-                    style={[
-                      styles.listTypeTabText,
-                      styles.listTypeTabTextMobile,
-                      { color: selectedListType === type ? '#fff' : colors.text },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {getListTypeText(type)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+                  {getListTypeText(type)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
         <View style={styles.groupByContainer}>
           <Text style={[styles.groupByLabel, { color: colors.textSecondary }]}>Group by:</Text>
@@ -668,28 +643,23 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   listTypeTabs: {
-    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingHorizontal: 8,
     paddingVertical: 8,
-    gap: Platform.OS === 'web' ? 8 : 4,
-    ...(Platform.OS !== 'web' ? {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    } : {}),
+    gap: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   listTypeTab: {
-    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingHorizontal: 4,
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    marginRight: Platform.OS === 'web' ? 8 : 0,
-    ...(Platform.OS !== 'web' ? {
-      flex: 1,
-      minWidth: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginHorizontal: 2,
-    } : {}),
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 2,
   },
   listTypeTabMobile: {
     paddingHorizontal: 4,

@@ -536,56 +536,31 @@ export default function ListsScreen() {
       )}
 
       <View style={[styles.tabsContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        {Platform.OS === 'web' ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-            {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
-              <TouchableOpacity
-                key={tab}
+        <View style={styles.tabs}>
+          {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[
+                styles.tab,
+                styles.tabMobile,
+                activeTab === tab && { backgroundColor: colors.primary },
+                { borderColor: colors.border },
+              ]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text
                 style={[
-                  styles.tab,
-                  activeTab === tab && { backgroundColor: colors.primary },
-                  { borderColor: colors.border },
+                  styles.tabText,
+                  styles.tabTextMobile,
+                  { color: activeTab === tab ? '#fff' : colors.text },
                 ]}
-                onPress={() => setActiveTab(tab)}
+                numberOfLines={1}
               >
-                <Text
-                  style={[
-                    styles.tabText,
-                    { color: activeTab === tab ? '#fff' : colors.text },
-                  ]}
-                >
-                  {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.tabs}>
-            {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
-              <TouchableOpacity
-                key={tab}
-                style={[
-                  styles.tab,
-                  styles.tabMobile,
-                  activeTab === tab && { backgroundColor: colors.primary },
-                  { borderColor: colors.border },
-                ]}
-                onPress={() => setActiveTab(tab)}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    styles.tabTextMobile,
-                    { color: activeTab === tab ? '#fff' : colors.text },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+                {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {loading ? (
@@ -717,27 +692,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   tabs: {
-    paddingHorizontal: Platform.OS === 'web' ? 16 : 8,
+    paddingHorizontal: 8,
     paddingVertical: 12,
-    gap: Platform.OS === 'web' ? 8 : 4,
-    ...(Platform.OS !== 'web' ? {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    } : {}),
+    gap: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   tab: {
-    paddingHorizontal: Platform.OS === 'web' ? 20 : 8,
+    paddingHorizontal: 4,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    marginRight: Platform.OS === 'web' ? 8 : 0,
-    ...(Platform.OS !== 'web' ? {
-      flex: 1,
-      minWidth: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-    } : {}),
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 2,
   },
   tabMobile: {
     paddingHorizontal: 4,
@@ -745,7 +716,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   tabText: {
-    fontSize: Platform.OS === 'web' ? 14 : 11,
+    fontSize: 11,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
