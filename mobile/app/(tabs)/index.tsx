@@ -100,8 +100,8 @@ export default function HomeScreen() {
     },
     {
       id: 'finance',
-      title: 'Finance',
-      description: 'Track family finances and budgets',
+      title: 'Expense Tracker',
+      description: 'Tracks daily/weekly/monthly expenses',
       icon: '💰',
       color: '#22c55e',
     },
