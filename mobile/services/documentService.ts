@@ -243,7 +243,7 @@ class DocumentService {
    */
   async downloadOneDriveFile(itemId: string): Promise<Blob> {
     try {
-      const response = await apiClient.get(`/onedrive/files/${itemId}/?download=true`, {
+      const response = await apiClient.get(`/onedrive/files/${itemId}/download/`, {
         responseType: 'blob',
       });
       return response.data;
@@ -258,7 +258,7 @@ class DocumentService {
    */
   async downloadGoogleDriveFile(itemId: string): Promise<Blob> {
     try {
-      const response = await apiClient.get(`/googledrive/files/${itemId}/?download=true`, {
+      const response = await apiClient.get(`/googledrive/files/${itemId}/download/`, {
         responseType: 'blob',
       });
       return response.data;

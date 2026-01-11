@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.signing import TimestampSigner
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from django.http import Http404, FileResponse, HttpResponse
 from .models import UserProfile
 from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer, EventSerializer, ChatRoomSerializer, MessageSerializer
 from meals.models import Recipe, MealPlan
@@ -2294,7 +2294,7 @@ def OneDriveListFilesView(request):
                 'size': file_item.get('size'),
                 'lastModifiedDateTime': file_item.get('lastModifiedDateTime'),
                 'createdDateTime': file_item.get('createdDateTime'),
-                'webUrl': file_item.get('webUrl'),
+                'webViewLink': file_item.get('webUrl'),  # OneDrive uses webUrl, map to webViewLink for consistency
             }
             # If it's a folder, set folder flag
             if 'folder' in file_item:
@@ -2384,7 +2384,7 @@ def OneDriveSearchFilesView(request):
                 'size': file_item.get('size'),
                 'lastModifiedDateTime': file_item.get('lastModifiedDateTime'),
                 'createdDateTime': file_item.get('createdDateTime'),
-                'webUrl': file_item.get('webUrl'),
+                'webViewLink': file_item.get('webUrl'),  # OneDrive uses webUrl, map to webViewLink for consistency
             }
             # If it's a folder, set folder flag
             if 'folder' in file_item:
@@ -2622,6 +2622,77 @@ def OneDriveDeleteItemView(request, item_id):
             logger.error(f"OneDrive delete error: {str(e)}", exc_info=True)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def OneDriveDownloadFileView(request, item_id):
+    """Download file from OneDrive."""
+    from documents.models import OneDriveSync
+    from documents.onedrive_sync import OneDriveSync as OneDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = OneDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'OneDrive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = OneDriveSyncService(access_token, refresh_token)
+
+        # Get file metadata first to get the filename
+        file_metadata = sync.get_file(item_id)
+        file_name = file_metadata.get('name', 'download')
+
+        # Download file content
+        file_content = sync.download_file(item_id)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        # Return file as download
+        response = HttpResponse(file_content, content_type='application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+        return response
+    except ValueError as e:
+        error_msg = str(e).lower()
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your OneDrive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt OneDrive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive download error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"OneDrive download error: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -3281,6 +3352,77 @@ def GoogleDriveDeleteItemView(request, item_id):
             logger.error(f"Google Drive delete error: {str(e)}", exc_info=True)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def GoogleDriveDownloadFileView(request, item_id):
+    """Download file from Google Drive."""
+    from documents.models import GoogleDriveSync
+    from documents.googledrive_sync import GoogleDriveSync as GoogleDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = GoogleDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'Google Drive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = GoogleDriveSyncService(access_token, refresh_token)
+
+        # Get file metadata first to get the filename
+        file_metadata = sync.get_file(item_id)
+        file_name = file_metadata.get('name', 'download')
+
+        # Download file content
+        file_content = sync.download_file(item_id)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        # Return file as download
+        response = HttpResponse(file_content, content_type='application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+        return response
+    except ValueError as e:
+        error_msg = str(e).lower()
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your Google Drive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt Google Drive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive download error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Google Drive download error: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

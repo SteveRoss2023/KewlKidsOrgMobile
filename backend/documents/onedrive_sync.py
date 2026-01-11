@@ -104,11 +104,16 @@ class OneDriveSync:
         else:
             url = f'{self.base_url}/me/drive/root/children'
 
-        response = requests.get(url, headers=headers)
+        # Request webUrl field explicitly for view functionality
+        params = {
+            '$select': 'id,name,size,folder,file,lastModifiedDateTime,createdDateTime,webUrl'
+        }
+
+        response = requests.get(url, headers=headers, params=params)
         if response.status_code == 401:
             self.refresh_access_token()
             headers = self._get_headers()
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         return response.json().get('value', [])
 

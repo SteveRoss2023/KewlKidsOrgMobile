@@ -1802,13 +1802,57 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  const handleView = async (file: CloudFile) => {
+    if (!file.webViewLink) {
+      Alert.alert('Error', 'This file cannot be viewed in browser.');
+      return;
+    }
+    try {
+      const canOpen = await Linking.canOpenURL(file.webViewLink);
+      if (canOpen) {
+        await Linking.openURL(file.webViewLink);
+      } else {
+        Alert.alert('Error', 'Unable to open this file.');
+      }
+    } catch (err: any) {
+      console.error('Error viewing file:', err);
+      Alert.alert('Error', 'Failed to open file.');
+    }
+  };
+
   const handleDownload = async (file: CloudFile) => {
     try {
       setLoading(true);
-      const blob = await DocumentService.downloadOneDriveFile(file.id);
-      // For mobile, we'd need to save the file using expo-file-system
-      // This is a simplified version - in production you'd want to use Sharing API
-      Alert.alert('Download', 'File download initiated. Check your downloads folder.');
+
+      if (Platform.OS === 'web') {
+        // For web: Download the file directly
+        const blob = await DocumentService.downloadOneDriveFile(file.id);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file.name || 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        Alert.alert('Success', 'File downloaded successfully');
+      } else {
+        // For mobile: Open the download URL in browser or use webViewLink
+        // The browser will handle the download
+        if (file.webViewLink) {
+          const downloadUrl = file.webViewLink.replace('/view?usp=drivesdk', '') + '?alt=media';
+          const canOpen = await Linking.canOpenURL(downloadUrl);
+          if (canOpen) {
+            await Linking.openURL(downloadUrl);
+            Alert.alert('Download', 'Opening file in browser. Use browser menu to save the file.');
+          } else {
+            Alert.alert('Error', 'Unable to open download link.');
+          }
+        } else {
+          // Fallback: Try to construct download URL from file ID
+          Alert.alert('Info', 'Download functionality requires file access. Please use the view option to access the file.');
+        }
+      }
     } catch (err: any) {
       console.error('Error downloading file:', err);
       Alert.alert('Error', err?.response?.data?.error || err?.message || 'Failed to download file.');
@@ -2067,6 +2111,7 @@ function OneDriveBrowser({ colors }: { colors: any }) {
                 file={file}
                 colors={colors}
                 onFolderClick={handleFolderClick}
+                onView={handleView}
                 onDownload={handleDownload}
                 onDelete={() => {
                   setDeleteConfirm({ isOpen: true, item: file });
@@ -2547,11 +2592,55 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  const handleView = async (file: CloudFile) => {
+    if (!file.webViewLink) {
+      Alert.alert('Error', 'This file cannot be viewed in browser.');
+      return;
+    }
+    try {
+      const canOpen = await Linking.canOpenURL(file.webViewLink);
+      if (canOpen) {
+        await Linking.openURL(file.webViewLink);
+      } else {
+        Alert.alert('Error', 'Unable to open this file.');
+      }
+    } catch (err: any) {
+      console.error('Error viewing file:', err);
+      Alert.alert('Error', 'Failed to open file.');
+    }
+  };
+
   const handleDownload = async (file: CloudFile) => {
     try {
       setLoading(true);
-      const blob = await DocumentService.downloadGoogleDriveFile(file.id);
-      Alert.alert('Download', 'File download initiated. Check your downloads folder.');
+
+      if (Platform.OS === 'web') {
+        // For web: Download the file directly
+        const blob = await DocumentService.downloadGoogleDriveFile(file.id);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file.name || 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        Alert.alert('Success', 'File downloaded successfully');
+      } else {
+        // For mobile: Open the download URL in browser
+        if (file.webViewLink) {
+          const downloadUrl = file.webViewLink.replace('/view?usp=drivesdk', '') + '?alt=media';
+          const canOpen = await Linking.canOpenURL(downloadUrl);
+          if (canOpen) {
+            await Linking.openURL(downloadUrl);
+            Alert.alert('Download', 'Opening file in browser. Use browser menu to save the file.');
+          } else {
+            Alert.alert('Error', 'Unable to open download link.');
+          }
+        } else {
+          Alert.alert('Info', 'Download functionality requires file access. Please use the view option to access the file.');
+        }
+      }
     } catch (err: any) {
       console.error('Error downloading file:', err);
       Alert.alert('Error', err?.response?.data?.error || err?.message || 'Failed to download file.');
@@ -2810,6 +2899,7 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
                 file={file}
                 colors={colors}
                 onFolderClick={handleFolderClick}
+                onView={handleView}
                 onDownload={handleDownload}
                 onDelete={() => {
                   setDeleteConfirm({ isOpen: true, item: file });
@@ -2967,6 +3057,11 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // Default to newest first
   const [showSummary, setShowSummary] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'thumbnails' | 'details'>('thumbnails');
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; item: GooglePhotoItem | null }>({
+    isOpen: false,
+    item: null,
+  });
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -3215,6 +3310,71 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
     setRefreshing(false);
   }, [loadItems]);
 
+  const handleView = (item: GooglePhotoItem) => {
+    // Open photo in fullscreen modal instead of browser
+    setSelectedPhoto(item);
+  };
+
+  const handleDownload = async (item: GooglePhotoItem) => {
+    try {
+      setLoading(true);
+
+      if (Platform.OS === 'web') {
+        // For web: Download the photo directly
+        const blob = await DocumentService.downloadGoogleDriveFile(item.id);
+        const fileName = item.filename || 'photo';
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        Alert.alert('Success', 'Photo downloaded successfully');
+      } else {
+        // For mobile: Open the photo URL in browser for download
+        if (item.baseUrl) {
+          // Use the baseUrl which should be the full image URL
+          const canOpen = await Linking.canOpenURL(item.baseUrl);
+          if (canOpen) {
+            await Linking.openURL(item.baseUrl);
+            Alert.alert('Download', 'Opening photo in browser. Long press the image and select "Save Image" to download.');
+          } else {
+            Alert.alert('Error', 'Unable to open photo link.');
+          }
+        } else {
+          Alert.alert('Info', 'Photo download not available. Please use the view option.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Error downloading photo:', err);
+      Alert.alert('Error', err?.response?.data?.error || err?.message || 'Failed to download photo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirm.item) return;
+
+    try {
+      setLoading(true);
+      setError('');
+      // Since Google Photos uses Drive API, we can use Drive delete
+      await DocumentService.deleteGoogleDriveItem(deleteConfirm.item.id);
+      setDeleteConfirm({ isOpen: false, item: null });
+      await loadItems(true, undefined, false);
+      Alert.alert('Success', 'Photo deleted successfully');
+    } catch (err: any) {
+      console.error('Error deleting photo:', err);
+      setError(err?.response?.data?.error || err?.message || 'Failed to delete photo. Please try again.');
+      Alert.alert('Error', err?.response?.data?.error || err?.message || 'Failed to delete photo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Calculate summary statistics
   const totalPhotos = items.length;
 
@@ -3237,7 +3397,19 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
           <Text style={[styles.documentsTitle, { color: colors.text }]}>Google Photos</Text>
           <View style={styles.titleActions}>
             <TouchableOpacity
-              style={[styles.iconButton, { backgroundColor: colors.primary }]}
+              style={[styles.iconButton, { backgroundColor: viewMode === 'thumbnails' ? colors.primary : colors.background, borderWidth: 1, borderColor: colors.border }]}
+              onPress={() => setViewMode('thumbnails')}
+            >
+              <FontAwesome name="th" size={16} color={viewMode === 'thumbnails' ? "#fff" : colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: viewMode === 'details' ? colors.primary : colors.background, borderWidth: 1, borderColor: colors.border, marginLeft: 8 }]}
+              onPress={() => setViewMode('details')}
+            >
+              <FontAwesome name="list" size={16} color={viewMode === 'details' ? "#fff" : colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.primary, marginLeft: 8 }]}
               onPress={() => setShowSummary(!showSummary)}
             >
               <FontAwesome name="info-circle" size={16} color="#fff" />
@@ -3383,7 +3555,7 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
 
       <ScrollView
         style={styles.filesScrollView}
-        contentContainerStyle={styles.photosGridContainer}
+        contentContainerStyle={viewMode === 'thumbnails' ? styles.photosGridContainer : styles.filesList}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
       >
         {displayPhotos.length === 0 ? (
@@ -3392,7 +3564,7 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
               No photos found in your Google Photos library.
             </Text>
           </View>
-        ) : (
+        ) : viewMode === 'thumbnails' ? (
           <>
             <View style={styles.photosGrid}>
               {displayPhotos.map((item) => {
@@ -3449,6 +3621,76 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
               </View>
             )}
           </>
+        ) : (
+          <View style={styles.filesList}>
+            {displayPhotos.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.fileItem, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+                onPress={() => handleView(item)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.fileIcon}>
+                  {item.baseUrl ? (
+                    <Image
+                      source={{ uri: item.baseUrl }}
+                      style={{ width: 40, height: 40, borderRadius: 4 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <FontAwesome name="photo" size={24} color={colors.primary} />
+                  )}
+                </View>
+                <View style={styles.fileInfoContainer}>
+                  <View style={styles.fileInfo}>
+                    <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+                      {item.filename || 'Unnamed Photo'}
+                    </Text>
+                    {item.mediaMetadata?.creationTime && (
+                      <View style={styles.fileMeta}>
+                        <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+                          {formatShortDate(item.mediaMetadata.creationTime)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.fileActions}>
+                  <TouchableOpacity
+                    style={styles.fileActionButton}
+                    onPress={() => handleDownload(item)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <FontAwesome name="download" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.fileActionButton}
+                    onPress={() => setDeleteConfirm({ isOpen: true, item })}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <FontAwesome name="trash" size={18} color={colors.error} />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            ))}
+            {nextPageToken && (
+              <View style={styles.loadMoreContainer}>
+                <TouchableOpacity
+                  style={[styles.loadMoreButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={() => loadItems(true, nextPageToken, true)}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={[styles.loadMoreText, { color: colors.primary }]}>
+                      Load more photos
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         )}
       </ScrollView>
 
@@ -3475,9 +3717,18 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
                   height: height * 0.95,
                   maxWidth: width * 0.95,
                   maxHeight: height * 0.95,
+                  position: 'relative',
                 },
               ]}
             >
+              {/* Close button in top right corner - positioned outside viewerContent to ensure visibility */}
+              <TouchableOpacity
+                style={[styles.viewerCloseIconButton, { backgroundColor: 'rgba(0,0,0,0.7)' }]}
+                onPress={() => setSelectedPhoto(null)}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              >
+                <FontAwesome name="times" size={24} color="#fff" />
+              </TouchableOpacity>
               <View style={[styles.viewerImageContainer, { height: height * 0.75 }]}>
                 {selectedPhoto?.baseUrl && (
                   Platform.OS === 'web' ? (
@@ -3588,6 +3839,19 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
         </GestureHandlerRootView>
       </Modal>
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm.item && deleteConfirm.isOpen && (
+        <ConfirmModal
+          visible={true}
+          onClose={() => setDeleteConfirm({ isOpen: false, item: null })}
+          onConfirm={handleDelete}
+          title="Delete Photo"
+          message={`Are you sure you want to delete "${deleteConfirm.item.filename || deleteConfirm.item.id || 'this photo'}"? This action cannot be undone.`}
+          confirmText="Delete"
+          type="danger"
+        />
+      )}
+
       <AlertModal
         visible={errorModal.visible}
         title={errorModal.title}
@@ -3634,12 +3898,14 @@ function FileItem({
   onFolderClick,
   onDownload,
   onDelete,
+  onView,
 }: {
   file: CloudFile;
   colors: any;
   onFolderClick: (folder: CloudFile) => void;
   onDownload: (file: CloudFile) => void;
   onDelete: () => void;
+  onView?: (file: CloudFile) => void;
 }) {
   const mimeType = file.mimeType || file.file?.mimeType;
   const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
@@ -3649,6 +3915,9 @@ function FileItem({
   const handlePress = () => {
     if (isFolder) {
       onFolderClick(file);
+    } else if (file.webViewLink && onView) {
+      // If it's a file with a webViewLink, open it for viewing
+      onView(file);
     }
   };
 
@@ -3656,7 +3925,7 @@ function FileItem({
     <TouchableOpacity
       style={[styles.fileItem, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
       onPress={handlePress}
-      disabled={!isFolder}
+      disabled={isFolder ? false : !(file.webViewLink && onView)}
     >
       <View style={styles.fileIcon}>
         {/* Folder uses emoji; files use Material Design file-type icons (PDF, Word, Excel, etc.) */}
@@ -3693,44 +3962,48 @@ function FileItem({
           })()
         )}
       </View>
-      <View style={styles.fileInfo}>
-        <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
-          {file.name || 'Unnamed'}
-        </Text>
-        {(!isFolder && (fileSize || mimeType)) && (
-          <View style={styles.fileMeta}>
-            {fileSize && (
-              <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-                {DocumentService.formatFileSize(fileSize)}
-              </Text>
-            )}
-            {mimeType && (
-              <>
-                {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>}
+      <View style={styles.fileInfoContainer}>
+        <View style={styles.fileInfo}>
+          <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+            {file.name || 'Unnamed'}
+          </Text>
+          {(!isFolder && (fileSize || mimeType)) && (
+            <View style={styles.fileMeta}>
+              {fileSize && (
                 <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
-                  {DocumentService.getFileTypeName(mimeType, file.name || '')}
+                  {DocumentService.formatFileSize(fileSize)}
                 </Text>
-              </>
-            )}
-          </View>
-        )}
+              )}
+              {mimeType && (
+                <>
+                  {fileSize && <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}> {'\u2022'} </Text>}
+                  <Text style={[styles.fileMetaText, { color: colors.textSecondary }]}>
+                    {DocumentService.getFileTypeName(mimeType, file.name || '')}
+                  </Text>
+                </>
+              )}
+            </View>
+          )}
+        </View>
       </View>
-      {!isFolder && (
+      <View style={styles.fileActions}>
+        {!isFolder && (
+          <TouchableOpacity
+            style={styles.fileActionButton}
+            onPress={() => onDownload(file)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <FontAwesome name="download" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
-          style={styles.fileAction}
-          onPress={() => onDownload(file)}
+          style={styles.fileActionButton}
+          onPress={onDelete}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <FontAwesome name="download" size={18} color={colors.primary} />
+          <FontAwesome name="trash" size={18} color={colors.error} />
         </TouchableOpacity>
-      )}
-      <TouchableOpacity
-        style={styles.fileAction}
-        onPress={onDelete}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <FontAwesome name="trash" size={18} color={colors.error} />
-      </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -3862,7 +4135,8 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     borderRadius: 8,
     borderBottomWidth: 1,
-    alignItems: 'flex-start', // Changed from 'center' to allow proper layout
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   fileIcon: {
     width: 40,
@@ -3882,7 +4156,9 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch', // Ensure it takes full available height
   },
   fileInfo: {
-    width: '100%',
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   fileInfoTop: {
     width: '100%',
@@ -4315,6 +4591,7 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     justifyContent: 'flex-start',
+    overflow: 'visible', // Ensure buttons aren't clipped
   },
   viewerImageContainer: {
     width: '100%',
@@ -4339,11 +4616,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
+  viewerCloseIconButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+    elevation: 10, // For Android
+    shadowColor: '#000', // For iOS
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
   viewerCloseButton: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
+    marginTop: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   viewerCloseText: {
     color: '#fff',
