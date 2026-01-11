@@ -16,6 +16,60 @@ import {
   Animated,
   Linking,
 } from 'react-native';
+
+// Helper component to add tooltips to buttons
+function TooltipButton({
+  children,
+  tooltip,
+  ...props
+}: {
+  children: React.ReactNode;
+  tooltip: string;
+  [key: string]: any;
+}) {
+  const buttonRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && tooltip) {
+      const setTitle = () => {
+        if (buttonRef?.current) {
+          const getDOMNode = (node: any): HTMLElement | null => {
+            if (!node) return null;
+            if (node.nodeType === 1) return node;
+            if (node._nativeNode) return node._nativeNode;
+            if (node._internalFiberInstanceHandleDEV) {
+              const fiber = node._internalFiberInstanceHandleDEV;
+              if (fiber && fiber.stateNode) {
+                const stateNode = fiber.stateNode;
+                if (stateNode.nodeType === 1) return stateNode;
+                if (stateNode._nativeNode) return stateNode._nativeNode;
+              }
+            }
+            return null;
+          };
+          const domNode = getDOMNode(buttonRef.current);
+          if (domNode) {
+            domNode.setAttribute('title', tooltip);
+          }
+        }
+      };
+      // Try immediately and also after a short delay to ensure DOM is ready
+      setTitle();
+      const timeout = setTimeout(setTitle, 100);
+      return () => clearTimeout(timeout);
+    }
+  }, [tooltip]);
+
+  return (
+    <TouchableOpacity
+      ref={buttonRef}
+      accessibilityLabel={tooltip}
+      {...props}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
 import {
   PinchGestureHandler,
   PanGestureHandler,
@@ -788,7 +842,8 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
         <View style={styles.titleRow}>
           <Text style={[styles.documentsTitle, { color: colors.text }]}>Documents</Text>
           <View style={styles.titleActions}>
-            <TouchableOpacity
+            <TooltipButton
+              tooltip="Create Folder"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => {
                 if (showFolderForm) {
@@ -804,8 +859,9 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
               disabled={uploading || updating}
             >
               <FontAwesome name="folder-open" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Upload File"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => {
                 if (showUploadForm) {
@@ -821,13 +877,14 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
               disabled={uploading || updating}
             >
               <FontAwesome name="upload" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Information"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowSummary(!showSummary)}
             >
               <FontAwesome name="info-circle" size={16} color="#fff" />
-            </TouchableOpacity>
+            </TooltipButton>
           </View>
         </View>
         <View style={[styles.breadcrumbInline, { borderTopColor: colors.border }]}>
@@ -1102,16 +1159,17 @@ function AppDocumentsTab({ selectedFamily, colors }: { selectedFamily: any; colo
                   </select>
                 ) : Platform.OS === 'android' ? (
                   <>
-                    <TouchableOpacity
-                      style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
-                      onPress={() => setShowSortModal(true)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.sortDropdownText, { color: colors.text }]}>
-                        {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
-                      </Text>
-                      <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
-                    </TouchableOpacity>
+              <TooltipButton
+                tooltip="Sort By"
+                style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
+                onPress={() => setShowSortModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sortDropdownText, { color: colors.text }]}>
+                  {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
+              </TooltipButton>
                     <Modal
                       visible={showSortModal}
                       transparent
@@ -1484,6 +1542,12 @@ function OneDriveBrowser({ colors }: { colors: any }) {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showSummary, setShowSummary] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [renameModal, setRenameModal] = useState<{ isOpen: boolean; item: CloudFile | null }>({
+    isOpen: false,
+    item: null,
+  });
+  const [newFileName, setNewFileName] = useState('');
+  const [renaming, setRenaming] = useState(false);
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -1861,6 +1925,37 @@ function OneDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  const handleRename = (file: CloudFile) => {
+    setNewFileName(file.name || '');
+    setRenameModal({ isOpen: true, item: file });
+  };
+
+  const handleRenameSubmit = async () => {
+    if (!renameModal.item || !newFileName.trim()) return;
+
+    try {
+      setRenaming(true);
+      setError('');
+      const updatedFile = await DocumentService.renameOneDriveItem(renameModal.item.id, newFileName.trim());
+
+      // Update the file in the list
+      setFiles((prevFiles) =>
+        prevFiles.map((f) => (f.id === renameModal.item!.id ? { ...f, ...updatedFile } : f))
+      );
+
+      setRenameModal({ isOpen: false, item: null });
+      setNewFileName('');
+      Alert.alert('Success', 'File renamed successfully');
+    } catch (err: any) {
+      console.error('Error renaming file:', err);
+      const parsedError = parseError(err);
+      setError(parsedError.message);
+      Alert.alert('Error', parsedError.message);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   // Get files to display
   const getDisplayFiles = (): CloudFile[] => {
     return files;
@@ -1896,7 +1991,8 @@ function OneDriveBrowser({ colors }: { colors: any }) {
         <View style={styles.titleRow}>
           <Text style={[styles.documentsTitle, { color: colors.text }]}>OneDrive</Text>
           <View style={styles.titleActions}>
-            <TouchableOpacity
+            <TooltipButton
+              tooltip="Create Folder"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => {
                 setShowFolderForm(true);
@@ -1905,20 +2001,22 @@ function OneDriveBrowser({ colors }: { colors: any }) {
               disabled={uploading || loading}
             >
               <FontAwesome name="folder-open" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Upload File"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowUploadForm(true)}
               disabled={uploading || loading}
             >
               <FontAwesome name="upload" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Information"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowSummary(!showSummary)}
             >
               <FontAwesome name="info-circle" size={16} color="#fff" />
-            </TouchableOpacity>
+            </TooltipButton>
           </View>
         </View>
         {/* Always show breadcrumb */}
@@ -2006,6 +2104,7 @@ function OneDriveBrowser({ colors }: { colors: any }) {
                 outline: 'none',
                 cursor: 'pointer',
               }}
+              title="Sort By"
             >
               <option value="name">Name</option>
               <option value="date">Date</option>
@@ -2013,7 +2112,8 @@ function OneDriveBrowser({ colors }: { colors: any }) {
             </select>
           ) : Platform.OS === 'android' ? (
             <>
-              <TouchableOpacity
+              <TooltipButton
+                tooltip="Sort By"
                 style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
                 onPress={() => setShowSortModal(true)}
                 activeOpacity={0.7}
@@ -2022,7 +2122,7 @@ function OneDriveBrowser({ colors }: { colors: any }) {
                   {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
                 </Text>
                 <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
-              </TouchableOpacity>
+              </TooltipButton>
               <Modal
                 visible={showSortModal}
                 transparent
@@ -2116,11 +2216,47 @@ function OneDriveBrowser({ colors }: { colors: any }) {
                 onDelete={() => {
                   setDeleteConfirm({ isOpen: true, item: file });
                 }}
+                onRename={handleRename}
               />
             ))}
           </View>
         )}
       </ScrollView>
+
+      {/* Rename Modal */}
+      <Modal visible={renameModal.isOpen} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Rename {renameModal.item?.folder ? 'Folder' : 'File'}</Text>
+            <TextInput
+              style={[styles.folderInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+              placeholder="New name"
+              placeholderTextColor={colors.textSecondary}
+              value={newFileName}
+              onChangeText={setNewFileName}
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                onPress={handleRenameSubmit}
+                disabled={renaming || !newFileName.trim()}
+              >
+                <Text style={styles.modalButtonText}>{renaming ? 'Renaming...' : 'Rename'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { borderColor: colors.border }]}
+                onPress={() => {
+                  setRenameModal({ isOpen: false, item: null });
+                  setNewFileName('');
+                }}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Upload Modal */}
       <Modal visible={showUploadForm} transparent animationType="slide">
@@ -2274,6 +2410,12 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showSummary, setShowSummary] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [renameModal, setRenameModal] = useState<{ isOpen: boolean; item: CloudFile | null }>({
+    isOpen: false,
+    item: null,
+  });
+  const [newFileName, setNewFileName] = useState('');
+  const [renaming, setRenaming] = useState(false);
 
   const parseError = (err: any): { message: string; requiresReconnect: boolean; requiresLogout: boolean } => {
     const apiError = err as APIError;
@@ -2649,6 +2791,37 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
     }
   };
 
+  const handleRename = (file: CloudFile) => {
+    setNewFileName(file.name || '');
+    setRenameModal({ isOpen: true, item: file });
+  };
+
+  const handleRenameSubmit = async () => {
+    if (!renameModal.item || !newFileName.trim()) return;
+
+    try {
+      setRenaming(true);
+      setError('');
+      const updatedFile = await DocumentService.renameGoogleDriveItem(renameModal.item.id, newFileName.trim());
+
+      // Update the file in the list
+      setFiles((prevFiles) =>
+        prevFiles.map((f) => (f.id === renameModal.item!.id ? { ...f, ...updatedFile } : f))
+      );
+
+      setRenameModal({ isOpen: false, item: null });
+      setNewFileName('');
+      Alert.alert('Success', 'File renamed successfully');
+    } catch (err: any) {
+      console.error('Error renaming file:', err);
+      const parsedError = parseError(err);
+      setError(parsedError.message);
+      Alert.alert('Error', parsedError.message);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   // Get files to display
   const getDisplayFiles = (): CloudFile[] => {
     return files;
@@ -2684,7 +2857,8 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
         <View style={styles.titleRow}>
           <Text style={[styles.documentsTitle, { color: colors.text }]}>Google Drive</Text>
           <View style={styles.titleActions}>
-            <TouchableOpacity
+            <TooltipButton
+              tooltip="Create Folder"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => {
                 setShowFolderForm(true);
@@ -2693,20 +2867,22 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
               disabled={uploading || loading}
             >
               <FontAwesome name="folder-open" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Upload File"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowUploadForm(true)}
               disabled={uploading || loading}
             >
               <FontAwesome name="upload" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Information"
               style={[styles.iconButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowSummary(!showSummary)}
             >
               <FontAwesome name="info-circle" size={16} color="#fff" />
-            </TouchableOpacity>
+            </TooltipButton>
           </View>
         </View>
         {/* Always show breadcrumb */}
@@ -2794,6 +2970,7 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
                 outline: 'none',
                 cursor: 'pointer',
               }}
+              title="Sort By"
             >
               <option value="name">Name</option>
               <option value="date">Date</option>
@@ -2801,7 +2978,8 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
             </select>
           ) : Platform.OS === 'android' ? (
             <>
-              <TouchableOpacity
+              <TooltipButton
+                tooltip="Sort By"
                 style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
                 onPress={() => setShowSortModal(true)}
                 activeOpacity={0.7}
@@ -2810,7 +2988,7 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
                   {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
                 </Text>
                 <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
-              </TouchableOpacity>
+              </TooltipButton>
               <Modal
                 visible={showSortModal}
                 transparent
@@ -2904,11 +3082,47 @@ function GoogleDriveBrowser({ colors }: { colors: any }) {
                 onDelete={() => {
                   setDeleteConfirm({ isOpen: true, item: file });
                 }}
+                onRename={handleRename}
               />
             ))}
           </View>
         )}
       </ScrollView>
+
+      {/* Rename Modal */}
+      <Modal visible={renameModal.isOpen} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Rename {renameModal.item?.folder ? 'Folder' : 'File'}</Text>
+            <TextInput
+              style={[styles.folderInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+              placeholder="New name"
+              placeholderTextColor={colors.textSecondary}
+              value={newFileName}
+              onChangeText={setNewFileName}
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                onPress={handleRenameSubmit}
+                disabled={renaming || !newFileName.trim()}
+              >
+                <Text style={styles.modalButtonText}>{renaming ? 'Renaming...' : 'Rename'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { borderColor: colors.border }]}
+                onPress={() => {
+                  setRenameModal({ isOpen: false, item: null });
+                  setNewFileName('');
+                }}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Upload Modal */}
       <Modal visible={showUploadForm} transparent animationType="slide">
@@ -3396,24 +3610,27 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
         <View style={styles.titleRow}>
           <Text style={[styles.documentsTitle, { color: colors.text }]}>Google Photos</Text>
           <View style={styles.titleActions}>
-            <TouchableOpacity
+            <TooltipButton
+              tooltip="Thumbnail View"
               style={[styles.iconButton, { backgroundColor: viewMode === 'thumbnails' ? colors.primary : colors.background, borderWidth: 1, borderColor: colors.border }]}
               onPress={() => setViewMode('thumbnails')}
             >
               <FontAwesome name="th" size={16} color={viewMode === 'thumbnails' ? "#fff" : colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Details View"
               style={[styles.iconButton, { backgroundColor: viewMode === 'details' ? colors.primary : colors.background, borderWidth: 1, borderColor: colors.border, marginLeft: 8 }]}
               onPress={() => setViewMode('details')}
             >
               <FontAwesome name="list" size={16} color={viewMode === 'details' ? "#fff" : colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Information"
               style={[styles.iconButton, { backgroundColor: colors.primary, marginLeft: 8 }]}
               onPress={() => setShowSummary(!showSummary)}
             >
               <FontAwesome name="info-circle" size={16} color="#fff" />
-            </TouchableOpacity>
+            </TooltipButton>
           </View>
         </View>
         {/* Always show breadcrumb */}
@@ -3474,7 +3691,8 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
             </select>
           ) : Platform.OS === 'android' ? (
             <>
-              <TouchableOpacity
+              <TooltipButton
+                tooltip="Sort By"
                 style={[styles.sortDropdownWrapper, { backgroundColor: colors.background, borderColor: colors.border }]}
                 onPress={() => setShowSortModal(true)}
                 activeOpacity={0.7}
@@ -3483,7 +3701,7 @@ function GooglePhotosBrowser({ colors }: { colors: any }) {
                   {sortBy === 'date' ? 'Date' : 'Name'}
                 </Text>
                 <FontAwesome name="chevron-down" size={12} color={colors.textSecondary} />
-              </TouchableOpacity>
+              </TooltipButton>
               <Modal
                 visible={showSortModal}
                 transparent
@@ -3899,6 +4117,7 @@ function FileItem({
   onDownload,
   onDelete,
   onView,
+  onRename,
 }: {
   file: CloudFile;
   colors: any;
@@ -3906,6 +4125,7 @@ function FileItem({
   onDownload: (file: CloudFile) => void;
   onDelete: () => void;
   onView?: (file: CloudFile) => void;
+  onRename?: (file: CloudFile) => void;
 }) {
   const mimeType = file.mimeType || file.file?.mimeType;
   const isFolder = file.folder || mimeType === 'application/vnd.google-apps.folder';
@@ -3987,6 +4207,15 @@ function FileItem({
         </View>
       </View>
       <View style={styles.fileActions}>
+        {onRename && (
+          <TouchableOpacity
+            style={styles.fileActionButton}
+            onPress={() => onRename(file)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <FontAwesome name="edit" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        )}
         {!isFolder && (
           <TouchableOpacity
             style={styles.fileActionButton}

@@ -2696,6 +2696,84 @@ def OneDriveDownloadFileView(request, item_id):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def OneDriveRenameItemView(request, item_id):
+    """Rename file or folder in OneDrive."""
+    from documents.models import OneDriveSync
+    from documents.onedrive_sync import OneDriveSync as OneDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = OneDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'OneDrive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    new_name = request.data.get('name')
+    if not new_name:
+        return Response({'error': 'Name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = OneDriveSyncService(access_token, refresh_token)
+        result = sync.update_file_name(item_id, new_name)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        # Normalize the response to match frontend expectations
+        normalized_item = {
+            'id': result.get('id'),
+            'name': result.get('name'),
+            'size': result.get('size'),
+            'folder': 'folder' in result,
+            'file': result.get('file'),
+            'lastModifiedDateTime': result.get('lastModifiedDateTime'),
+            'createdDateTime': result.get('createdDateTime'),
+            'webViewLink': result.get('webUrl'),
+        }
+
+        return Response(normalized_item, status=status.HTTP_200_OK)
+    except ValueError as e:
+        error_msg = str(e).lower()
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your OneDrive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt OneDrive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive rename error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"OneDrive rename error: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # Google Drive OAuth
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -3423,6 +3501,85 @@ def GoogleDriveDownloadFileView(request, item_id):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Google Drive download error: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def GoogleDriveRenameItemView(request, item_id):
+    """Rename file or folder in Google Drive."""
+    from documents.models import GoogleDriveSync
+    from documents.googledrive_sync import GoogleDriveSync as GoogleDriveSyncService
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = GoogleDriveSync.objects.filter(member=member, is_active=True).first()
+    if not sync_record:
+        return Response({'error': 'Google Drive not connected'}, status=status.HTTP_400_BAD_REQUEST)
+
+    new_name = request.data.get('name')
+    if not new_name:
+        return Response({'error': 'Name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Decrypt tokens using password-based encryption (user_key from cache)
+        from encryption.utils import get_user_key_from_request
+        user_key = get_user_key_from_request(request)
+        access_token, refresh_token = sync_record.decrypt_tokens(user_key=user_key)
+
+        sync = GoogleDriveSyncService(access_token, refresh_token)
+        result = sync.update_file_name(item_id, new_name)
+
+        # Refresh token if it was updated
+        if sync.access_token != access_token:
+            sync_record.update_tokens(
+                sync.access_token,
+                sync.refresh_token if sync.refresh_token else refresh_token,
+                user_key=user_key
+            )
+
+        # Normalize the response to match frontend expectations
+        normalized_item = {
+            'id': result.get('id'),
+            'name': result.get('name'),
+            'mimeType': result.get('mimeType'),
+            'size': result.get('size'),
+            'modifiedTime': result.get('modifiedTime'),
+            'createdTime': result.get('createdTime'),
+            'parents': result.get('parents', []),
+            'webViewLink': result.get('webViewLink'),
+            'folder': result.get('folder', False),
+        }
+
+        return Response(normalized_item, status=status.HTTP_200_OK)
+    except ValueError as e:
+        error_msg = str(e).lower()
+        if 'not in session' in error_msg or 'password required' in error_msg:
+            return Response({
+                'error': 'Session expired. Please refresh the page or log in again.',
+                'detail': 'Your session key has expired. Your Google Drive connection is still valid.',
+                'requires_refresh': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        elif 'decryption failed' in error_msg or 'failed to decrypt' in error_msg:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive decryption error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Unable to decrypt Google Drive tokens. Please disconnect and reconnect.',
+                'detail': str(e),
+                'requires_reconnect': True
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Drive rename error: {str(e)}", exc_info=True)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Google Drive rename error: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

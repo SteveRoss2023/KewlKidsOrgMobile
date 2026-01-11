@@ -375,6 +375,37 @@ class OneDriveSync:
 
         return result
 
+    def update_file_name(self, item_id: str, new_name: str) -> Dict:
+        """
+        Rename a file or folder in OneDrive.
+
+        Args:
+            item_id: ID of the file/folder to rename
+            new_name: New name for the file/folder
+
+        Returns:
+            Updated file/folder metadata.
+        """
+        headers = self._get_headers()
+        data = {
+            'name': new_name
+        }
+        response = requests.patch(
+            f'{self.base_url}/me/drive/items/{item_id}',
+            headers=headers,
+            json=data
+        )
+        if response.status_code == 401:
+            self.refresh_access_token()
+            headers = self._get_headers()
+            response = requests.patch(
+                f'{self.base_url}/me/drive/items/{item_id}',
+                headers=headers,
+                json=data
+            )
+        response.raise_for_status()
+        return response.json()
+
     def delete_item(self, item_id: str) -> None:
         """Delete file or folder from OneDrive."""
         headers = self._get_headers()

@@ -269,6 +269,36 @@ class DocumentService {
   }
 
   /**
+   * Rename item in OneDrive
+   */
+  async renameOneDriveItem(itemId: string, newName: string): Promise<CloudFile> {
+    try {
+      const response = await apiClient.patch<CloudFile>(`/onedrive/files/${itemId}/rename/`, {
+        name: newName,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error renaming OneDrive item:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Rename item in Google Drive
+   */
+  async renameGoogleDriveItem(itemId: string, newName: string): Promise<CloudFile> {
+    try {
+      const response = await apiClient.patch<CloudFile>(`/googledrive/files/${itemId}/rename/`, {
+        name: newName,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error renaming Google Drive item:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Format file size for display
    */
   formatFileSize(bytes?: number): string {

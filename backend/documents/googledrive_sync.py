@@ -486,6 +486,52 @@ class GoogleDriveSync:
             'folder': True,
         }
 
+    def update_file_name(self, item_id: str, new_name: str) -> Dict:
+        """
+        Rename a file or folder in Google Drive.
+
+        Args:
+            item_id: ID of the file/folder to rename
+            new_name: New name for the file/folder
+
+        Returns:
+            Updated file/folder metadata.
+        """
+        headers = self._get_headers()
+        data = {
+            'name': new_name
+        }
+        response = requests.patch(
+            f'{self.base_url}/files/{item_id}',
+            headers=headers,
+            json=data,
+            params={'fields': 'id,name,mimeType,size,modifiedTime,createdTime,parents,webViewLink'}
+        )
+        if response.status_code == 401:
+            self.refresh_access_token()
+            headers = self._get_headers()
+            response = requests.patch(
+                f'{self.base_url}/files/{item_id}',
+                headers=headers,
+                json=data,
+                params={'fields': 'id,name,mimeType,size,modifiedTime,createdTime,parents,webViewLink'}
+            )
+        response.raise_for_status()
+
+        file_data = response.json()
+        # Transform to match OneDrive-like structure
+        return {
+            'id': file_data.get('id'),
+            'name': file_data.get('name'),
+            'mimeType': file_data.get('mimeType'),
+            'size': file_data.get('size'),
+            'modifiedTime': file_data.get('modifiedTime'),
+            'createdTime': file_data.get('createdTime'),
+            'parents': file_data.get('parents', []),
+            'webViewLink': file_data.get('webViewLink'),
+            'folder': file_data.get('mimeType') == 'application/vnd.google-apps.folder',
+        }
+
     def delete_item(self, item_id: str) -> None:
         """Delete file or folder from Google Drive."""
         headers = self._get_headers()

@@ -41,6 +41,7 @@ urlpatterns = [
     path('onedrive/files/search/', views.OneDriveSearchFilesView, name='onedrive-search-files'),
     path('onedrive/files/upload/', views.OneDriveUploadFileView, name='onedrive-upload-file'),
     path('onedrive/files/<str:item_id>/delete/', views.OneDriveDeleteItemView, name='onedrive-delete-item'),
+    path('onedrive/files/<str:item_id>/rename/', views.OneDriveRenameItemView, name='onedrive-rename-item'),
     path('onedrive/files/<str:item_id>/download/', views.OneDriveDownloadFileView, name='onedrive-download-file'),
     path('onedrive/folders/create/', views.OneDriveCreateFolderView, name='onedrive-create-folder'),
 
@@ -53,6 +54,7 @@ urlpatterns = [
     path('googledrive/files/search/', views.GoogleDriveSearchFilesView, name='googledrive-search-files'),
     path('googledrive/files/upload/', views.GoogleDriveUploadFileView, name='googledrive-upload-file'),
     path('googledrive/files/<str:item_id>/delete/', views.GoogleDriveDeleteItemView, name='googledrive-delete-item'),
+    path('googledrive/files/<str:item_id>/rename/', views.GoogleDriveRenameItemView, name='googledrive-rename-item'),
     path('googledrive/files/<str:item_id>/download/', views.GoogleDriveDownloadFileView, name='googledrive-download-file'),
     path('googledrive/folders/create/', views.GoogleDriveCreateFolderView, name='googledrive-create-folder'),
 
