@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'documents',
     'events',
     'chat',
+    'expenses',
 
     'django.contrib.staticfiles',
 
@@ -421,6 +422,11 @@ LOGGING = {
         'chat': {
             'handlers': ['console'],
             'level': 'WARNING',
+            'propagate': False,
+        },
+        'expenses': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for expenses app
             'propagate': False,
         },
     },

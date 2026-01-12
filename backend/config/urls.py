@@ -36,6 +36,7 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('api/', include('families.urls')),
     path('api/', include('lists.urls')),
+    path('api/', include('expenses.urls')),
     # Handle favicon.ico requests to prevent 500 errors
     path('favicon.ico', favicon_view, name='favicon'),
 ]

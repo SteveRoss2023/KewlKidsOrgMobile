@@ -241,6 +241,12 @@ export default function TabsLayout() {
           href: null, // Hide from tab bar
         }}
       />
+      <Tabs.Screen
+        name="expenses"
+        options={{
+          href: null, // Hide from tab bar - accessible via Home card
+        }}
+      />
     </Tabs>
   );
 }
