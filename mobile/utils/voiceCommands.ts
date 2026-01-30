@@ -22,6 +22,23 @@ export function capitalizeWords(text: string): string {
 }
 
 /**
+ * Returns true if the text is a cancel/abort command (e.g. "cancel", "never mind", "stop").
+ */
+export function isCancelCommand(text: string): boolean {
+  const normalized = normalizeText(text);
+  const cancelPhrases = [
+    'cancel',
+    'never mind',
+    'nevermind',
+    'stop',
+    'abort',
+    'forget it',
+    'forgetit',
+  ];
+  return cancelPhrases.some((phrase) => normalized === phrase || normalized.startsWith(phrase + ' '));
+}
+
+/**
  * Parse "create list [name]" command
  * Always prompts for list type after name is provided
  */

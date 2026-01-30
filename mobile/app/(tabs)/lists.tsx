@@ -23,7 +23,7 @@ import AlertModal from '../../components/AlertModal';
 import { APIError } from '../../services/api';
 import { useVoiceRecognition } from '../../hooks/useVoiceRecognition';
 import { speak } from '../../utils/voiceFeedback';
-import { parseCreateList } from '../../utils/voiceCommands';
+import { parseCreateList, isCancelCommand } from '../../utils/voiceCommands';
 import VoiceButton from '../../components/VoiceButton';
 
 type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'ideas' | 'other';
@@ -82,6 +82,16 @@ export default function ListsScreen() {
       const text = transcript.toLowerCase().trim();
 
       try {
+        // Cancel list creation flow if user says cancel/stop/never mind
+        if (isCancelCommand(text)) {
+          stop();
+          reset();
+          setAwaitingListType(false);
+          setPendingListName(null);
+          speak('List creation cancelled.');
+          return;
+        }
+
         // Handle list type selection if we're waiting for it (check this FIRST)
         if (awaitingListType) {
           // Ignore if this looks like the prompt message being repeated back
