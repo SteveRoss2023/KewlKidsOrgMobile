@@ -48,6 +48,54 @@ import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } fro
 import VoiceButton from '../../../components/VoiceButton';
 import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
 
+function TooltipButton({
+  children,
+  tooltip,
+  ...props
+}: {
+  children: React.ReactNode;
+  tooltip: string;
+  [key: string]: any;
+}) {
+  const buttonRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && tooltip) {
+      const setTitle = () => {
+        if (buttonRef?.current) {
+          const getDOMNode = (node: any): HTMLElement | null => {
+            if (!node) return null;
+            if (node.nodeType === 1) return node;
+            if (node._nativeNode) return node._nativeNode;
+            if (node._internalFiberInstanceHandleDEV) {
+              const fiber = node._internalFiberInstanceHandleDEV;
+              if (fiber && fiber.stateNode) {
+                const stateNode = fiber.stateNode;
+                if (stateNode.nodeType === 1) return stateNode;
+                if (stateNode._nativeNode) return stateNode._nativeNode;
+              }
+            }
+            return null;
+          };
+          const domNode = getDOMNode(buttonRef.current);
+          if (domNode) {
+            domNode.setAttribute('title', tooltip);
+          }
+        }
+      };
+      setTitle();
+      const timeout = setTimeout(setTitle, 100);
+      return () => clearTimeout(timeout);
+    }
+  }, [tooltip]);
+
+  return (
+    <TouchableOpacity ref={buttonRef} accessibilityLabel={tooltip} {...props}>
+      {children}
+    </TouchableOpacity>
+  );
+}
+
 export default function ListDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -113,6 +161,7 @@ export default function ListDetailScreen() {
   const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<ListItem[]>([]);
   const [pendingAction, setPendingAction] = useState<'delete' | 'update' | null>(null);
+  const [showVoiceHelpModal, setShowVoiceHelpModal] = useState(false);
 
   const isGroceryList = list?.list_type === 'grocery';
   const isShoppingList = list?.list_type === 'shopping';
@@ -391,9 +440,7 @@ export default function ListDetailScreen() {
       start();
       setTimeout(() => {
         stop();
-        speak(
-          'Please say add followed by your item to add an item, delete followed by the item name to delete, or update followed by the item name and new name to update',
-          () => {
+        speak('Say add item', () => {
             setTimeout(() => {
               start();
             }, 100);
@@ -1047,17 +1094,25 @@ export default function ListDetailScreen() {
                     {Platform.OS === 'web' ? 'Add Item' : '+Add'}
                   </Text>
                 </TouchableOpacity>
-                {isGroceryList && (
-                  <TouchableOpacity
-                    onPress={() => router.push('/(tabs)/lists/completed')}
-                    style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    accessibilityLabel="View completed items history"
-                    accessibilityHint="Opens the history of completed grocery items"
+                {isSupported && (
+                  <TooltipButton
+                    tooltip="Voice commands — view phrases you can say with the mic"
+                    onPress={() => setShowVoiceHelpModal(true)}
+                    style={[styles.voiceHelpButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    accessibilityHint="Shows list of voice commands you can say"
                   >
-                    <FontAwesome name="history" size={16} color={colors.primary} />
-                    <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
-                  </TouchableOpacity>
+                    <FontAwesome name="question-circle" size={20} color={colors.textSecondary} />
+                  </TooltipButton>
                 )}
+                <TouchableOpacity
+                  onPress={() => router.push('/(tabs)/lists/completed')}
+                  style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  accessibilityLabel="View completed items history"
+                  accessibilityHint="Opens the history of completed items"
+                >
+                  <FontAwesome name="history" size={16} color={colors.primary} />
+                  <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
+                </TouchableOpacity>
               </>
             ) : editingItem && !supportsDragAndDrop ? (
               <TouchableOpacity
@@ -1498,6 +1553,19 @@ export default function ListDetailScreen() {
         onClose={() => setMoveItemResultModal({ visible: false, message: '', type: 'success' })}
         confirmText="OK"
       />
+      <AlertModal
+        visible={showVoiceHelpModal}
+        title="Voice commands"
+        message="Use these phrases when the mic is listening:"
+        type="info"
+        onClose={() => setShowVoiceHelpModal(false)}
+        confirmText="OK"
+        details={[
+          { label: 'Add item', items: ['add [item name]'] },
+          { label: 'Delete item', items: ['delete [item name]'] },
+          { label: 'Update item', items: ['update [old name] to [new name]'] },
+        ]}
+      />
     </View>
   );
 }
@@ -1630,6 +1698,19 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     flex: Platform.OS === 'web' ? 1 : 0,
     ...(Platform.OS !== 'web' ? { minWidth: 0 } : {}),
+  },
+  voiceHelpButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+      },
+    }),
   },
   addButton: {
     flexDirection: 'row',
