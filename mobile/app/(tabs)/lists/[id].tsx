@@ -10,6 +10,7 @@ import {
   FlatList,
   Platform,
   RefreshControl,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -96,12 +97,23 @@ function TooltipButton({
   );
 }
 
+const NARROW_VIEWPORT_WIDTH = 480;
+const TITLE_FONT_SIZE_MIN = 10;
+const TITLE_FONT_SIZE_REGULAR_WEB = 22;
+const TITLE_FONT_SIZE_REGULAR_NATIVE = 16;
+
 export default function ListDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const listId = params.id ? parseInt(params.id as string, 10) : null;
+  const { width: windowWidth } = useWindowDimensions();
   const { colors, theme } = useTheme();
   const { selectedFamily } = useFamily();
+  const isNarrowViewport = Platform.OS === 'web' && windowWidth < NARROW_VIEWPORT_WIDTH;
+  const [titleContainerWidth, setTitleContainerWidth] = useState(0);
+  const [titleFontSize, setTitleFontSize] = useState(
+    Platform.OS === 'web' ? TITLE_FONT_SIZE_REGULAR_WEB : TITLE_FONT_SIZE_REGULAR_NATIVE
+  );
   const [list, setList] = useState<List | null>(null);
   const [listItems, setListItems] = useState<ListItem[]>([]);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
@@ -163,6 +175,9 @@ export default function ListDetailScreen() {
   const [pendingAction, setPendingAction] = useState<'delete' | 'update' | null>(null);
   const [showVoiceHelpModal, setShowVoiceHelpModal] = useState(false);
 
+  const needTitleShrink =
+    (Platform.OS === 'android' || isNarrowViewport) && !!list?.name;
+
   const isGroceryList = list?.list_type === 'grocery';
   const isShoppingList = list?.list_type === 'shopping';
   const isTodoList = list?.list_type === 'todo';
@@ -187,6 +202,13 @@ export default function ListDetailScreen() {
       fetchListItems();
     }
   }, [list]);
+
+  // Reset title font size when list changes (so we re-measure for new name)
+  useEffect(() => {
+    setTitleFontSize(
+      Platform.OS === 'web' ? TITLE_FONT_SIZE_REGULAR_WEB : TITLE_FONT_SIZE_REGULAR_NATIVE
+    );
+  }, [list?.id]);
 
   // Initialize collapsed categories only when list changes (new list loaded)
   // Preserve accordion state when items are added/removed
@@ -1055,12 +1077,60 @@ export default function ListDetailScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <GlobalNavBar />
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+            borderLeftWidth: 4,
+            borderLeftColor: list.color || colors.primary,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => router.push('/(tabs)/lists')} style={styles.backButton}>
           <FontAwesome name="arrow-left" size={18} color={colors.text} />
         </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={[styles.listTitle, { color: colors.text }]} numberOfLines={1}>
+        <View
+          style={styles.headerContent}
+          onLayout={
+            needTitleShrink
+              ? (e) => setTitleContainerWidth(e.nativeEvent.layout.width)
+              : undefined
+          }
+        >
+          {needTitleShrink && titleContainerWidth > 0 && (
+            <View style={styles.titleMeasureWrap} pointerEvents="none">
+              <Text
+                style={[
+                  styles.listTitle,
+                  {
+                    color: list.color || colors.primary,
+                    fontSize: titleFontSize,
+                    alignSelf: 'flex-start',
+                  },
+                ]}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > titleContainerWidth && titleFontSize > TITLE_FONT_SIZE_MIN) {
+                    setTitleFontSize((prev) => Math.max(TITLE_FONT_SIZE_MIN, prev - 2));
+                  }
+                }}
+              >
+                {list.name}
+              </Text>
+            </View>
+          )}
+          <Text
+            style={[
+              styles.listTitle,
+              {
+                color: list.color || colors.primary,
+                ...(needTitleShrink && { fontSize: titleFontSize }),
+              },
+            ]}
+            numberOfLines={1}
+          >
             {list.name}
           </Text>
           {list.description && (
@@ -1581,6 +1651,10 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     gap: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginHorizontal: 16,
+    marginTop: 8,
   },
   backButton: {
     padding: 8,
@@ -1588,9 +1662,17 @@ const styles = StyleSheet.create({
   headerContent: {
     flex: 1,
   },
+  titleMeasureWrap: {
+    position: 'absolute',
+    left: -9999,
+    width: 9999,
+  },
   listTitle: {
-    fontSize: 20,
+    fontSize: Platform.select({ ios: TITLE_FONT_SIZE_REGULAR_NATIVE, android: TITLE_FONT_SIZE_REGULAR_NATIVE, default: TITLE_FONT_SIZE_REGULAR_WEB }),
     fontWeight: 'bold',
+    letterSpacing: 0.3,
+    flex: 1,
+    minWidth: 0,
   },
   listDescription: {
     fontSize: 14,
