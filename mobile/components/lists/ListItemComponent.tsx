@@ -167,16 +167,41 @@ export default function ListItemComponent({
             <View style={styles.itemContent}>
               <View style={styles.itemHeader}>
                 <View style={styles.itemNameRow}>
-                  <Text
-                    style={[
-                      styles.itemName,
-                      { color: colors.text },
-                      item.completed && styles.itemNameCompleted,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 2 : 2}
-                  >
-                    {item.name}
-                  </Text>
+                  {onEdit ? (
+                    <TouchableOpacity
+                      style={styles.itemNameTouchable}
+                      onPress={onEdit}
+                      activeOpacity={0.7}
+                      accessibilityLabel={`Edit ${item.name}`}
+                      accessibilityHint="Opens the edit form for this item"
+                      {...(Platform.OS === 'web' && {
+                        'data-no-drag': 'true',
+                        onMouseDown: (e: any) => e.stopPropagation(),
+                      } as any)}
+                    >
+                      <Text
+                        style={[
+                          styles.itemName,
+                          { color: colors.text },
+                          item.completed && styles.itemNameCompleted,
+                        ]}
+                        numberOfLines={Platform.OS === 'web' ? 2 : 2}
+                      >
+                        {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.itemName,
+                        { color: colors.text },
+                        item.completed && styles.itemNameCompleted,
+                      ]}
+                      numberOfLines={Platform.OS === 'web' ? 2 : 2}
+                    >
+                      {item.name}
+                    </Text>
+                  )}
                   {/* Edit, Move, and Delete buttons on same line as name on mobile */}
                   {Platform.OS !== 'web' && (
                     <View
@@ -270,16 +295,41 @@ export default function ListItemComponent({
         <View style={styles.itemContent}>
           <View style={styles.itemHeader}>
             <View style={styles.itemNameRow}>
-              <Text
-                style={[
-                  styles.itemName,
-                  { color: colors.text },
-                  item.completed && styles.itemNameCompleted,
-                ]}
-                numberOfLines={Platform.OS === 'web' ? 2 : 2}
-              >
-                {item.name}
-              </Text>
+              {onEdit ? (
+                <TouchableOpacity
+                  style={styles.itemNameTouchable}
+                  onPress={onEdit}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`Edit ${item.name}`}
+                  accessibilityHint="Opens the edit form for this item"
+                  {...(Platform.OS === 'web' && {
+                    'data-no-drag': 'true',
+                    onMouseDown: (e: any) => e.stopPropagation(),
+                  } as any)}
+                >
+                  <Text
+                    style={[
+                      styles.itemName,
+                      { color: colors.text },
+                      item.completed && styles.itemNameCompleted,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 2 : 2}
+                  >
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text
+                  style={[
+                    styles.itemName,
+                    { color: colors.text },
+                    item.completed && styles.itemNameCompleted,
+                  ]}
+                  numberOfLines={Platform.OS === 'web' ? 2 : 2}
+                >
+                  {item.name}
+                </Text>
+              )}
               {/* Edit, Move, and Delete buttons on same line as name on mobile */}
               {Platform.OS !== 'web' && (
                 <View style={styles.itemActionsInline}>
@@ -514,6 +564,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: Platform.OS !== 'web' ? 4 : 0,
     gap: 8,
+  },
+  itemNameTouchable: {
+    flex: 1,
   },
   itemName: {
     fontSize: Platform.OS !== 'web' ? 16 : 16,

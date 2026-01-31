@@ -440,7 +440,7 @@ export default function ListDetailScreen() {
       start();
       setTimeout(() => {
         stop();
-        speak('Say add item', () => {
+        speak('What would you like to do', () => {
             setTimeout(() => {
               start();
             }, 100);
