@@ -1,4 +1,6 @@
+import { Platform } from 'react-native';
 import apiClient, { handleAPIError, APIError } from './api';
+import { tokenStorage } from '../utils/storage';
 
 /**
  * Recipe data
@@ -41,6 +43,15 @@ export interface MealPlan {
 }
 
 /**
+ * Picked image asset for recipe photo (from expo-image-picker or similar)
+ */
+export interface RecipeImageAsset {
+  uri: string;
+  type?: string;
+  fileName?: string;
+}
+
+/**
  * Create Recipe data
  */
 export interface CreateRecipeData {
@@ -54,6 +65,8 @@ export interface CreateRecipeData {
   cook_time_minutes?: number;
   image_url?: string;
   source_url?: string;
+  /** Picked image file (library/camera); when set, create uses FormData */
+  image?: RecipeImageAsset | null;
 }
 
 /**
@@ -69,6 +82,9 @@ export interface UpdateRecipeData {
   cook_time_minutes?: number;
   image_url?: string;
   source_url?: string;
+  /** New image file; when set, update uses FormData. Use clear_image: true to remove photo. */
+  image?: RecipeImageAsset | null;
+  clear_image?: boolean;
 }
 
 /**
@@ -121,6 +137,44 @@ export interface AddToListResponse {
 }
 
 /**
+ * Append recipe image to FormData (web: File from blob; native: { uri, type, name })
+ */
+async function appendRecipeImage(formData: FormData, fieldName: string, image: RecipeImageAsset): Promise<void> {
+  let uri = image.uri || (image as any).uri;
+  const photoType = image.type || 'image/jpeg';
+  const photoName = image.fileName || (image as any).fileName || 'recipe.jpg';
+
+  if (Platform.OS === 'web') {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const file = new File([blob], photoName, { type: photoType });
+      formData.append(fieldName, file);
+    } catch (e) {
+      if (uri.startsWith('data:')) {
+        const base64Data = uri.split(',')[1];
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: photoType });
+        const file = new File([blob], photoName, { type: photoType });
+        formData.append(fieldName, file);
+      } else {
+        throw e;
+      }
+    }
+  } else {
+    if (!uri.startsWith('file://') && !uri.startsWith('content://') && !uri.startsWith('ph://')) {
+      uri = uri.startsWith('/') ? `file://${uri}` : `file://${uri}`;
+    }
+    formData.append(fieldName, { uri, type: photoType, name: photoName } as any);
+  }
+}
+
+/**
  * Meals Service
  */
 class MealsService {
@@ -156,6 +210,31 @@ class MealsService {
    */
   async createRecipe(data: CreateRecipeData): Promise<Recipe> {
     try {
+      if (data.image) {
+        const formData = new FormData();
+        formData.append('family', String(data.family));
+        formData.append('title', data.title);
+        if (data.notes !== undefined) formData.append('notes', data.notes);
+        formData.append('ingredients', JSON.stringify(data.ingredients));
+        formData.append('instructions', JSON.stringify(data.instructions));
+        if (data.servings !== undefined) formData.append('servings', String(data.servings));
+        if (data.prep_time_minutes !== undefined) formData.append('prep_time_minutes', String(data.prep_time_minutes));
+        if (data.cook_time_minutes !== undefined) formData.append('cook_time_minutes', String(data.cook_time_minutes));
+        if (data.image_url) formData.append('image_url', data.image_url);
+        if (data.source_url) formData.append('source_url', data.source_url);
+        await appendRecipeImage(formData, 'image', data.image);
+
+        if (Platform.OS !== 'web') {
+          return await this.sendRecipeFormData('POST', '/recipes/', formData);
+        }
+        const response = await apiClient.post<Recipe>('/recipes/', formData, {
+          timeout: 120000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+        return response.data;
+      }
+
       const response = await apiClient.post<Recipe>('/recipes/', data);
       return response.data;
     } catch (error) {
@@ -164,10 +243,85 @@ class MealsService {
   }
 
   /**
+   * Send recipe FormData via XHR (native only, for FormData + ngrok compatibility)
+   */
+  private sendRecipeFormData(method: 'POST' | 'PATCH', urlPath: string, formData: FormData): Promise<Recipe> {
+    const url = `${apiClient.defaults.baseURL}${urlPath}`;
+    return new Promise<Recipe>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url, true);
+      xhr.timeout = 120000;
+
+      tokenStorage.getAccessToken().then((token) => {
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              reject(new APIError('Failed to parse response', xhr.status));
+            }
+          } else {
+            try {
+              const errData = JSON.parse(xhr.responseText);
+              const msg = (errData.detail || errData.message || errData.error) ?? `Request failed with status ${xhr.status}`;
+              reject(new APIError(typeof msg === 'string' ? msg : JSON.stringify(msg), xhr.status));
+            } catch {
+              reject(new APIError(`Request failed with status ${xhr.status}`, xhr.status));
+            }
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new APIError('Network error', 0));
+        };
+        xhr.ontimeout = () => {
+          reject(new APIError('Request timeout', 0));
+        };
+
+        xhr.send(formData as any);
+      }).catch((tokenError) => {
+        reject(new APIError('Failed to get authentication token', 0));
+      });
+    });
+  }
+
+  /**
    * Update a recipe
    */
   async updateRecipe(id: number, data: UpdateRecipeData): Promise<Recipe> {
     try {
+      if (data.image || data.clear_image) {
+        const formData = new FormData();
+        if (data.title !== undefined) formData.append('title', data.title);
+        if (data.notes !== undefined) formData.append('notes', data.notes);
+        if (data.ingredients !== undefined) formData.append('ingredients', JSON.stringify(data.ingredients));
+        if (data.instructions !== undefined) formData.append('instructions', JSON.stringify(data.instructions));
+        if (data.servings !== undefined) formData.append('servings', String(data.servings));
+        if (data.prep_time_minutes !== undefined) formData.append('prep_time_minutes', String(data.prep_time_minutes));
+        if (data.cook_time_minutes !== undefined) formData.append('cook_time_minutes', String(data.cook_time_minutes));
+        if (data.image_url !== undefined) formData.append('image_url', data.image_url);
+        if (data.source_url !== undefined) formData.append('source_url', data.source_url);
+        if (data.clear_image) {
+          formData.append('clear_image', 'true');
+        } else if (data.image) {
+          await appendRecipeImage(formData, 'image', data.image);
+        }
+
+        if (Platform.OS !== 'web') {
+          return await this.sendRecipeFormData('PATCH', `/recipes/${id}/`, formData);
+        }
+        const response = await apiClient.patch<Recipe>(`/recipes/${id}/`, formData, {
+          timeout: 120000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+        return response.data;
+      }
+
       const response = await apiClient.patch<Recipe>(`/recipes/${id}/`, data);
       return response.data;
     } catch (error) {

@@ -20,6 +20,7 @@ interface RecipeDetailProps {
   recipe: Recipe;
   shoppingLists: List[];
   onClose: () => void;
+  onEdit: (recipe: Recipe) => void;
   onAddToList: (recipeId: number, listId: number, recipeTitle?: string) => void;
   onDelete: (recipeId: number, recipeTitle: string) => void;
 }
@@ -28,6 +29,7 @@ export default function RecipeDetail({
   recipe,
   shoppingLists,
   onClose,
+  onEdit,
   onAddToList,
   onDelete,
 }: RecipeDetailProps) {
@@ -84,12 +86,17 @@ export default function RecipeDetail({
             <FontAwesome name="times" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Recipe Details</Text>
-          <TouchableOpacity
-            onPress={() => onDelete(recipe.id, recipe.title)}
-            style={styles.deleteButton}
-          >
-            <FontAwesome name="trash" size={20} color={colors.error} />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => onEdit(recipe)} style={styles.editButton}>
+              <FontAwesome name="pencil" size={20} color={colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => onDelete(recipe.id, recipe.title)}
+              style={styles.deleteButton}
+            >
+              <FontAwesome name="trash" size={20} color={colors.error} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
@@ -257,6 +264,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
     textAlign: 'center',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  editButton: {
+    padding: 8,
   },
   deleteButton: {
     padding: 8,

@@ -37,6 +37,7 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
   const [showRecipeForm, setShowRecipeForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [deleteRecipeConfirm, setDeleteRecipeConfirm] = useState<{
     isOpen: boolean;
     recipeId: number | null;
@@ -132,6 +133,12 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
     }
   };
 
+  const handleEditRecipe = (recipe: Recipe) => {
+    setEditingRecipe(recipe);
+    setSelectedRecipe(null);
+    setShowRecipeForm(true);
+  };
+
   const handleAddToList = async (recipeId: number, listId: number, recipeTitle?: string) => {
     try {
       const response = await MealsService.addRecipeToList(recipeId, listId);
@@ -197,7 +204,10 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: colors.primary }]}
-          onPress={() => setShowRecipeForm(true)}
+          onPress={() => {
+            setEditingRecipe(null);
+            setShowRecipeForm(true);
+          }}
         >
           <FontAwesome name="plus" size={16} color="#fff" />
           <Text style={styles.actionButtonText}>Create</Text>
@@ -250,7 +260,11 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
       {showRecipeForm && (
         <RecipeForm
           selectedFamily={selectedFamily}
-          onClose={() => setShowRecipeForm(false)}
+          recipe={editingRecipe ?? undefined}
+          onClose={() => {
+            setShowRecipeForm(false);
+            setEditingRecipe(null);
+          }}
           onSuccess={onRefresh}
         />
       )}
@@ -260,6 +274,7 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
           recipe={selectedRecipe}
           shoppingLists={shoppingLists}
           onClose={() => setSelectedRecipe(null)}
+          onEdit={handleEditRecipe}
           onAddToList={handleAddToList}
           onDelete={handleDeleteRecipeClick}
         />

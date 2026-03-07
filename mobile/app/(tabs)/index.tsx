@@ -57,11 +57,11 @@ export default function HomeScreen() {
 
   const cards: FeatureCard[] = [
     {
-      id: 'activity',
-      title: 'Activity',
-      description: 'View today\'s activities and events',
-      icon: '⏰',
-      color: '#3b82f6',
+      id: 'lists',
+      title: 'Lists',
+      description: 'Shopping lists and to-do items',
+      icon: '📝',
+      color: '#8b5cf6',
     },
     {
       id: 'calendar',
@@ -71,11 +71,11 @@ export default function HomeScreen() {
       color: '#10b981',
     },
     {
-      id: 'lists',
-      title: 'Lists',
-      description: 'Shopping lists and to-do items',
-      icon: '📝',
-      color: '#8b5cf6',
+      id: 'activity',
+      title: 'Activity',
+      description: 'View today\'s activities and events',
+      icon: '⏰',
+      color: '#3b82f6',
     },
     {
       id: 'chat',

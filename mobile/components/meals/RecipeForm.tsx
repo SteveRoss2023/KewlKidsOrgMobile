@@ -8,20 +8,40 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
+  Platform,
+  Alert,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../../contexts/ThemeContext';
-import MealsService, { CreateRecipeData } from '../../services/mealsService';
+import MealsService, {
+  CreateRecipeData,
+  UpdateRecipeData,
+  Recipe,
+  RecipeImageAsset,
+} from '../../services/mealsService';
+
+let ImagePicker: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    ImagePicker = require('expo-image-picker');
+  } catch {
+    // expo-image-picker not available on this platform
+  }
+}
+
 
 interface RecipeFormProps {
   selectedFamily: { id: number; name: string };
   onClose: () => void;
   onSuccess: () => void;
-  recipe?: any; // For editing, not implemented yet
+  recipe?: Recipe | null;
 }
 
 export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe }: RecipeFormProps) {
   const { colors } = useTheme();
+  const isEdit = !!recipe;
   const [title, setTitle] = useState(recipe?.title || '');
   const [servings, setServings] = useState(recipe?.servings?.toString() || '');
   const [prepTime, setPrepTime] = useState(recipe?.prep_time_minutes?.toString() || '');
@@ -29,9 +49,11 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
   const [imageUrl, setImageUrl] = useState(recipe?.image_url || '');
   const [sourceUrl, setSourceUrl] = useState(recipe?.source_url || '');
   const [notes, setNotes] = useState(recipe?.notes || '');
-  const [ingredients, setIngredients] = useState<string[]>(recipe?.ingredients || ['']);
-  const [instructions, setInstructions] = useState<string[]>(recipe?.instructions || ['']);
+  const [ingredients, setIngredients] = useState<string[]>(recipe?.ingredients?.length ? [...recipe.ingredients] : ['']);
+  const [instructions, setInstructions] = useState<string[]>(recipe?.instructions?.length ? [...recipe.instructions] : ['']);
   const [creating, setCreating] = useState(false);
+  const [pickedImage, setPickedImage] = useState<RecipeImageAsset | null>(null);
+  const [clearImageRequested, setClearImageRequested] = useState(false);
 
   const addIngredient = () => {
     setIngredients([...ingredients, '']);
@@ -61,6 +83,98 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
     setInstructions(newInstructions);
   };
 
+  const handleChooseFromLibrary = async () => {
+    if (!ImagePicker) {
+      Alert.alert('Not available', 'Image picker is not available on this platform.');
+      return;
+    }
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Permission to access photos is required to add a recipe image.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setPickedImage({
+          uri: asset.uri,
+          type: asset.mimeType || 'image/jpeg',
+          fileName: asset.fileName || 'recipe.jpg',
+        });
+        setClearImageRequested(false);
+      }
+    } catch (err: any) {
+      console.error('Error picking image:', err);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    if (!ImagePicker) {
+      Alert.alert('Not available', 'Camera is not available on this platform.');
+      return;
+    }
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Permission to access camera is required to take a photo.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setPickedImage({
+          uri: asset.uri,
+          type: asset.mimeType || 'image/jpeg',
+          fileName: asset.fileName || 'recipe.jpg',
+        });
+        setClearImageRequested(false);
+      }
+    } catch (err: any) {
+      console.error('Error taking photo:', err);
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPickedImage(null);
+    if (isEdit) setClearImageRequested(true);
+  };
+
+  const handleSelectImageFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setPickedImage({
+          uri: asset.uri,
+          type: asset.mimeType || 'image/jpeg',
+          fileName: asset.name || 'recipe.jpg',
+        });
+        setClearImageRequested(false);
+      }
+    } catch (err: any) {
+      console.error('Error picking image:', err);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  const displayImageUri = pickedImage?.uri ?? (clearImageRequested ? null : (recipe?.image_url && recipe.image_url.trim()) || null);
+  const showFilePickerFallback = !ImagePicker;
+
   const handleSubmit = async () => {
     if (!title.trim()) {
       return;
@@ -75,25 +189,48 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
 
     setCreating(true);
     try {
-      const data: CreateRecipeData = {
-        family: selectedFamily.id,
-        title: title.trim(),
-        ingredients: filteredIngredients,
-        instructions: filteredInstructions,
-        servings: servings ? parseInt(servings, 10) : undefined,
-        prep_time_minutes: prepTime ? parseInt(prepTime, 10) : undefined,
-        cook_time_minutes: cookTime ? parseInt(cookTime, 10) : undefined,
-        image_url: imageUrl.trim() || undefined,
-        source_url: sourceUrl.trim() || undefined,
-        notes: notes.trim() || undefined,
-      };
-
-      await MealsService.createRecipe(data);
+      if (isEdit && recipe) {
+        const data: UpdateRecipeData = {
+          title: title.trim(),
+          ingredients: filteredIngredients,
+          instructions: filteredInstructions,
+          servings: servings ? parseInt(servings, 10) : undefined,
+          prep_time_minutes: prepTime ? parseInt(prepTime, 10) : undefined,
+          cook_time_minutes: cookTime ? parseInt(cookTime, 10) : undefined,
+          image_url: imageUrl.trim() || undefined,
+          source_url: sourceUrl.trim() || undefined,
+          notes: notes.trim() || undefined,
+        };
+        if (clearImageRequested) {
+          data.clear_image = true;
+        } else if (pickedImage) {
+          data.image = pickedImage;
+        } else if (imageUrl.trim()) {
+          // User set an image URL; clear stored file so this URL is used as the recipe image
+          data.clear_image = true;
+        }
+        await MealsService.updateRecipe(recipe.id, data);
+      } else {
+        const data: CreateRecipeData = {
+          family: selectedFamily.id,
+          title: title.trim(),
+          ingredients: filteredIngredients,
+          instructions: filteredInstructions,
+          servings: servings ? parseInt(servings, 10) : undefined,
+          prep_time_minutes: prepTime ? parseInt(prepTime, 10) : undefined,
+          cook_time_minutes: cookTime ? parseInt(cookTime, 10) : undefined,
+          image_url: !pickedImage && imageUrl.trim() ? imageUrl.trim() : undefined,
+          source_url: sourceUrl.trim() || undefined,
+          notes: notes.trim() || undefined,
+          image: pickedImage || undefined,
+        };
+        await MealsService.createRecipe(data);
+      }
       await onSuccess();
       onClose();
     } catch (err: any) {
-      console.error('Error creating recipe:', err);
-      // Error handling would go here
+      console.error('Error saving recipe:', err);
+      Alert.alert('Error', err?.message || 'Failed to save recipe. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -106,7 +243,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <FontAwesome name="times" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Create Recipe</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{isEdit ? 'Edit Recipe' : 'Create Recipe'}</Text>
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={creating || !title.trim()}
@@ -167,6 +304,82 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
               placeholderTextColor={colors.textSecondary}
               keyboardType="numeric"
             />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.text }]}>Recipe photo</Text>
+            <Text style={[styles.hint, { color: colors.textSecondary }]}>
+              Choose from library, take a photo, or paste an Image URL below.
+            </Text>
+            {displayImageUri ? (
+              <View style={styles.imageSection}>
+                <Image source={{ uri: displayImageUri }} style={styles.thumbnail} resizeMode="cover" />
+                <View style={styles.imageActions}>
+                  {ImagePicker ? (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        onPress={handleChooseFromLibrary}
+                      >
+                        <FontAwesome name="photo" size={16} color={colors.primary} />
+                        <Text style={[styles.imageButtonText, { color: colors.primary }]}>Library</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        onPress={handleTakePhoto}
+                      >
+                        <FontAwesome name="camera" size={16} color={colors.primary} />
+                        <Text style={[styles.imageButtonText, { color: colors.primary }]}>Camera</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : showFilePickerFallback ? (
+                    <TouchableOpacity
+                      style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={handleSelectImageFile}
+                    >
+                      <FontAwesome name="photo" size={16} color={colors.primary} />
+                      <Text style={[styles.imageButtonText, { color: colors.primary }]}>Change image</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity
+                    style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.error }]}
+                    onPress={handleRemovePhoto}
+                  >
+                    <FontAwesome name="trash" size={16} color={colors.error} />
+                    <Text style={[styles.imageButtonText, { color: colors.error }]}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.imageActions}>
+                {ImagePicker ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={handleChooseFromLibrary}
+                    >
+                      <FontAwesome name="photo" size={16} color={colors.primary} />
+                      <Text style={[styles.imageButtonText, { color: colors.primary }]}>Choose from library</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={handleTakePhoto}
+                    >
+                      <FontAwesome name="camera" size={16} color={colors.primary} />
+                      <Text style={[styles.imageButtonText, { color: colors.primary }]}>Take photo</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : showFilePickerFallback ? (
+                  <TouchableOpacity
+                    style={[styles.imageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={handleSelectImageFile}
+                  >
+                    <FontAwesome name="photo" size={16} color={colors.primary} />
+                    <Text style={[styles.imageButtonText, { color: colors.primary }]}>Select image</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
           </View>
 
           <View style={styles.field}>
@@ -312,6 +525,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 8,
   },
+  hint: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
   input: {
     borderWidth: 1,
     borderRadius: 8,
@@ -350,6 +567,33 @@ const styles = StyleSheet.create({
   removeButton: {
     padding: 8,
     marginTop: 2,
+  },
+  imageSection: {
+    marginTop: 4,
+  },
+  thumbnail: {
+    width: '100%',
+    height: 180,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  imageActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  imageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  imageButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

@@ -149,6 +149,7 @@ class RecipeSerializer(serializers.ModelSerializer):
     ingredients = serializers.JSONField(required=False, allow_null=True)
     instructions = serializers.JSONField(required=False, allow_null=True)
     image_url = serializers.SerializerMethodField()  # Override to return either stored image URL or original URL
+    clear_image = serializers.BooleanField(required=False, write_only=True, default=False)
 
     def get_created_by_username(self, obj):
         if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
@@ -205,7 +206,7 @@ class RecipeSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'family', 'created_by', 'created_by_username', 'title', 'notes',
             'ingredients', 'instructions', 'servings', 'prep_time_minutes', 'cook_time_minutes',
-            'image', 'image_url', 'source_url', 'created_at', 'updated_at'
+            'image', 'image_url', 'source_url', 'clear_image', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -223,6 +224,7 @@ class RecipeSerializer(serializers.ModelSerializer):
         """Update recipe with encrypted JSON fields."""
         ingredients = validated_data.pop('ingredients', None)
         instructions = validated_data.pop('instructions', None)
+        clear_image = validated_data.pop('clear_image', False)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -231,6 +233,10 @@ class RecipeSerializer(serializers.ModelSerializer):
             instance.ingredients = ingredients
         if instructions is not None:
             instance.instructions = instructions
+
+        if clear_image and instance.image:
+            instance.image.delete(save=False)
+            instance.image = None
 
         instance.save()
         return instance
