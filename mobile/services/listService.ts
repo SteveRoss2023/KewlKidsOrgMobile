@@ -2,6 +2,7 @@ import apiClient, { APIError, handleAPIError } from './api';
 import {
   List,
   ListItem,
+  ListSection,
   GroceryCategory,
   CompletedListItem,
   CreateListData,
@@ -10,6 +11,8 @@ import {
   UpdateListItemData,
   CreateGroceryCategoryData,
   UpdateGroceryCategoryData,
+  CreateListSectionData,
+  UpdateListSectionData,
   ListType,
 } from '../types/lists';
 
@@ -87,6 +90,73 @@ class ListService {
   async deleteList(listId: number): Promise<void> {
     try {
       await apiClient.delete(`/lists/${listId}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Get sections for a checklist list
+   */
+  async getListSections(listId: number): Promise<ListSection[]> {
+    try {
+      const response = await apiClient.get('/list-sections/', {
+        params: { list: listId },
+      });
+      if (response.data && Array.isArray(response.data.results)) {
+        return response.data.results;
+      }
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching list sections:', error);
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Create a list section
+   */
+  async createListSection(data: CreateListSectionData): Promise<ListSection> {
+    try {
+      const response = await apiClient.post<ListSection>('/list-sections/', data);
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Update a list section
+   */
+  async updateListSection(sectionId: number, data: UpdateListSectionData): Promise<ListSection> {
+    try {
+      const response = await apiClient.patch<ListSection>(`/list-sections/${sectionId}/`, data);
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Delete a list section
+   */
+  async deleteListSection(sectionId: number): Promise<void> {
+    try {
+      await apiClient.delete(`/list-sections/${sectionId}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Set all items in a section (and descendants) completed or uncompleted
+   */
+  async setSectionAllCompleted(sectionId: number, completed: boolean): Promise<void> {
+    try {
+      await apiClient.post(`/list-sections/${sectionId}/set-all-completed/`, { completed });
     } catch (error) {
       throw handleAPIError(error as any);
     }

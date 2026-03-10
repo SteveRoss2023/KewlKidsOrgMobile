@@ -2,7 +2,7 @@
 Serializers for lists app.
 """
 from rest_framework import serializers
-from .models import List, ListItem, GroceryCategory, CompletedListItem
+from .models import List, ListItem, ListSection, GroceryCategory, CompletedListItem
 
 
 class GroceryCategorySerializer(serializers.ModelSerializer):
@@ -39,6 +39,15 @@ class ListSerializer(serializers.ModelSerializer):
         return obj.items.count()
 
 
+class ListSectionSerializer(serializers.ModelSerializer):
+    """ListSection serializer for checklist sections."""
+
+    class Meta:
+        model = ListSection
+        fields = ['id', 'list', 'order', 'title', 'bullet_style']
+        read_only_fields = ['id']
+
+
 class ListItemSerializer(serializers.ModelSerializer):
     """ListItem serializer."""
     created_by_username = serializers.SerializerMethodField()
@@ -62,7 +71,7 @@ class ListItemSerializer(serializers.ModelSerializer):
         model = ListItem
         fields = [
             'id', 'list', 'created_by', 'created_by_username', 'assigned_to', 'assigned_to_username',
-            'name', 'notes', 'quantity', 'category', 'category_name', 'completed', 'completed_at', 'completed_by', 'order',
+            'section', 'parent', 'indent_level', 'name', 'notes', 'quantity', 'category', 'category_name', 'completed', 'completed_at', 'completed_by', 'order',
             'due_date', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'completed_at', 'category_name']

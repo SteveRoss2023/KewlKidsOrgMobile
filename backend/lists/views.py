@@ -5,11 +5,12 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Max, F
-from .models import List, ListItem, GroceryCategory, CompletedListItem
-from .serializers import ListSerializer, ListItemSerializer, GroceryCategorySerializer, CompletedListItemSerializer
+from .models import List, ListItem, ListSection, GroceryCategory, CompletedListItem
+from .serializers import ListSerializer, ListItemSerializer, ListSectionSerializer, GroceryCategorySerializer, CompletedListItemSerializer
 from families.models import Family, Member
 from django.contrib.auth import get_user_model
 from datetime import datetime, timedelta
@@ -63,6 +64,60 @@ class ListViewSet(viewsets.ModelViewSet):
         if list_obj.list_type == 'grocery':
             from .utils import ensure_default_categories
             ensure_default_categories(family)
+
+
+def _item_depth(item):
+    """Return depth of item in tree (0 = top-level under section)."""
+    depth = 0
+    current = item.parent
+    while current:
+        depth += 1
+        current = current.parent
+    return depth
+
+
+class ListSectionViewSet(viewsets.ModelViewSet):
+    """ListSection viewset for checklist sections."""
+    serializer_class = ListSectionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return sections for lists the user can access."""
+        user = self.request.user
+        queryset = ListSection.objects.filter(list__family__members__user=user)
+
+        list_id = self.request.query_params.get('list')
+        if list_id:
+            try:
+                queryset = queryset.filter(list_id=int(list_id))
+            except (ValueError, TypeError):
+                pass
+
+        return queryset.order_by('list', 'order')
+
+    @action(detail=True, methods=['post'], url_path='set-all-completed')
+    def set_all_completed(self, request, pk=None):
+        """Set all items in this section (and descendants) completed or uncompleted."""
+        section = self.get_object()
+        completed = request.data.get('completed', True)
+        list_obj = section.list
+        member = get_object_or_404(Member, user=request.user, family=list_obj.family)
+
+        items = ListItem.objects.filter(section=section)
+        for item in items:
+            _set_item_and_descendants_completed(item, completed, member)
+
+        return Response(status=status.HTTP_200_OK)
+
+
+def _set_item_and_descendants_completed(item, completed, member):
+    """Recursively set item and all descendants completed/uncompleted."""
+    item.completed = completed
+    item.completed_at = timezone.now() if completed else None
+    item.completed_by = member if completed else None
+    item.save(update_fields=['completed', 'completed_at', 'completed_by'])
+    for child in item.children.all():
+        _set_item_and_descendants_completed(child, completed, member)
 
 
 class GroceryCategoryViewSet(viewsets.ModelViewSet):
@@ -172,8 +227,26 @@ class ListItemViewSet(viewsets.ModelViewSet):
         list_obj = get_object_or_404(List, id=self.request.data.get('list'))
         member = get_object_or_404(Member, user=self.request.user, family=list_obj.family)
 
+        save_kwargs = {'created_by': member}
+
+        # Checklist: allow section and parent; enforce max depth
+        if list_obj.list_type == 'checklist':
+            section_id = self.request.data.get('section')
+            parent_id = self.request.data.get('parent')
+            if parent_id:
+                parent = get_object_or_404(ListItem, id=parent_id, list=list_obj)
+                depth = _item_depth(parent) + 1
+                if depth >= 10:
+                    raise ValidationError({'parent': 'Maximum nesting depth (10) exceeded.'})
+                save_kwargs['parent'] = parent
+                save_kwargs['section'] = parent.section
+            elif section_id:
+                section = get_object_or_404(ListSection, id=section_id, list=list_obj)
+                save_kwargs['section'] = section
+            max_order = ListItem.objects.filter(list=list_obj, section=save_kwargs.get('section'), parent=save_kwargs.get('parent')).aggregate(Max('order'))['order__max']
+            save_kwargs['order'] = (max_order + 1) if max_order is not None else 0
+
         # Set default due_date for todo lists if not provided
-        save_kwargs = {}
         if list_obj.list_type == 'todo':
             due_date = self.request.data.get('due_date')
             if not due_date:
@@ -185,24 +258,56 @@ class ListItemViewSet(viewsets.ModelViewSet):
             max_order = ListItem.objects.filter(list=list_obj).aggregate(Max('order'))['order__max']
             save_kwargs['order'] = (max_order + 1) if max_order is not None else 0
 
-        item = serializer.save(created_by=member, **save_kwargs)
+        item = serializer.save(**save_kwargs)
 
         # Auto-assign category for grocery lists
         if list_obj.list_type == 'grocery':
             from .utils import assign_category_to_item
             assign_category_to_item(item, list_obj.family)
 
+    def perform_update(self, serializer):
+        """Validate checklist fields on update."""
+        instance = serializer.instance
+        list_obj = instance.list
+        if list_obj.list_type == 'checklist':
+            if 'indent_level' in self.request.data:
+                indent_level = self.request.data.get('indent_level')
+                try:
+                    indent_level = int(indent_level)
+                except (ValueError, TypeError):
+                    indent_level = 0
+                if indent_level < 0 or indent_level > 10:
+                    raise ValidationError({'indent_level': 'Indent level must be between 0 and 10.'})
+            if 'parent' in self.request.data:
+                parent_id = self.request.data.get('parent')
+                if parent_id is not None:
+                    parent = get_object_or_404(ListItem, id=parent_id, list=list_obj) if parent_id else None
+                    if parent:
+                        depth = _item_depth(parent) + 1
+                        if depth >= 10:
+                            raise ValidationError({'parent': 'Maximum nesting depth (10) exceeded.'})
+                        serializer.validated_data['section'] = parent.section
+        serializer.save()
+
     def update(self, request, *args, **kwargs):
         """Update item - special handling for list completion (all list types)."""
         instance = self.get_object()
         list_obj = instance.list
 
-        # Check if this is a list item being completed (all list types now save to history)
+        # Check if this is a list item being completed
         if request.data.get('completed') is True and not instance.completed:
-            # Get the member for the current user
             member = get_object_or_404(Member, user=request.user, family=list_obj.family)
 
-            # Extract recipe name from notes if present
+            # Checklist: just mark completed, do not delete
+            if list_obj.list_type == 'checklist':
+                instance.completed = True
+                instance.completed_at = timezone.now()
+                instance.completed_by = member
+                instance.save(update_fields=['completed', 'completed_at', 'completed_by'])
+                serializer = self.get_serializer(instance)
+                return Response(serializer.data)
+
+            # Other list types: save to history and delete item
             recipe_name = None
             notes = None
             if instance.notes:

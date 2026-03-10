@@ -17,6 +17,7 @@ interface ThemeContextType {
     text: string;
     textSecondary: string;
     border: string;
+    borderStrong: string;
     primary: string;
     error: string;
     success: string;
@@ -30,6 +31,7 @@ const lightColors = {
   text: '#333333',
   textSecondary: '#666666',
   border: '#e0e0e0',
+  borderStrong: '#d0d0d0',
   primary: '#007AFF',
   error: '#FF3B30',
   success: '#34C759',
@@ -42,6 +44,7 @@ const darkColors = {
   text: '#ffffff',
   textSecondary: '#98989d',
   border: '#38383a',
+  borderStrong: '#7c7c80',
   primary: '#0a84ff',
   error: '#ff453a',
   success: '#30d158',

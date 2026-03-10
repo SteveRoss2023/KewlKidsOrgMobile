@@ -19,6 +19,11 @@ interface ListItemComponentProps {
   onMoveUp?: () => void; // For simple mobile reordering
   onMoveDown?: () => void; // For simple mobile reordering
   showDragHandle?: boolean; // Explicitly show drag handle (for web drag-and-drop)
+  /** Checklist: indent (move right) / outdent (move left) */
+  onIndent?: () => void;
+  onOutdent?: () => void;
+  canIndent?: boolean;
+  canOutdent?: boolean;
 }
 
 export default function ListItemComponent({
@@ -36,6 +41,10 @@ export default function ListItemComponent({
   onMoveUp,
   onMoveDown,
   showDragHandle = false,
+  onIndent,
+  onOutdent,
+  canIndent = true,
+  canOutdent = true,
 }: ListItemComponentProps) {
   const { colors } = useTheme();
   const editButtonRef = useRef<any>(null);
@@ -82,11 +91,40 @@ export default function ListItemComponent({
     }
   }, [onEdit, onMove, onDelete]);
 
+  const indentButtonRef = useRef<any>(null);
+  const outdentButtonRef = useRef<any>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const setTitle = (ref: any, title: string) => {
+        if (ref?.current) {
+          const getDOMNode = (node: any): HTMLElement | null => {
+            if (!node) return null;
+            if (node.nodeType === 1) return node;
+            if (node._nativeNode) return node._nativeNode;
+            if (node._internalFiberInstanceHandleDEV) {
+              const fiber = node._internalFiberInstanceHandleDEV;
+              if (fiber && fiber.stateNode) {
+                const stateNode = fiber.stateNode;
+                if (stateNode.nodeType === 1) return stateNode;
+                if (stateNode._nativeNode) return stateNode._nativeNode;
+              }
+            }
+            return null;
+          };
+          const domNode = getDOMNode(ref.current);
+          if (domNode) domNode.setAttribute('title', title);
+        }
+      };
+      if (onOutdent) setTitle(outdentButtonRef, canOutdent ? 'Outdent (move left)' : 'Outdent (already top level)');
+      if (onIndent) setTitle(indentButtonRef, canIndent ? 'Indent (move right)' : 'Indent (first item in section)');
+    }
+  }, [onIndent, onOutdent, canIndent, canOutdent]);
+
   return (
     <View
       style={[
         styles.item,
-        { backgroundColor: colors.surface, borderColor: colors.border },
+        { backgroundColor: colors.surface, borderColor: colors.borderStrong },
         item.completed && styles.itemCompleted,
         !item.category && isGroceryList && styles.uncategorizedItem,
       ]}
@@ -148,7 +186,7 @@ export default function ListItemComponent({
         <View
           style={[
             styles.checkbox,
-            { borderColor: item.completed ? colors.primary : colors.border },
+            { borderColor: item.completed ? colors.primary : colors.borderStrong },
             item.completed && { backgroundColor: colors.primary },
           ]}
         >
@@ -243,6 +281,30 @@ export default function ListItemComponent({
                           accessibilityHint="Permanently delete this item"
                         >
                           <FontAwesome name="trash" size={20} color="#FF3B30" />
+                        </TouchableOpacity>
+                      )}
+                      {onOutdent != null && (
+                        <TouchableOpacity
+                          ref={outdentButtonRef}
+                          style={styles.actionButton}
+                          onPress={onOutdent}
+                          disabled={!canOutdent}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel={canOutdent ? 'Outdent' : 'Outdent (already top level)'}
+                        >
+                          <FontAwesome name="outdent" size={16} color={canOutdent ? colors.text : colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      {onIndent != null && (
+                        <TouchableOpacity
+                          ref={indentButtonRef}
+                          style={[styles.actionButton, !canIndent && styles.actionButtonDisabled]}
+                          onPress={canIndent ? onIndent : undefined}
+                          disabled={!canIndent}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel={canIndent ? 'Indent' : 'Indent (first item)'}
+                        >
+                          <FontAwesome name="indent" size={16} color={canIndent ? colors.text : colors.textSecondary} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -369,6 +431,30 @@ export default function ListItemComponent({
                       <FontAwesome name="trash" size={20} color="#FF3B30" />
                     </TouchableOpacity>
                   )}
+                  {onOutdent != null && (
+                    <TouchableOpacity
+                      ref={outdentButtonRef}
+                      style={styles.actionButton}
+                      onPress={onOutdent}
+                      disabled={!canOutdent}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel={canOutdent ? 'Outdent' : 'Outdent (already top level)'}
+                    >
+                      <FontAwesome name="outdent" size={16} color={canOutdent ? colors.text : colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                  {onIndent != null && (
+                    <TouchableOpacity
+                      ref={indentButtonRef}
+                      style={[styles.actionButton, !canIndent && styles.actionButtonDisabled]}
+                      onPress={canIndent ? onIndent : undefined}
+                      disabled={!canIndent}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel={canIndent ? 'Indent' : 'Indent (first item)'}
+                    >
+                      <FontAwesome name="indent" size={16} color={canIndent ? colors.text : colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             </View>
@@ -482,6 +568,40 @@ export default function ListItemComponent({
               })}
             >
               <FontAwesome name="trash" size={16} color="#FF3B30" />
+            </TouchableOpacity>
+          )}
+          {onOutdent != null && (
+            <TouchableOpacity
+              ref={outdentButtonRef}
+              style={styles.actionButton}
+              onPress={onOutdent}
+              disabled={!canOutdent}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={canOutdent ? 'Outdent (move left)' : 'Outdent (already top level)'}
+              // @ts-ignore - web-specific props
+              {...(Platform.OS === 'web' && {
+                'data-no-drag': 'true',
+                onMouseDown: (e: any) => e.stopPropagation(),
+              })}
+            >
+              <FontAwesome name="outdent" size={14} color={canOutdent ? colors.text : colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+          {onIndent != null && (
+            <TouchableOpacity
+              ref={indentButtonRef}
+              style={[styles.actionButton, !canIndent && styles.actionButtonDisabled]}
+              onPress={canIndent ? onIndent : undefined}
+              disabled={!canIndent}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={canIndent ? 'Indent (move right)' : 'Indent (first item in section)'}
+              // @ts-ignore - web-specific props
+              {...(Platform.OS === 'web' && {
+                'data-no-drag': 'true',
+                onMouseDown: (e: any) => e.stopPropagation(),
+              })}
+            >
+              <FontAwesome name="indent" size={14} color={canIndent ? colors.text : colors.textSecondary} />
             </TouchableOpacity>
           )}
         </View>
@@ -633,6 +753,10 @@ const styles = StyleSheet.create({
     minHeight: Platform.OS !== 'web' ? 40 : undefined,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+    ...(Platform.OS === 'web' ? { cursor: 'not-allowed' as const } : {}),
   },
 });
 

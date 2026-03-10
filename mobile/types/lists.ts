@@ -2,7 +2,7 @@
  * TypeScript types for Lists feature
  */
 
-export type ListType = 'shopping' | 'grocery' | 'todo' | 'ideas' | 'other';
+export type ListType = 'shopping' | 'grocery' | 'todo' | 'ideas' | 'checklist' | 'other';
 
 export interface List {
   id: number;
@@ -26,6 +26,9 @@ export interface ListItem {
   created_by_username: string | null;
   assigned_to: number | null;
   assigned_to_username: string | null;
+  section: number | null;
+  parent: number | null;
+  indent_level: number;
   name: string;
   notes: string | null;
   quantity: string | null;
@@ -51,6 +54,14 @@ export interface GroceryCategory {
   keywords: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ListSection {
+  id: number;
+  list: number;
+  order: number;
+  title: string;
+  bullet_style: 'number' | 'dot';
 }
 
 export interface CompletedListItem {
@@ -90,6 +101,8 @@ export interface CreateListItemData {
   quantity?: string;
   category?: number | null;
   due_date?: string | null;
+  section?: number | null;
+  parent?: number | null;
 }
 
 export interface UpdateListItemData {
@@ -100,6 +113,9 @@ export interface UpdateListItemData {
   completed?: boolean;
   order?: number;
   due_date?: string | null;
+  section?: number | null;
+  parent?: number | null;
+  indent_level?: number;
 }
 
 export interface CreateGroceryCategoryData {
@@ -117,5 +133,18 @@ export interface UpdateGroceryCategoryData {
   icon?: string;
   order?: number;
   keywords?: string[];
+}
+
+export interface CreateListSectionData {
+  list: number;
+  order: number;
+  title: string;
+  bullet_style: 'number' | 'dot';
+}
+
+export interface UpdateListSectionData {
+  order?: number;
+  title?: string;
+  bullet_style?: 'number' | 'dot';
 }
 

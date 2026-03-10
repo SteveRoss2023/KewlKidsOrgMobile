@@ -39,6 +39,7 @@ class List(models.Model):
         ('grocery', 'Grocery List'),
         ('todo', 'To-Do List'),
         ('ideas', 'Ideas'),
+        ('checklist', 'Checklist'),
         ('other', 'Other'),
     ]
 
@@ -69,11 +70,37 @@ class List(models.Model):
         return f"{self.name} ({self.get_list_type_display()})"
 
 
+class ListSection(models.Model):
+    """Section/heading for checklist-style lists (numbered or dotted)."""
+    BULLET_STYLE_CHOICES = [
+        ('number', 'Number'),
+        ('dot', 'Dot'),
+    ]
+
+    list = models.ForeignKey(List, on_delete=models.CASCADE, related_name='sections')
+    order = models.IntegerField(default=0)
+    title = EncryptedCharField(max_length=500)
+    bullet_style = models.CharField(max_length=10, choices=BULLET_STYLE_CHOICES, default='number')
+
+    class Meta:
+        ordering = ['order']
+        indexes = [
+            models.Index(fields=['list', 'order']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.list.name})"
+
+
 class ListItem(models.Model):
     """Item in a list."""
     list = models.ForeignKey(List, on_delete=models.CASCADE, related_name='items')
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name='created_items')
     assigned_to = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_items')
+
+    # Section and parent (for checklist nesting)
+    section = models.ForeignKey(ListSection, on_delete=models.CASCADE, null=True, blank=True, related_name='items')
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
 
     # Encrypted fields
     name = EncryptedCharField(max_length=200)
@@ -90,6 +117,9 @@ class ListItem(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     completed_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name='completed_items')
 
+    # Visual indent level (for checklists; 0 = top-level under section)
+    indent_level = models.IntegerField(default=0)
+
     # Ordering
     order = models.IntegerField(default=0)
 
@@ -105,6 +135,8 @@ class ListItem(models.Model):
         indexes = [
             models.Index(fields=['list', 'completed']),
             models.Index(fields=['category']),
+            models.Index(fields=['section']),
+            models.Index(fields=['parent']),
         ]
 
     def __str__(self):
@@ -118,6 +150,7 @@ class CompletedListItem(models.Model):
         ('grocery', 'Grocery List'),
         ('todo', 'To-Do List'),
         ('ideas', 'Ideas'),
+        ('checklist', 'Checklist'),
         ('other', 'Other'),
     ]
 

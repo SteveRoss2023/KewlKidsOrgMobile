@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Platfo
 import { FontAwesome } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ThemeAwarePicker from './ThemeAwarePicker';
-import { ListItem, CreateListItemData, UpdateListItemData, GroceryCategory } from '../../types/lists';
+import { ListItem, ListSection, CreateListItemData, UpdateListItemData, GroceryCategory } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
 
 interface AddItemFormProps {
@@ -15,6 +15,8 @@ interface AddItemFormProps {
   isGroceryList?: boolean;
   isShoppingList?: boolean;
   isTodoList?: boolean;
+  isChecklistList?: boolean;
+  sections?: ListSection[];
   loading?: boolean;
 }
 
@@ -27,6 +29,8 @@ export default function AddItemForm({
   isGroceryList = false,
   isShoppingList = false,
   isTodoList = false,
+  isChecklistList = false,
+  sections = [],
   loading = false,
 }: AddItemFormProps) {
   const { colors, theme } = useTheme();
@@ -34,6 +38,7 @@ export default function AddItemForm({
   const [notes, setNotes] = useState('');
   const [quantity, setQuantity] = useState('');
   const [category, setCategory] = useState<number | null>(null);
+  const [selectedSection, setSelectedSection] = useState<number | null>(null);
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -43,13 +48,17 @@ export default function AddItemForm({
       setNotes(editingItem.notes || '');
       setQuantity(editingItem.quantity || '');
       setCategory(editingItem.category);
+      setSelectedSection(editingItem.section);
       setDueDate(editingItem.due_date ? new Date(editingItem.due_date) : null);
-    } else if (isTodoList && !editingItem) {
-      // Set default due date to today for new todo items
-      setDueDate(new Date());
+    } else {
+      if (isTodoList) {
+        setDueDate(new Date());
+      }
+      if (isChecklistList && sections.length > 0) {
+        setSelectedSection(sections[0].id);
+      }
     }
-    // Only reset when editingItem changes, not on every render
-  }, [editingItem?.id, isTodoList]);
+  }, [editingItem?.id, isTodoList, isChecklistList, sections.length]);
 
   const handleSubmit = () => {
     console.log('AddItemForm handleSubmit called, name:', name);
@@ -71,6 +80,9 @@ export default function AddItemForm({
     if (isGroceryList) {
       data.category = category;
     }
+    if (isChecklistList && selectedSection != null) {
+      data.section = selectedSection;
+    }
     if (isTodoList && dueDate) {
       data.due_date = dueDate.toISOString().split('T')[0];
       console.log('Setting due_date for todo list:', data.due_date);
@@ -84,7 +96,6 @@ export default function AddItemForm({
       data.list = listId;
       console.log('Creating item with data:', data);
       onSubmit(data);
-      // Reset form after create
       setName('');
       setNotes('');
       setQuantity('');
@@ -109,7 +120,7 @@ export default function AddItemForm({
           onSubmitEditing={handleSubmit}
         />
 
-        {isGroceryList && categories.length > 0 && (
+        {isGroceryList && categories.length > 0 && !isChecklistList && (
           <>
             <Text style={[styles.label, { color: colors.text }]}>Category</Text>
             <ThemeAwarePicker
@@ -125,7 +136,20 @@ export default function AddItemForm({
           </>
         )}
 
-        {(isGroceryList || isShoppingList) && (
+        {isChecklistList && sections.length > 0 && (
+          <>
+            <Text style={[styles.label, { color: colors.text }]}>Section</Text>
+            <ThemeAwarePicker
+              selectedValue={selectedSection}
+              onValueChange={(value) => setSelectedSection(value as number | null)}
+              options={sections.map((s) => ({ label: s.title, value: s.id }))}
+              placeholder="Select section"
+              enabled={!loading}
+            />
+          </>
+        )}
+
+        {(isGroceryList || isShoppingList) && !isChecklistList && (
           <>
             <Text style={[styles.label, { color: colors.text }]}>Quantity</Text>
             <TextInput

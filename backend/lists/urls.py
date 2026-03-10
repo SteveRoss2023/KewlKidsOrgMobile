@@ -8,6 +8,7 @@ from . import views
 router = DefaultRouter()
 router.register(r'lists', views.ListViewSet, basename='list')
 router.register(r'list-items', views.ListItemViewSet, basename='listitem')
+router.register(r'list-sections', views.ListSectionViewSet, basename='listsection')
 router.register(r'grocery-categories', views.GroceryCategoryViewSet, basename='grocerycategory')
 router.register(r'completed-list-items', views.CompletedListItemViewSet, basename='completedlistitem')
 

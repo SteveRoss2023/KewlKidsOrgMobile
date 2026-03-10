@@ -2,7 +2,7 @@
 Admin interface for lists app.
 """
 from django.contrib import admin
-from .models import List, ListItem, GroceryCategory, CompletedListItem
+from .models import List, ListItem, ListSection, GroceryCategory, CompletedListItem
 
 
 @admin.register(List)
@@ -13,9 +13,17 @@ class ListAdmin(admin.ModelAdmin):
     readonly_fields = ['created_at', 'updated_at']
 
 
+@admin.register(ListSection)
+class ListSectionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'title', 'list', 'order', 'bullet_style']
+    list_filter = ['bullet_style', 'list']
+    search_fields = ['title']
+    ordering = ['list', 'order']
+
+
 @admin.register(ListItem)
 class ListItemAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'list', 'category', 'completed', 'order', 'due_date', 'created_at']
+    list_display = ['id', 'name', 'list', 'section', 'indent_level', 'category', 'completed', 'order', 'due_date', 'created_at']
     list_filter = ['completed', 'category', 'created_at']
     search_fields = ['name']
     readonly_fields = ['created_at', 'updated_at', 'completed_at']

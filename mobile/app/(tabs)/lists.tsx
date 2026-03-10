@@ -9,6 +9,7 @@ import {
   Modal,
   FlatList,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -26,7 +27,7 @@ import { speak } from '../../utils/voiceFeedback';
 import { parseCreateList, isCancelCommand } from '../../utils/voiceCommands';
 import VoiceButton from '../../components/VoiceButton';
 
-type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'ideas' | 'other';
+type ActiveTab = 'todo' | 'grocery' | 'shopping' | 'ideas' | 'checklist' | 'other';
 
 export default function ListsScreen() {
   const router = useRouter();
@@ -96,7 +97,7 @@ export default function ListsScreen() {
         if (awaitingListType) {
           // Ignore if this looks like the prompt message being repeated back
           if (text.includes('what type of list') || text.includes('say todo') || text.includes('say grocery') ||
-              text.includes('say shopping') || text.includes('say ideas') || text.includes('say other')) {
+              text.includes('say shopping') || text.includes('say ideas') || text.includes('say other') || text.includes('say checklist')) {
             console.log('🎤 [LISTS] Ignoring prompt message:', text);
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -124,6 +125,8 @@ export default function ListsScreen() {
             listType = 'shopping';
           } else if (normalizedType === 'ideas' || normalizedType === 'idea' || normalizedType === '5' || normalizedType === 'five') {
             listType = 'ideas';
+          } else if (normalizedType === 'checklist' || normalizedType === '4' || normalizedType === 'four') {
+            listType = 'checklist';
           } else if (normalizedType === 'other' || normalizedType === '6' || normalizedType === 'six') {
             listType = 'other';
           }
@@ -139,6 +142,8 @@ export default function ListsScreen() {
             listType = 'shopping';
           } else if ((normalizedType.includes('ideas') || normalizedType.includes('idea')) && !normalizedType.includes('say')) {
             listType = 'ideas';
+          } else if (normalizedType.includes('checklist') && !normalizedType.includes('say')) {
+            listType = 'checklist';
           } else if (normalizedType.includes('other') && !normalizedType.includes('say')) {
             listType = 'other';
           }
@@ -146,7 +151,7 @@ export default function ListsScreen() {
           if (!listType) {
             // Invalid selection - ask again but don't reset everything
             console.log('🎤 [LISTS] Invalid list type response:', text);
-            speak('Invalid selection. Please say: to do, grocery, shopping, ideas, or other', () => {
+            speak('Invalid selection. Please say: to do, grocery, shopping, ideas, checklist, or other', () => {
               setTimeout(() => {
                 start({ ignoreTranscriptsForMs: 2000 });
               }, 300); // Reduced from 500ms to 300ms
@@ -206,6 +211,8 @@ export default function ListsScreen() {
             'say todo',
             'say grocery',
             'say shopping',
+            'say ideas',
+            'say checklist',
             'say other',
           ];
           if (feedbackPatterns.some((pattern) => text.includes(pattern))) {
@@ -228,7 +235,7 @@ export default function ListsScreen() {
           setAwaitingListType(true);
           lastProcessedTranscriptRef.current = '';
           reset(); // Clear transcript before speaking
-          speak('What type of list? Say: to do, grocery, shopping, ideas, or other', () => {
+          speak('What type of list? Say: to do, grocery, shopping, ideas, checklist, or other', () => {
             // Start listening quickly but ignore the prompt message
             setTimeout(() => {
               start({ ignoreTranscriptsForMs: 2000 }); // Ignore transcripts for 2 seconds after prompt
@@ -546,13 +553,12 @@ export default function ListsScreen() {
       )}
 
       <View style={[styles.tabsContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={styles.tabs}>
-          {(['todo', 'grocery', 'shopping', 'ideas', 'other'] as ActiveTab[]).map((tab) => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+          {(['todo', 'grocery', 'shopping', 'ideas', 'checklist', 'other'] as ActiveTab[]).map((tab) => (
             <TouchableOpacity
               key={tab}
               style={[
                 styles.tab,
-                styles.tabMobile,
                 activeTab === tab && { backgroundColor: colors.primary },
                 { borderColor: colors.border },
               ]}
@@ -561,16 +567,15 @@ export default function ListsScreen() {
               <Text
                 style={[
                   styles.tabText,
-                  styles.tabTextMobile,
                   { color: activeTab === tab ? '#fff' : colors.text },
                 ]}
                 numberOfLines={1}
               >
-                {tab === 'todo' ? 'To-Do' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'todo' ? 'To-Do' : tab === 'checklist' ? 'Checklist' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       </View>
 
       {loading ? (
@@ -704,34 +709,22 @@ const styles = StyleSheet.create({
   tabs: {
     paddingHorizontal: 8,
     paddingVertical: 12,
-    gap: 4,
+    gap: 6,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
   },
   tab: {
-    paddingHorizontal: 4,
-    paddingVertical: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 14,
+    paddingVertical: Platform.OS === 'web' ? 8 : 7,
     borderRadius: 20,
     borderWidth: 1,
-    flex: 1,
-    minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 2,
-  },
-  tabMobile: {
-    paddingHorizontal: 4,
-    paddingVertical: 6,
-    marginHorizontal: 2,
   },
   tabText: {
-    fontSize: 11,
+    fontSize: Platform.OS === 'web' ? 13 : 12,
     fontWeight: '600',
     textTransform: 'capitalize',
-  },
-  tabTextMobile: {
-    fontSize: 11,
   },
   loadingContainer: {
     flex: 1,

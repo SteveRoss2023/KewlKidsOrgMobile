@@ -6,6 +6,7 @@ import {
   ScrollView,
   ActivityIndicator,
   TouchableOpacity,
+  TextInput,
   Modal,
   FlatList,
   Platform,
@@ -34,8 +35,9 @@ import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useFamily } from '../../../contexts/FamilyContext';
 import ListService from '../../../services/listService';
-import { List, ListItem, GroceryCategory, CreateListItemData, UpdateListItemData } from '../../../types/lists';
+import { List, ListItem, ListSection, GroceryCategory, CreateListItemData, UpdateListItemData } from '../../../types/lists';
 import ListItemComponent from '../../../components/lists/ListItemComponent';
+import SectionRow from '../../../components/lists/SectionRow';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
@@ -116,6 +118,9 @@ export default function ListDetailScreen() {
   );
   const [list, setList] = useState<List | null>(null);
   const [listItems, setListItems] = useState<ListItem[]>([]);
+  const [sections, setSections] = useState<ListSection[]>([]);
+  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
+  const [addingSectionName, setAddingSectionName] = useState<string | null>(null);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -179,12 +184,23 @@ export default function ListDetailScreen() {
     (Platform.OS === 'android' || isNarrowViewport) && !!list?.name;
 
   const isGroceryList = list?.list_type === 'grocery';
+  const isChecklistList = list?.list_type === 'checklist';
   const isShoppingList = list?.list_type === 'shopping';
   const isTodoList = list?.list_type === 'todo';
   const isIdeasList = list?.list_type === 'ideas';
   const isOtherList = list?.list_type === 'other';
   // Lists that support drag and drop, reordering, and move item features
   const supportsDragAndDrop = isTodoList || isIdeasList || isOtherList;
+
+  const fetchListSections = async (skipLoading = false) => {
+    if (!listId) return;
+    try {
+      const fetched = await ListService.getListSections(listId);
+      setSections(fetched);
+    } catch (err) {
+      console.error('Error fetching list sections:', err);
+    }
+  };
 
   // Load list and categories when screen comes into focus
   useFocusEffect(
@@ -196,14 +212,19 @@ export default function ListDetailScreen() {
     }, [listId, selectedFamily])
   );
 
-  // Load items when list changes
+  // Load items (and sections for checklist) when list changes
   useEffect(() => {
     if (list) {
       fetchListItems();
+      if (list.list_type === 'checklist') {
+        fetchListSections();
+      } else {
+        setSections([]);
+      }
     }
   }, [list]);
 
-  // Reset title font size when list changes (so we re-measure for new name)
+  // Reset title font size when list changes
   useEffect(() => {
     setTitleFontSize(
       Platform.OS === 'web' ? TITLE_FONT_SIZE_REGULAR_WEB : TITLE_FONT_SIZE_REGULAR_NATIVE
@@ -531,18 +552,21 @@ export default function ListDetailScreen() {
 
     setRefreshing(true);
     try {
-      // Refresh list, categories, and items in parallel
-      await Promise.all([
-        fetchList(true), // Skip loading state
+      const promises: Promise<any>[] = [
+        fetchList(true),
         fetchCategories(),
         ListService.getListItems(listId).then(items => setListItems(items)),
-      ]);
+      ];
+      if (list?.list_type === 'checklist') {
+        promises.push(ListService.getListSections(listId).then(s => setSections(s)));
+      }
+      await Promise.all(promises);
     } catch (err) {
       console.error('Error refreshing list detail:', err);
     } finally {
       setRefreshing(false);
     }
-  }, [listId, selectedFamily]);
+  }, [listId, selectedFamily, list?.list_type]);
 
   // Extract unique recipe names from items
   const availableRecipes = useMemo(() => {
@@ -658,8 +682,207 @@ export default function ListDetailScreen() {
     return category ? category.name : 'Unknown';
   };
 
+  // Checklist: expand / collapse all sections
+  const areAllSectionsCollapsed = useMemo(() => {
+    if (!isChecklistList || sections.length === 0) return true;
+    return sections.every((s) => collapsedSections.has(s.id));
+  }, [isChecklistList, sections, collapsedSections]);
+
+  const expandAllSections = () => setCollapsedSections(new Set());
+
+  const collapseAllSections = () => {
+    setCollapsedSections(new Set(sections.map((s) => s.id)));
+  };
+
+  // Checklist: group items by section, sorted by order
+  const checklistItemsBySection = useMemo(() => {
+    if (!isChecklistList) return new Map<number, ListItem[]>();
+    const bySection = new Map<number, ListItem[]>();
+    listItems.forEach((item) => {
+      const sid = item.section ?? 0;
+      if (!bySection.has(sid)) bySection.set(sid, []);
+      bySection.get(sid)!.push(item);
+    });
+    bySection.forEach((arr) => arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+    return bySection;
+  }, [isChecklistList, listItems]);
+
+  const isSectionAllCompleted = useCallback((sectionId: number) => {
+    const items = checklistItemsBySection.get(sectionId) ?? [];
+    return items.length > 0 && items.every((i) => i.completed);
+  }, [checklistItemsBySection]);
+
+  const handleSectionToggleComplete = async (section: ListSection) => {
+    const targetCompleted = !isSectionAllCompleted(section.id);
+    const sectionItemIds = (checklistItemsBySection.get(section.id) ?? []).map((i) => i.id);
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prevItems) =>
+      prevItems.map((i) =>
+        sectionItemIds.includes(i.id) ? { ...i, completed: targetCompleted } : i
+      )
+    );
+    try {
+      await ListService.setSectionAllCompleted(section.id, targetCompleted);
+    } catch (err) {
+      console.error('Error toggling section complete:', err);
+      setListItems(previousState);
+      alert((err as APIError)?.message || 'Failed to update section. Try again.');
+    }
+  };
+
+  const handleRenameSection = async (section: ListSection, newTitle: string) => {
+    const previousSections = sections.map((s) => ({ ...s }));
+    setSections((prev) =>
+      prev.map((s) => (s.id === section.id ? { ...s, title: newTitle } : s))
+    );
+    try {
+      await ListService.updateListSection(section.id, { title: newTitle });
+    } catch (err) {
+      console.error('Error renaming section:', err);
+      setSections(previousSections);
+      alert((err as APIError)?.message || 'Failed to rename section. Try again.');
+    }
+  };
+
+  const [deleteSectionConfirm, setDeleteSectionConfirm] = useState<{
+    isOpen: boolean;
+    section: ListSection | null;
+  }>({ isOpen: false, section: null });
+
+  const confirmDeleteSection = async () => {
+    if (!deleteSectionConfirm.section) return;
+    const sectionId = deleteSectionConfirm.section.id;
+    const previousSections = [...sections];
+    const previousItems = [...listItems];
+    setSections((prev) => prev.filter((s) => s.id !== sectionId));
+    setListItems((prev) => prev.filter((i) => i.section !== sectionId));
+    setDeleteSectionConfirm({ isOpen: false, section: null });
+    try {
+      await ListService.deleteListSection(sectionId);
+    } catch (err) {
+      console.error('Error deleting section:', err);
+      setSections(previousSections);
+      setListItems(previousItems);
+      alert((err as APIError)?.message || 'Failed to delete section. Try again.');
+    }
+  };
+
+  const handleIndent = async (item: ListItem) => {
+    if (!list || list.list_type !== 'checklist') return;
+    const currentLevel = item.indent_level ?? 0;
+    if (currentLevel >= 10) return;
+    const newLevel = currentLevel + 1;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, indent_level: newLevel } : i))
+    );
+    try {
+      await ListService.updateListItem(item.id, { indent_level: newLevel });
+    } catch (err) {
+      console.error('Error indenting item:', err);
+      setListItems(previousState);
+      alert((err as APIError)?.message || 'Failed to indent. Try again.');
+    }
+  };
+
+  const handleOutdent = async (item: ListItem) => {
+    if (!list || list.list_type !== 'checklist') return;
+    const currentLevel = item.indent_level ?? 0;
+    if (currentLevel <= 0) return;
+    const newLevel = currentLevel - 1;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, indent_level: newLevel } : i))
+    );
+    try {
+      await ListService.updateListItem(item.id, { indent_level: newLevel });
+    } catch (err) {
+      console.error('Error outdenting item:', err);
+      setListItems(previousState);
+      alert((err as APIError)?.message || 'Failed to outdent. Try again.');
+    }
+  };
+
+  const handleIndentAllInSection = async (sectionId: number) => {
+    if (!list || list.list_type !== 'checklist') return;
+    const sectionItems = (checklistItemsBySection.get(sectionId) ?? [])
+      .filter((i) => (i.indent_level ?? 0) < 10);
+    if (sectionItems.length === 0) return;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => {
+        if (i.section === sectionId && (i.indent_level ?? 0) < 10) {
+          return { ...i, indent_level: (i.indent_level ?? 0) + 1 };
+        }
+        return i;
+      })
+    );
+    try {
+      await Promise.all(
+        sectionItems.map((i) =>
+          ListService.updateListItem(i.id, { indent_level: (i.indent_level ?? 0) + 1 })
+        )
+      );
+    } catch (err) {
+      console.error('Error indenting all items in section:', err);
+      setListItems(previousState);
+      alert((err as APIError)?.message || 'Failed to indent all. Try again.');
+    }
+  };
+
+  const handleOutdentAllInSection = async (sectionId: number) => {
+    if (!list || list.list_type !== 'checklist') return;
+    const sectionItems = (checklistItemsBySection.get(sectionId) ?? [])
+      .filter((i) => (i.indent_level ?? 0) > 0);
+    if (sectionItems.length === 0) return;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => {
+        if (i.section === sectionId && (i.indent_level ?? 0) > 0) {
+          return { ...i, indent_level: (i.indent_level ?? 0) - 1 };
+        }
+        return i;
+      })
+    );
+    try {
+      await Promise.all(
+        sectionItems.map((i) =>
+          ListService.updateListItem(i.id, { indent_level: (i.indent_level ?? 0) - 1 })
+        )
+      );
+    } catch (err) {
+      console.error('Error outdenting all items in section:', err);
+      setListItems(previousState);
+      alert((err as APIError)?.message || 'Failed to outdent all. Try again.');
+    }
+  };
+
   const toggleItemComplete = async (item: ListItem) => {
-    // For all list types, completing an item will delete it and save to history
+    if (!list) return;
+
+    // Checklist: backend returns updated item; we update in place (no delete)
+    if (list.list_type === 'checklist') {
+      const newCompleted = !item.completed;
+      setListItems((prev) =>
+        prev.map((p) => (p.id === item.id ? { ...p, completed: newCompleted } : p))
+      );
+      try {
+        const updated = await ListService.toggleItemComplete(item.id, newCompleted);
+        if (updated) {
+          setListItems((prev) =>
+            prev.map((p) => (p.id === item.id ? updated : p))
+          );
+        }
+      } catch (err) {
+        console.error('Error toggling item:', err);
+        setListItems((prev) =>
+          prev.map((p) => (p.id === item.id ? { ...p, completed: item.completed } : p))
+        );
+      }
+      return;
+    }
+
+    // For all other list types, completing an item will delete it and save to history
     if (!item.completed) {
       // Optimistic update - remove item immediately
       setListItems((prevItems) => prevItems.filter((prevItem) => prevItem.id !== item.id));
@@ -703,6 +926,9 @@ export default function ListDetailScreen() {
   const handleAddItem = async (data: CreateListItemData) => {
     try {
       setAdding(true);
+      if (list?.list_type === 'checklist' && sections.length > 0 && !data.section) {
+        (data as CreateListItemData).section = sections[0].id;
+      }
       const newItem = await ListService.createListItem(data);
       await fetchListItems();
       setShowAddItem(false);
@@ -1027,6 +1253,8 @@ export default function ListDetailScreen() {
             isGroceryList={isGroceryList}
             isShoppingList={isShoppingList}
             isTodoList={isTodoList}
+            isChecklistList={isChecklistList}
+            sections={sections}
             loading={updatingItem}
           />
         </View>
@@ -1143,7 +1371,7 @@ export default function ListDetailScreen() {
 
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.actionsBarTop}>
-          <View style={styles.actionButtons}>
+          <View style={styles.actionButtonsPrimary}>
             {isSupported && !showAddItem && !editingItem && (
               <VoiceButton
                 onPress={handleVoiceClick}
@@ -1154,41 +1382,29 @@ export default function ListDetailScreen() {
             {!showAddItem && !editingItem ? (
               <>
                 <TouchableOpacity
-                  onPress={() => {
-                    setShowAddItem(true);
-                  }}
+                  onPress={() => setShowAddItem(true)}
                   style={[styles.addButton, { backgroundColor: colors.primary }]}
                 >
-                  {Platform.OS === 'web' && <FontAwesome name="plus" size={16} color="#fff" />}
+                  <FontAwesome name="plus" size={16} color="#fff" />
                   <Text style={styles.addButtonText}>
-                    {Platform.OS === 'web' ? 'Add Item' : '+Add'}
+                    {Platform.OS === 'web' ? 'Add Item' : 'Item'}
                   </Text>
                 </TouchableOpacity>
-                {isSupported && (
-                  <TooltipButton
-                    tooltip="Voice commands — view phrases you can say with the mic"
-                    onPress={() => setShowVoiceHelpModal(true)}
-                    style={[styles.voiceHelpButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    accessibilityHint="Shows list of voice commands you can say"
+                {isChecklistList && (
+                  <TouchableOpacity
+                    onPress={() => setAddingSectionName('')}
+                    style={[styles.addButton, { backgroundColor: colors.primary }]}
                   >
-                    <FontAwesome name="question-circle" size={20} color={colors.textSecondary} />
-                  </TooltipButton>
+                    <FontAwesome name="plus" size={16} color="#fff" />
+                    <Text style={styles.addButtonText}>
+                      {Platform.OS === 'web' ? 'Add Section' : 'Section'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
-                <TouchableOpacity
-                  onPress={() => router.push('/(tabs)/lists/completed')}
-                  style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  accessibilityLabel="View completed items history"
-                  accessibilityHint="Opens the history of completed items"
-                >
-                  <FontAwesome name="history" size={16} color={colors.primary} />
-                  <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
-                </TouchableOpacity>
               </>
             ) : editingItem && !supportsDragAndDrop ? (
               <TouchableOpacity
-                onPress={() => {
-                  setEditingItem(null);
-                }}
+                onPress={() => setEditingItem(null)}
                 style={[styles.cancelButton, { backgroundColor: colors.textSecondary }]}
               >
                 <FontAwesome name="times" size={16} color="#fff" />
@@ -1196,25 +1412,102 @@ export default function ListDetailScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-          {isGroceryList && sortedCategoryIds.length > 0 && (
-            <TouchableOpacity
-              onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
-              style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
-            >
-              <FontAwesome
-                name={areAllCollapsed ? 'chevron-down' : 'chevron-up'}
-                size={14}
-                color={colors.textSecondary}
-              />
-              <Text
-                style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}
-                numberOfLines={1}
+          {!showAddItem && !editingItem && (
+            <View style={styles.actionButtonsSecondary}>
+              {isSupported && (
+                <TooltipButton
+                  tooltip="Voice commands — view phrases you can say with the mic"
+                  onPress={() => setShowVoiceHelpModal(true)}
+                  style={[styles.voiceHelpButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  accessibilityHint="Shows list of voice commands you can say"
+                >
+                  <FontAwesome name="question-circle" size={20} color={colors.textSecondary} />
+                </TooltipButton>
+              )}
+              <TouchableOpacity
+                onPress={() => router.push('/(tabs)/lists/completed')}
+                style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                accessibilityLabel="View completed items history"
+                accessibilityHint="Opens the history of completed items"
               >
-                {areAllCollapsed ? 'Expand' : 'Collapse'}
-              </Text>
-            </TouchableOpacity>
+                <FontAwesome name="history" size={16} color={colors.primary} />
+                <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
+              </TouchableOpacity>
+              {isChecklistList && sections.length > 0 && (
+                <TouchableOpacity
+                  onPress={areAllSectionsCollapsed ? expandAllSections : collapseAllSections}
+                  style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+                >
+                  <FontAwesome
+                    name={areAllSectionsCollapsed ? 'chevron-down' : 'chevron-up'}
+                    size={14}
+                    color={colors.textSecondary}
+                  />
+                  <Text
+                    style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
+                    {areAllSectionsCollapsed ? 'Expand All' : 'Collapse All'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {isGroceryList && sortedCategoryIds.length > 0 && (
+                <TouchableOpacity
+                  onPress={areAllCollapsed ? expandAllCategories : collapseAllCategories}
+                  style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+                >
+                  <FontAwesome
+                    name={areAllCollapsed ? 'chevron-down' : 'chevron-up'}
+                    size={14}
+                    color={colors.textSecondary}
+                  />
+                  <Text
+                    style={[styles.expandCollapseButtonText, { color: colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
+                    {areAllCollapsed ? 'Expand' : 'Collapse'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
+        {isChecklistList && addingSectionName !== null && (
+          <View style={[styles.addSectionRow, { borderTopColor: colors.border }]}>
+            <FontAwesome name="plus" size={16} color={colors.primary} />
+            <TextInput
+              autoFocus
+              style={[styles.addSectionInput, { color: colors.text, borderColor: colors.primary }]}
+              placeholder="Section name..."
+              placeholderTextColor={colors.textSecondary}
+              value={addingSectionName}
+              onChangeText={setAddingSectionName}
+              onSubmitEditing={async () => {
+                const sectionName = addingSectionName.trim();
+                if (!sectionName) { setAddingSectionName(null); return; }
+                try {
+                  await ListService.createListSection({
+                    list: list!.id,
+                    order: sections.length,
+                    title: sectionName,
+                    bullet_style: 'number',
+                  });
+                  await fetchListSections();
+                } catch (err) {
+                  console.error('Error creating section:', err);
+                }
+                setAddingSectionName(null);
+              }}
+              returnKeyType="done"
+            />
+            <TouchableOpacity
+              onPress={() => setAddingSectionName(null)}
+              style={{ padding: 6 }}
+            >
+              <FontAwesome name="times" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
         {isGroceryList && availableRecipes.length > 0 && (
           <View style={styles.recipeFilterRow}>
             <FontAwesome name="filter" size={16} color={colors.textSecondary} />
@@ -1270,6 +1563,8 @@ export default function ListDetailScreen() {
             isGroceryList={isGroceryList}
             isShoppingList={isShoppingList}
             isTodoList={isTodoList}
+            isChecklistList={isChecklistList}
+            sections={sections}
             loading={adding}
           />
         </ScrollView>
@@ -1321,6 +1616,8 @@ export default function ListDetailScreen() {
                     isGroceryList={isGroceryList}
                     isShoppingList={isShoppingList}
                     isTodoList={isTodoList}
+                    isChecklistList={isChecklistList}
+                    sections={sections}
                     loading={updatingItem}
                   />
                 </ScrollView>
@@ -1354,6 +1651,8 @@ export default function ListDetailScreen() {
                   categories={categories}
                   isGroceryList={isGroceryList}
                   isTodoList={isTodoList}
+                  isChecklistList={isChecklistList}
+                  sections={sections}
                   loading={updatingItem}
                 />
               </ScrollView>
@@ -1367,13 +1666,90 @@ export default function ListDetailScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading items...</Text>
         </View>
-      ) : filteredItems.length === 0 ? (
+      ) : filteredItems.length === 0 && !isChecklistList ? (
         <View style={styles.emptyState}>
           <FontAwesome name="list-ul" size={48} color={colors.textSecondary} />
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
             {selectedRecipeFilter ? `No items found for recipe "${selectedRecipeFilter}".` : 'No items yet. Add your first item!'}
           </Text>
         </View>
+      ) : isChecklistList ? (
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+            />
+          }
+        >
+          {sections.map((section) => {
+            const sectionItems = checklistItemsBySection.get(section.id) ?? [];
+            const allCompleted = isSectionAllCompleted(section.id);
+            const isCollapsed = collapsedSections.has(section.id);
+            return (
+              <View key={section.id} style={[styles.sectionGroup, { borderColor: colors.borderStrong }]}>
+                <SectionRow
+                  section={section}
+                  allCompleted={allCompleted}
+                  listColor={listColor}
+                  onToggleComplete={() => handleSectionToggleComplete(section)}
+                  onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                  onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
+                  collapsed={isCollapsed}
+                  onToggleCollapse={() => {
+                    setCollapsedSections((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(section.id)) {
+                        next.delete(section.id);
+                      } else {
+                        next.add(section.id);
+                      }
+                      return next;
+                    });
+                  }}
+                  onIndentAll={() => handleIndentAllInSection(section.id)}
+                  onOutdentAll={() => handleOutdentAllInSection(section.id)}
+                  itemCount={sectionItems.length}
+                />
+                {!isCollapsed && sectionItems.map((item) => {
+                  const depth = item.indent_level ?? 0;
+                  const canIndent = depth < 10;
+                  const canOutdent = depth > 0;
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.checklistItemRow,
+                        { paddingLeft: 16 + depth * 32, backgroundColor: colors.surface, borderColor: colors.borderStrong },
+                      ]}
+                    >
+                      <View style={{ flex: 1 }} collapsable={false}>
+                        <ListItemComponent
+                          item={item}
+                          onToggleComplete={() => toggleItemComplete(item)}
+                          onEdit={() => setEditingItem(item)}
+                          onDelete={() => handleDeleteItem(item)}
+                          isTodoList={false}
+                          onIndent={() => handleIndent(item)}
+                          onOutdent={() => handleOutdent(item)}
+                          canIndent={canIndent}
+                          canOutdent={canOutdent}
+                        />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })}
+          {sections.length === 0 && listItems.filter((i) => i.section == null).length === 0 && (
+            <View style={[styles.emptyState, { paddingVertical: 24 }]}>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No sections yet. Use the "Add Section" button above to get started.</Text>
+            </View>
+          )}
+        </ScrollView>
       ) : isGroceryList && listColor ? (
         <ScrollView
           style={styles.scrollView}
@@ -1516,6 +1892,17 @@ export default function ListDetailScreen() {
         type="error"
         onClose={() => setDeleteConfirm({ isOpen: false, itemId: null, itemName: '' })}
         onConfirm={confirmDeleteItem}
+        confirmText="Delete"
+        cancelText="Cancel"
+        showCancel={true}
+      />
+      <AlertModal
+        visible={deleteSectionConfirm.isOpen}
+        title="Delete Section"
+        message={`Are you sure you want to delete "${deleteSectionConfirm.section?.title}"? All items in this section will also be deleted. This cannot be undone.`}
+        type="error"
+        onClose={() => setDeleteSectionConfirm({ isOpen: false, section: null })}
+        onConfirm={confirmDeleteSection}
         confirmText="Delete"
         cancelText="Cancel"
         showCancel={true}
@@ -1687,13 +2074,10 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   actionsBarTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     width: '100%',
-    marginBottom: Platform.OS === 'web' ? 12 : 8, // Reduced margin on mobile
+    marginBottom: Platform.OS === 'web' ? 12 : 8,
     gap: 8,
-    flexWrap: Platform.OS === 'web' ? 'nowrap' : 'wrap',
   },
   recipeFilterRow: {
     flexDirection: 'row',
@@ -1780,6 +2164,25 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     flex: Platform.OS === 'web' ? 1 : 0,
     ...(Platform.OS !== 'web' ? { minWidth: 0 } : {}),
+  },
+  actionButtonsPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionButtonsSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  addSectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    marginTop: 4,
   },
   voiceHelpButton: {
     width: 36,
@@ -1977,6 +2380,42 @@ const styles = StyleSheet.create({
     ...(Platform.OS !== 'web' ? {
       zIndex: 200,
     } : {}),
+  },
+  sectionGroup: {
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  checklistItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingRight: 8,
+  },
+  indentOutdentRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginLeft: 8,
+    minWidth: 72,
+  },
+  indentButton: {
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 36,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addSectionInput: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'web' ? 6 : 8,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
   },
   itemContainer: {
     marginBottom: 8,
