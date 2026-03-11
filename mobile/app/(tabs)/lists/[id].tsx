@@ -99,6 +99,202 @@ function TooltipButton({
   );
 }
 
+// Web-only: makes a checklist section block draggable (reorder accordions)
+function DraggableChecklistSection({
+  sectionId,
+  sectionIndex,
+  children,
+  isDragging,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: {
+  sectionId: number;
+  sectionIndex: number;
+  children: React.ReactNode;
+  isDragging: boolean;
+  isDragOver: boolean;
+  onDragStart: (id: number) => void;
+  onDragOver: (e: any, index: number) => void;
+  onDragLeave: () => void;
+  onDrop: (e: any, index: number) => void;
+  onDragEnd: () => void;
+}) {
+  const viewRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !viewRef.current) return;
+    const getDOMNode = (node: any): HTMLElement | null => {
+      if (!node) return null;
+      if (node.nodeType === 1) return node;
+      if (node._nativeNode) return node._nativeNode;
+      if (node._internalFiberInstanceHandleDEV?.stateNode) {
+        const s = node._internalFiberInstanceHandleDEV.stateNode;
+        return s?.nodeType === 1 ? s : s?._nativeNode ?? null;
+      }
+      return null;
+    };
+    const dom = getDOMNode(viewRef.current);
+    if (!dom) return;
+    dom.setAttribute('draggable', 'true');
+    dom.style.cursor = isDragging ? 'grabbing' : 'grab';
+    dom.style.userSelect = 'none';
+    const handleDragStart = (e: DragEvent) => {
+      const t = (e.target as HTMLElement).closest('[data-no-drag="true"], button, [role="button"]');
+      if (t) {
+        e.preventDefault();
+        return;
+      }
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', sectionId.toString());
+      }
+      onDragStart(sectionId);
+    };
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      onDragOver(e as any, sectionIndex);
+    };
+    const handleDragLeave = (e: DragEvent) => {
+      const related = e.relatedTarget as HTMLElement;
+      if (!related || !dom.contains(related)) onDragLeave();
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onDrop(e as any, sectionIndex);
+    };
+    const handleDragEnd = () => onDragEnd();
+    dom.addEventListener('dragstart', handleDragStart);
+    dom.addEventListener('dragover', handleDragOver);
+    dom.addEventListener('dragleave', handleDragLeave);
+    dom.addEventListener('drop', handleDrop);
+    dom.addEventListener('dragend', handleDragEnd);
+    return () => {
+      dom.removeAttribute('draggable');
+      dom.removeEventListener('dragstart', handleDragStart);
+      dom.removeEventListener('dragover', handleDragOver);
+      dom.removeEventListener('dragleave', handleDragLeave);
+      dom.removeEventListener('drop', handleDrop);
+      dom.removeEventListener('dragend', handleDragEnd);
+    };
+  }, [sectionId, sectionIndex, isDragging, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd]);
+
+  return (
+    <View
+      ref={viewRef}
+      style={[
+        { opacity: isDragging ? 0.6 : 1, borderTopWidth: isDragOver ? 3 : 0, borderTopColor: isDragOver ? '#007AFF' : 'transparent' },
+        Platform.OS === 'web' && ({ cursor: (isDragging ? 'grabbing' : 'grab') as any, userSelect: 'none' } as any),
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+// Web-only: draggable checklist item row (reorder within section)
+function DraggableChecklistItemRow({
+  itemId,
+  children,
+  isDragging,
+  isDropTarget,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: {
+  itemId: number;
+  children: React.ReactNode;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  onDragStart: (id: number) => void;
+  onDragOver: (e: any, id: number) => void;
+  onDragLeave: () => void;
+  onDrop: (e: any, id: number) => void;
+  onDragEnd: () => void;
+}) {
+  const viewRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !viewRef.current) return;
+    const getDOMNode = (node: any): HTMLElement | null => {
+      if (!node) return null;
+      if (node.nodeType === 1) return node;
+      if (node._nativeNode) return node._nativeNode;
+      if (node._internalFiberInstanceHandleDEV?.stateNode) {
+        const s = node._internalFiberInstanceHandleDEV.stateNode;
+        return s?.nodeType === 1 ? s : s?._nativeNode ?? null;
+      }
+      return null;
+    };
+    const dom = getDOMNode(viewRef.current);
+    if (!dom) return;
+    dom.setAttribute('draggable', 'true');
+    (dom.style as any).cursor = isDragging ? 'grabbing' : 'grab';
+    dom.style.userSelect = 'none';
+    const handleDragStart = (e: DragEvent) => {
+      const t = (e.target as HTMLElement).closest('[data-no-drag="true"], button, [role="button"]');
+      if (t) {
+        e.preventDefault();
+        return;
+      }
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', itemId.toString());
+      }
+      onDragStart(itemId);
+    };
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      onDragOver(e as any, itemId);
+    };
+    const handleDragLeave = (e: DragEvent) => {
+      const related = e.relatedTarget as HTMLElement;
+      if (!related || !dom.contains(related)) onDragLeave();
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onDrop(e as any, itemId);
+    };
+    const handleDragEnd = () => onDragEnd();
+    dom.addEventListener('dragstart', handleDragStart);
+    dom.addEventListener('dragover', handleDragOver);
+    dom.addEventListener('dragleave', handleDragLeave);
+    dom.addEventListener('drop', handleDrop);
+    dom.addEventListener('dragend', handleDragEnd);
+    return () => {
+      dom.removeAttribute('draggable');
+      dom.removeEventListener('dragstart', handleDragStart);
+      dom.removeEventListener('dragover', handleDragOver);
+      dom.removeEventListener('dragleave', handleDragLeave);
+      dom.removeEventListener('drop', handleDrop);
+      dom.removeEventListener('dragend', handleDragEnd);
+    };
+  }, [itemId, isDragging, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd]);
+
+  return (
+    <View
+      ref={viewRef}
+      style={[
+        { opacity: isDragging ? 0.6 : 1, borderTopWidth: isDropTarget ? 3 : 0, borderTopColor: isDropTarget ? '#007AFF' : 'transparent' },
+        Platform.OS === 'web' && ({ cursor: (isDragging ? 'grabbing' : 'grab') as any, userSelect: 'none' } as any),
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
 const NARROW_VIEWPORT_WIDTH = 480;
 const TITLE_FONT_SIZE_MIN = 10;
 const TITLE_FONT_SIZE_REGULAR_WEB = 22;
@@ -171,8 +367,13 @@ export default function ListDetailScreen() {
   const [selectedRecipeFilter, setSelectedRecipeFilter] = useState<string>('');
   const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  // Voice recognition
+  // Checklist section drag (reorder accordions)
+  const [draggedSectionId, setDraggedSectionId] = useState<number | null>(null);
+  const [dragOverSectionIndex, setDragOverSectionIndex] = useState<number | null>(null);
+  const [reorderingSections, setReorderingSections] = useState(false);
+  // Checklist item drag (reorder within section, web only)
+  const [draggedChecklistItemId, setDraggedChecklistItemId] = useState<number | null>(null);
+  const [dropTargetChecklistItemId, setDropTargetChecklistItemId] = useState<number | null>(null);
   const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
   const lastProcessedTranscriptRef = useRef('');
   const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
@@ -803,6 +1004,56 @@ export default function ListDetailScreen() {
     }
   };
 
+  const handleMoveItemUpInSection = async (item: ListItem) => {
+    if (!item.section) return;
+    const sectionItems = (checklistItemsBySection.get(item.section) ?? []).slice();
+    const idx = sectionItems.findIndex((i) => i.id === item.id);
+    if (idx <= 0) return;
+    const prevItem = sectionItems[idx - 1];
+    const prevOrder = item.order;
+    const newOrder = prevItem.order;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => {
+        if (i.id === item.id) return { ...i, order: newOrder };
+        if (i.id === prevItem.id) return { ...i, order: prevOrder };
+        return i;
+      })
+    );
+    try {
+      await ListService.updateListItem(item.id, { order: newOrder });
+      await ListService.updateListItem(prevItem.id, { order: prevOrder });
+    } catch (err) {
+      console.error('Error moving item up:', err);
+      setListItems(previousState);
+    }
+  };
+
+  const handleMoveItemDownInSection = async (item: ListItem) => {
+    if (!item.section) return;
+    const sectionItems = (checklistItemsBySection.get(item.section) ?? []).slice();
+    const idx = sectionItems.findIndex((i) => i.id === item.id);
+    if (idx < 0 || idx >= sectionItems.length - 1) return;
+    const nextItem = sectionItems[idx + 1];
+    const prevOrder = item.order;
+    const newOrder = nextItem.order;
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => {
+        if (i.id === item.id) return { ...i, order: newOrder };
+        if (i.id === nextItem.id) return { ...i, order: prevOrder };
+        return i;
+      })
+    );
+    try {
+      await ListService.updateListItem(item.id, { order: newOrder });
+      await ListService.updateListItem(nextItem.id, { order: prevOrder });
+    } catch (err) {
+      console.error('Error moving item down:', err);
+      setListItems(previousState);
+    }
+  };
+
   const handleIndentAllInSection = async (sectionId: number) => {
     if (!list || list.list_type !== 'checklist') return;
     const sectionItems = (checklistItemsBySection.get(sectionId) ?? [])
@@ -1145,6 +1396,124 @@ export default function ListDetailScreen() {
   const handleWebDragEnd = () => {
     setDraggedItemId(null);
     setDragOverIndex(null);
+  };
+
+  // Checklist section reorder (accordion drag)
+  const handleChecklistSectionDragStart = (sectionId: number) => {
+    setDraggedSectionId(sectionId);
+  };
+
+  const handleChecklistSectionDragOver = (e: any, sectionIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragOverSectionIndex !== sectionIndex) {
+      setDragOverSectionIndex(sectionIndex);
+    }
+  };
+
+  const handleChecklistSectionDragLeave = () => {
+    setDragOverSectionIndex(null);
+  };
+
+  const handleChecklistSectionDrop = async (e: any, dropIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverSectionIndex(null);
+    if (draggedSectionId == null) return;
+    const dragIndex = sections.findIndex((s) => s.id === draggedSectionId);
+    if (dragIndex === -1 || dragIndex === dropIndex) {
+      setDraggedSectionId(null);
+      return;
+    }
+    const newSections = [...sections];
+    const [moved] = newSections.splice(dragIndex, 1);
+    newSections.splice(dropIndex, 0, moved);
+    const updated = newSections.map((s, i) => ({ ...s, order: i }));
+    setSections(updated);
+    setReorderingSections(true);
+    try {
+      await Promise.all(updated.map((s, i) => ListService.updateListSection(s.id, { order: i })));
+    } catch (err) {
+      console.error('Error reordering sections:', err);
+      await fetchListSections();
+    } finally {
+      setReorderingSections(false);
+      setDraggedSectionId(null);
+    }
+  };
+
+  const handleChecklistSectionDragEnd = () => {
+    setDraggedSectionId(null);
+    setDragOverSectionIndex(null);
+  };
+
+  const handleChecklistSectionDragEndMobile = async (data: ListSection[]) => {
+    const updated = data.map((s, i) => ({ ...s, order: i }));
+    setSections(updated);
+    setReorderingSections(true);
+    try {
+      await Promise.all(updated.map((s, i) => ListService.updateListSection(s.id, { order: i })));
+    } catch (err) {
+      console.error('Error reordering sections:', err);
+      await fetchListSections();
+    } finally {
+      setReorderingSections(false);
+    }
+  };
+
+  // Checklist item reorder within section (web drag-drop)
+  const handleChecklistItemDragStart = (itemId: number) => {
+    setDraggedChecklistItemId(itemId);
+  };
+
+  const handleChecklistItemDragOver = (e: any, itemId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    setDropTargetChecklistItemId(itemId);
+  };
+
+  const handleChecklistItemDragLeave = () => {
+    setDropTargetChecklistItemId(null);
+  };
+
+  const handleChecklistItemDrop = async (e: any, dropTargetId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTargetChecklistItemId(null);
+    const draggedId = draggedChecklistItemId;
+    setDraggedChecklistItemId(null);
+    if (draggedId == null || draggedId === dropTargetId) return;
+    const draggedItem = listItems.find((i) => i.id === draggedId);
+    const dropItem = listItems.find((i) => i.id === dropTargetId);
+    if (!draggedItem || !dropItem || draggedItem.section !== dropItem.section) return;
+    const sectionId = draggedItem.section!;
+    const sectionItems = (checklistItemsBySection.get(sectionId) ?? []).slice();
+    const fromIdx = sectionItems.findIndex((i) => i.id === draggedId);
+    const toIdx = sectionItems.findIndex((i) => i.id === dropTargetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const reordered = sectionItems.slice();
+    const [removed] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, removed);
+    const previousState = listItems.map((i) => ({ ...i }));
+    setListItems((prev) =>
+      prev.map((i) => {
+        const newOrder = reordered.findIndex((r) => r.id === i.id);
+        if (newOrder === -1) return i;
+        return { ...i, order: newOrder };
+      })
+    );
+    try {
+      await Promise.all(reordered.map((item, index) => ListService.updateListItem(item.id, { order: index })));
+    } catch (err) {
+      console.error('Error reordering checklist item:', err);
+      setListItems(previousState);
+    }
+  };
+
+  const handleChecklistItemDragEnd = () => {
+    setDraggedChecklistItemId(null);
+    setDropTargetChecklistItemId(null);
   };
 
   // Simple move functions for mobile when DraggableFlatList is not available
@@ -1674,82 +2043,291 @@ export default function ListDetailScreen() {
           </Text>
         </View>
       ) : isChecklistList ? (
-        <ScrollView
-          style={styles.scrollView}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
-          }
-        >
-          {sections.map((section) => {
-            const sectionItems = checklistItemsBySection.get(section.id) ?? [];
-            const allCompleted = isSectionAllCompleted(section.id);
-            const isCollapsed = collapsedSections.has(section.id);
-            return (
-              <View key={section.id} style={[styles.sectionGroup, { borderColor: colors.borderStrong }]}>
-                <SectionRow
-                  section={section}
-                  allCompleted={allCompleted}
-                  listColor={listColor}
-                  onToggleComplete={() => handleSectionToggleComplete(section)}
-                  onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
-                  onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
-                  collapsed={isCollapsed}
-                  onToggleCollapse={() => {
-                    setCollapsedSections((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(section.id)) {
-                        next.delete(section.id);
-                      } else {
-                        next.add(section.id);
-                      }
-                      return next;
-                    });
-                  }}
-                  onIndentAll={() => handleIndentAllInSection(section.id)}
-                  onOutdentAll={() => handleOutdentAllInSection(section.id)}
-                  itemCount={sectionItems.length}
-                />
-                {!isCollapsed && sectionItems.map((item) => {
-                  const depth = item.indent_level ?? 0;
-                  const canIndent = depth < 10;
-                  const canOutdent = depth > 0;
-                  return (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.checklistItemRow,
-                        { paddingLeft: 16 + depth * 32, backgroundColor: colors.surface, borderColor: colors.borderStrong },
-                      ]}
-                    >
-                      <View style={{ flex: 1 }} collapsable={false}>
-                        <ListItemComponent
-                          item={item}
-                          onToggleComplete={() => toggleItemComplete(item)}
-                          onEdit={() => setEditingItem(item)}
-                          onDelete={() => handleDeleteItem(item)}
-                          isTodoList={false}
-                          onIndent={() => handleIndent(item)}
-                          onOutdent={() => handleOutdent(item)}
-                          canIndent={canIndent}
-                          canOutdent={canOutdent}
-                        />
+        Platform.OS === 'web' ? (
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+              />
+            }
+          >
+            {sections.map((section, sectionIndex) => {
+              const sectionItems = checklistItemsBySection.get(section.id) ?? [];
+              const allCompleted = isSectionAllCompleted(section.id);
+              const isCollapsed = collapsedSections.has(section.id);
+              return (
+                <DraggableChecklistSection
+                  key={section.id}
+                  sectionId={section.id}
+                  sectionIndex={sectionIndex}
+                  isDragging={draggedSectionId === section.id}
+                  isDragOver={dragOverSectionIndex === sectionIndex}
+                  onDragStart={handleChecklistSectionDragStart}
+                  onDragOver={handleChecklistSectionDragOver}
+                  onDragLeave={handleChecklistSectionDragLeave}
+                  onDrop={handleChecklistSectionDrop}
+                  onDragEnd={handleChecklistSectionDragEnd}
+                >
+                  <View style={[styles.sectionGroup, { borderColor: colors.border }]}>
+                    <SectionRow
+                      section={section}
+                      allCompleted={allCompleted}
+                      listColor={listColor}
+                      onToggleComplete={() => handleSectionToggleComplete(section)}
+                      onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                      onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
+                      collapsed={isCollapsed}
+                      onToggleCollapse={() => {
+                        setCollapsedSections((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(section.id)) next.delete(section.id);
+                          else next.add(section.id);
+                          return next;
+                        });
+                      }}
+                      onIndentAll={() => handleIndentAllInSection(section.id)}
+                      onOutdentAll={() => handleOutdentAllInSection(section.id)}
+                      itemCount={sectionItems.length}
+                      showSectionDragHandle
+                    />
+                    {!isCollapsed && (
+                      <View style={styles.checklistItemsContainer}>
+                        {sectionItems.map((item) => {
+                      const depth = item.indent_level ?? 0;
+                      const canIndent = depth < 10;
+                      const canOutdent = depth > 0;
+                      const itemIndex = sectionItems.findIndex((i) => i.id === item.id);
+                      const canMoveUp = itemIndex > 0;
+                      const canMoveDown = itemIndex >= 0 && itemIndex < sectionItems.length - 1;
+                      const row = (
+                        <View
+                          key={item.id}
+                          style={[
+                            styles.checklistItemRow,
+                            { paddingLeft: 16 + depth * 32, backgroundColor: colors.surface, borderColor: colors.borderStrong },
+                          ]}
+                        >
+                          <View style={{ flex: 1 }} collapsable={false}>
+                            <ListItemComponent
+                              item={item}
+                              onToggleComplete={() => toggleItemComplete(item)}
+                              onEdit={() => setEditingItem(item)}
+                              onDelete={() => handleDeleteItem(item)}
+                              isTodoList={false}
+                              onIndent={() => handleIndent(item)}
+                              onOutdent={() => handleOutdent(item)}
+                              canIndent={canIndent}
+                              canOutdent={canOutdent}
+                              onMoveUp={Platform.OS !== 'web' && canMoveUp ? () => handleMoveItemUpInSection(item) : undefined}
+                              onMoveDown={Platform.OS !== 'web' && canMoveDown ? () => handleMoveItemDownInSection(item) : undefined}
+                              showDragHandle
+                            />
+                          </View>
+                        </View>
+                      );
+                      return Platform.OS === 'web' ? (
+                        <DraggableChecklistItemRow
+                          key={item.id}
+                          itemId={item.id}
+                          isDragging={draggedChecklistItemId === item.id}
+                          isDropTarget={dropTargetChecklistItemId === item.id}
+                          onDragStart={handleChecklistItemDragStart}
+                          onDragOver={handleChecklistItemDragOver}
+                          onDragLeave={handleChecklistItemDragLeave}
+                          onDrop={handleChecklistItemDrop}
+                          onDragEnd={handleChecklistItemDragEnd}
+                        >
+                          {row}
+                        </DraggableChecklistItemRow>
+                      ) : (
+                        row
+                      );
+                    })}
                       </View>
-                    </View>
-                  );
-                })}
+                    )}
+                  </View>
+                </DraggableChecklistSection>
+              );
+            })}
+            {sections.length === 0 && listItems.filter((i) => i.section == null).length === 0 && (
+              <View style={[styles.emptyState, { paddingVertical: 24 }]}>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No sections yet. Use the "Add Section" button above to get started.</Text>
               </View>
-            );
-          })}
-          {sections.length === 0 && listItems.filter((i) => i.section == null).length === 0 && (
-            <View style={[styles.emptyState, { paddingVertical: 24 }]}>
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No sections yet. Use the "Add Section" button above to get started.</Text>
-            </View>
-          )}
-        </ScrollView>
+            )}
+          </ScrollView>
+        ) : DraggableFlatList ? (
+          <DraggableFlatList
+            data={sections}
+            keyExtractor={(s: ListSection) => s.id.toString()}
+            onDragEnd={({ data }: { data: ListSection[] }) => handleChecklistSectionDragEndMobile(data)}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+              />
+            }
+            renderItem={({ item: section, drag }: any) => {
+              const sectionItems = checklistItemsBySection.get(section.id) ?? [];
+              const allCompleted = isSectionAllCompleted(section.id);
+              const isCollapsed = collapsedSections.has(section.id);
+              return (
+                <ScaleDecorator>
+                  <View style={[styles.sectionGroup, { borderColor: colors.border }]}>
+                    <SectionRow
+                      section={section}
+                      allCompleted={allCompleted}
+                      listColor={listColor}
+                      onToggleComplete={() => handleSectionToggleComplete(section)}
+                      onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                      onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
+                      collapsed={isCollapsed}
+                      onToggleCollapse={() => {
+                        setCollapsedSections((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(section.id)) next.delete(section.id);
+                          else next.add(section.id);
+                          return next;
+                        });
+                      }}
+                      onIndentAll={() => handleIndentAllInSection(section.id)}
+                      onOutdentAll={() => handleOutdentAllInSection(section.id)}
+                      itemCount={sectionItems.length}
+                      onSectionDrag={drag}
+                    />
+                    {!isCollapsed && (
+                      <View style={styles.checklistItemsContainer}>
+                        {sectionItems.map((item) => {
+                      const depth = item.indent_level ?? 0;
+                      const canIndent = depth < 10;
+                      const canOutdent = depth > 0;
+                      const itemIndex = sectionItems.findIndex((i) => i.id === item.id);
+                      const canMoveUp = itemIndex > 0;
+                      const canMoveDown = itemIndex >= 0 && itemIndex < sectionItems.length - 1;
+                      return (
+                        <View
+                          key={item.id}
+                          style={[
+                            styles.checklistItemRow,
+                            { paddingLeft: 16 + depth * 32, backgroundColor: colors.surface, borderColor: colors.borderStrong },
+                          ]}
+                        >
+                          <View style={{ flex: 1 }} collapsable={false}>
+                            <ListItemComponent
+                              item={item}
+                              onToggleComplete={() => toggleItemComplete(item)}
+                              onEdit={() => setEditingItem(item)}
+                              onDelete={() => handleDeleteItem(item)}
+                              isTodoList={false}
+                              onIndent={() => handleIndent(item)}
+                              onOutdent={() => handleOutdent(item)}
+                              canIndent={canIndent}
+                              canOutdent={canOutdent}
+                              onMoveUp={Platform.OS !== 'web' && canMoveUp ? () => handleMoveItemUpInSection(item) : undefined}
+                              onMoveDown={Platform.OS !== 'web' && canMoveDown ? () => handleMoveItemDownInSection(item) : undefined}
+                              showDragHandle
+                            />
+                          </View>
+                        </View>
+                      );
+                    })}
+                      </View>
+                    )}
+                  </View>
+                </ScaleDecorator>
+              );
+            }}
+            contentContainerStyle={styles.checklistContent}
+          />
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+              />
+            }
+          >
+            {sections.map((section) => {
+              const sectionItems = checklistItemsBySection.get(section.id) ?? [];
+              const allCompleted = isSectionAllCompleted(section.id);
+              const isCollapsed = collapsedSections.has(section.id);
+              return (
+                <View key={section.id} style={[styles.sectionGroup, { borderColor: colors.border }]}>
+                  <SectionRow
+                    section={section}
+                    allCompleted={allCompleted}
+                    listColor={listColor}
+                    onToggleComplete={() => handleSectionToggleComplete(section)}
+                    onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                    onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
+                    collapsed={isCollapsed}
+                    onToggleCollapse={() => {
+                      setCollapsedSections((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(section.id)) next.delete(section.id);
+                        else next.add(section.id);
+                        return next;
+                      });
+                    }}
+                    onIndentAll={() => handleIndentAllInSection(section.id)}
+                    onOutdentAll={() => handleOutdentAllInSection(section.id)}
+                    itemCount={sectionItems.length}
+                    showSectionDragHandle
+                  />
+                  {!isCollapsed && (
+                    <View style={styles.checklistItemsContainer}>
+                      {sectionItems.map((item) => {
+                    const depth = item.indent_level ?? 0;
+                    const canIndent = depth < 10;
+                    const canOutdent = depth > 0;
+                    const itemIndex = sectionItems.findIndex((i) => i.id === item.id);
+                    const canMoveUp = itemIndex > 0;
+                    const canMoveDown = itemIndex >= 0 && itemIndex < sectionItems.length - 1;
+                    return (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.checklistItemRow,
+                          { paddingLeft: 16 + depth * 32, backgroundColor: colors.surface, borderColor: colors.borderStrong },
+                        ]}
+                      >
+                        <View style={{ flex: 1 }} collapsable={false}>
+                          <ListItemComponent
+                            item={item}
+                            onToggleComplete={() => toggleItemComplete(item)}
+                            onEdit={() => setEditingItem(item)}
+                            onDelete={() => handleDeleteItem(item)}
+                            isTodoList={false}
+                            onIndent={() => handleIndent(item)}
+                            onOutdent={() => handleOutdent(item)}
+                            canIndent={canIndent}
+                            canOutdent={canOutdent}
+                            onMoveUp={Platform.OS !== 'web' && canMoveUp ? () => handleMoveItemUpInSection(item) : undefined}
+                            onMoveDown={Platform.OS !== 'web' && canMoveDown ? () => handleMoveItemDownInSection(item) : undefined}
+                          showDragHandle
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+            {sections.length === 0 && listItems.filter((i) => i.section == null).length === 0 && (
+              <View style={[styles.emptyState, { paddingVertical: 24 }]}>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No sections yet. Use the "Add Section" button above to get started.</Text>
+              </View>
+            )}
+          </ScrollView>
+        )
       ) : isGroceryList && listColor ? (
         <ScrollView
           style={styles.scrollView}
@@ -2382,10 +2960,16 @@ const styles = StyleSheet.create({
     } : {}),
   },
   sectionGroup: {
-    marginBottom: 12,
+    marginBottom: 16,
     borderRadius: 8,
     borderWidth: 1,
     overflow: 'hidden',
+  },
+  checklistItemsContainer: {
+    padding: 8,
+  },
+  checklistContent: {
+    paddingBottom: 24,
   },
   checklistItemRow: {
     flexDirection: 'row',

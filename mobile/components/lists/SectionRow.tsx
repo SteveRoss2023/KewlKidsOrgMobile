@@ -4,6 +4,16 @@ import { FontAwesome } from '@expo/vector-icons';
 import { ListSection } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
 
+function isLightColor(hex: string): boolean {
+  const color = hex.replace('#', '');
+  const rgb = color.length === 8 ? color.slice(0, 6) : color;
+  const r = parseInt(rgb.substring(0, 2), 16);
+  const g = parseInt(rgb.substring(2, 4), 16);
+  const b = parseInt(rgb.substring(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5;
+}
+
 interface SectionRowProps {
   section: ListSection;
   allCompleted: boolean;
@@ -16,6 +26,9 @@ interface SectionRowProps {
   onRenameSection?: (newTitle: string) => void;
   onDeleteSection?: () => void;
   listColor?: string;
+  onSectionDrag?: () => void;
+  /** Show the drag handle icon (e.g. on web where the whole row is draggable). When onSectionDrag is also set, the icon is pressable. */
+  showSectionDragHandle?: boolean;
 }
 
 export default function SectionRow({
@@ -29,6 +42,8 @@ export default function SectionRow({
   onRenameSection,
   onDeleteSection,
   listColor,
+  onSectionDrag,
+  showSectionDragHandle = false,
 }: SectionRowProps) {
   const { colors } = useTheme();
   const bullet =
@@ -36,10 +51,12 @@ export default function SectionRow({
       ? `${section.order + 1}.`
       : '\u2022';
 
-  const headerBg = colors.surface;
-  const headerTextColor = colors.text;
-  const headerIconColor = colors.textSecondary;
-  const checkboxBorderColor = listColor || colors.border;
+  // Match grocery: list color as header fill when set; otherwise surface
+  const headerBg = listColor || colors.surface;
+  const useLight = listColor ? isLightColor(listColor) : false;
+  const headerTextColor = listColor ? (useLight ? '#000000' : '#FFFFFF') : colors.text;
+  const headerIconColor = listColor ? (useLight ? '#00000080' : '#FFFFFF80') : colors.textSecondary;
+  const checkboxBorderColor = listColor ? (useLight ? '#333' : '#ddd') : colors.border;
 
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(section.title);
@@ -88,8 +105,7 @@ export default function SectionRow({
     <View
       style={[
         styles.row,
-        { backgroundColor: headerBg, borderColor: colors.borderStrong },
-        listColor && { borderWidth: 2, borderColor: listColor },
+        { backgroundColor: headerBg, borderBottomColor: colors.border },
       ]}
     >
       <TouchableOpacity
@@ -106,6 +122,22 @@ export default function SectionRow({
           <FontAwesome name="check" size={14} color="#fff" />
         ) : null}
       </TouchableOpacity>
+      {(onSectionDrag || showSectionDragHandle) && (
+        onSectionDrag ? (
+          <TouchableOpacity
+            onLongPress={onSectionDrag}
+            style={styles.sectionActionButton}
+            accessibilityLabel="Drag to reorder section"
+            {...(Platform.OS === 'web' ? { onMouseDown: (e: any) => e.stopPropagation() } : {})}
+          >
+            <FontAwesome name="bars" size={14} color={headerIconColor} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.sectionActionButton}>
+            <FontAwesome name="bars" size={14} color={headerIconColor} />
+          </View>
+        )
+      )}
       <View style={styles.bulletContainer}>
         <Text style={[styles.bullet, { color: headerTextColor }]}>{bullet}</Text>
       </View>
@@ -128,7 +160,11 @@ export default function SectionRow({
           accessibilityLabel={collapsed ? 'Expand section' : 'Collapse section'}
         >
           <Text
-            style={[styles.title, { color: headerTextColor }]}
+            style={[
+              styles.title,
+              { color: headerTextColor },
+              allCompleted && styles.titleCompleted,
+            ]}
             numberOfLines={2}
           >
             {section.title}
@@ -182,8 +218,8 @@ export default function SectionRow({
           accessibilityLabel={collapsed ? 'Expand section' : 'Collapse section'}
         >
           <FontAwesome
-            name={collapsed ? 'chevron-right' : 'chevron-down'}
-            size={14}
+            name={collapsed ? 'chevron-down' : 'chevron-up'}
+            size={16}
             color={headerIconColor}
           />
         </TouchableOpacity>
@@ -196,9 +232,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
     gap: 10,
   },
   bulletContainer: {
@@ -223,6 +259,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  titleCompleted: {
+    textDecorationLine: 'line-through',
+    opacity: 0.6,
   },
   titleInput: {
     flex: 1,
