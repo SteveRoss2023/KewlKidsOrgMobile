@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { ListSection } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useIsMobileLayout } from '../../hooks/useIsMobileLayout';
 
 function isLightColor(hex: string): boolean {
   const color = hex.replace('#', '');
@@ -82,6 +83,30 @@ export default function SectionRow({
     }
   };
 
+  const isMobileLayout = useIsMobileLayout();
+  const showSectionOverflowMenu = isMobileLayout;
+  const hasAnySectionAction = !!(onRenameSection || onDeleteSection || onOutdentAll || onIndentAll);
+
+  const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
+
+  const openSectionMenu = () => {
+    const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
+    if (onRenameSection) {
+      buttons.push({ text: 'Rename section', onPress: () => setEditing(true) });
+    }
+    if (onDeleteSection) {
+      buttons.push({ text: 'Delete section', onPress: onDeleteSection, style: 'destructive' });
+    }
+    if (onOutdentAll) {
+      buttons.push({ text: 'Outdent all', onPress: onOutdentAll });
+    }
+    if (onIndentAll) {
+      buttons.push({ text: 'Indent all', onPress: onIndentAll });
+    }
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Section', undefined, buttons);
+  };
+
   const indentRef = useRef<any>(null);
   const outdentRef = useRef<any>(null);
   const editBtnRef = useRef<any>(null);
@@ -99,7 +124,7 @@ export default function SectionRow({
       if (onRenameSection) setTitle(editBtnRef, 'Edit section name');
       if (onDeleteSection) setTitle(deleteBtnRef, 'Delete section and all its items');
     }
-  }, [onIndentAll, onOutdentAll, onRenameSection, onDeleteSection]);
+  }, [onIndentAll, onOutdentAll, onRenameSection, onDeleteSection, isMobileLayout, sectionMenuOpen]);
 
   return (
     <View
@@ -171,7 +196,69 @@ export default function SectionRow({
           </Text>
         </TouchableOpacity>
       )}
-      {!editing && onRenameSection && (
+      {!editing && showSectionOverflowMenu && hasAnySectionAction ? (
+        Platform.OS === 'web' && sectionMenuOpen ? (
+          <View style={styles.sectionMenuIconsRow}>
+            {onRenameSection && (
+              <TouchableOpacity
+                ref={editBtnRef}
+                style={styles.sectionActionButton}
+                onPress={() => { setSectionMenuOpen(false); setEditing(true); }}
+                accessibilityLabel="Rename section"
+              >
+                <FontAwesome name="pencil" size={14} color={headerIconColor} />
+              </TouchableOpacity>
+            )}
+            {onDeleteSection && (
+              <TouchableOpacity
+                ref={deleteBtnRef}
+                style={styles.sectionActionButton}
+                onPress={() => { setSectionMenuOpen(false); onDeleteSection(); }}
+                accessibilityLabel="Delete section"
+              >
+                <FontAwesome name="trash" size={14} color="#FF3B30" />
+              </TouchableOpacity>
+            )}
+            {onOutdentAll && (
+              <TouchableOpacity
+                ref={outdentRef}
+                style={styles.sectionActionButton}
+                onPress={() => { setSectionMenuOpen(false); onOutdentAll(); }}
+                accessibilityLabel="Outdent all"
+              >
+                <FontAwesome name="outdent" size={14} color={headerIconColor} />
+              </TouchableOpacity>
+            )}
+            {onIndentAll && (
+              <TouchableOpacity
+                ref={indentRef}
+                style={styles.sectionActionButton}
+                onPress={() => { setSectionMenuOpen(false); onIndentAll(); }}
+                accessibilityLabel="Indent all"
+              >
+                <FontAwesome name="indent" size={14} color={headerIconColor} />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.sectionActionButton}
+              onPress={() => setSectionMenuOpen(false)}
+              accessibilityLabel="Close menu"
+              accessibilityHint="Closes the section actions menu"
+            >
+              <FontAwesome name="ellipsis-v" size={14} color={headerIconColor} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+        <TouchableOpacity
+          onPress={Platform.OS === 'web' ? () => setSectionMenuOpen((open) => !open) : openSectionMenu}
+          style={styles.sectionActionButton}
+          accessibilityLabel="Section actions"
+          accessibilityHint="Opens menu with rename, delete, and indent options"
+        >
+          <FontAwesome name="ellipsis-v" size={14} color={headerIconColor} />
+        </TouchableOpacity>
+        )
+      ) : !editing && !showSectionOverflowMenu && onRenameSection && (
         <TouchableOpacity
           ref={editBtnRef}
           onPress={() => setEditing(true)}
@@ -181,7 +268,7 @@ export default function SectionRow({
           <FontAwesome name="pencil" size={14} color={headerIconColor} />
         </TouchableOpacity>
       )}
-      {!editing && onDeleteSection && (
+      {!editing && !showSectionOverflowMenu && onDeleteSection && (
         <TouchableOpacity
           ref={deleteBtnRef}
           onPress={onDeleteSection}
@@ -191,7 +278,7 @@ export default function SectionRow({
           <FontAwesome name="trash" size={14} color="#FF3B30" />
         </TouchableOpacity>
       )}
-      {onOutdentAll && (
+      {!showSectionOverflowMenu && onOutdentAll && (
         <TouchableOpacity
           ref={outdentRef}
           onPress={onOutdentAll}
@@ -201,7 +288,7 @@ export default function SectionRow({
           <FontAwesome name="outdent" size={14} color={headerIconColor} />
         </TouchableOpacity>
       )}
-      {onIndentAll && (
+      {!showSectionOverflowMenu && onIndentAll && (
         <TouchableOpacity
           ref={indentRef}
           onPress={onIndentAll}
@@ -280,6 +367,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...(Platform.OS === 'web' ? { cursor: 'pointer' as const } : {}),
+  },
+  sectionMenuIconsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   chevronButton: {
     padding: 8,

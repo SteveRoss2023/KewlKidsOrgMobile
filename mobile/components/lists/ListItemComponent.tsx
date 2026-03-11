@@ -1,8 +1,9 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Pressable } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Pressable, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { ListItem } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useIsMobileLayout } from '../../hooks/useIsMobileLayout';
 
 interface ListItemComponentProps {
   item: ListItem;
@@ -47,6 +48,8 @@ export default function ListItemComponent({
   canOutdent = true,
 }: ListItemComponentProps) {
   const { colors } = useTheme();
+  const isMobileLayout = useIsMobileLayout();
+  const [itemMenuOpen, setItemMenuOpen] = useState(false);
   const editButtonRef = useRef<any>(null);
   const moveButtonRef = useRef<any>(null);
   const deleteButtonRef = useRef<any>(null);
@@ -55,6 +58,36 @@ export default function ListItemComponent({
   const deleteButtonWebRef = useRef<any>(null);
 
   const isOverdue = isTodoList && item.due_date && !item.completed && new Date(item.due_date) < new Date();
+
+  const useChecklistOverflowMenu = isMobileLayout && (onIndent != null || onOutdent != null);
+  const hasAnyItemAction = !!(onEdit || onDelete || onMove || onIndent || onOutdent);
+
+  const openItemMenu = () => {
+    const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
+    if (onEdit) {
+      buttons.push({ text: 'Edit', onPress: onEdit });
+    }
+    if (onMove) {
+      buttons.push({ text: 'Move to list', onPress: onMove });
+    }
+    if (onDelete) {
+      buttons.push({ text: 'Delete', onPress: onDelete, style: 'destructive' });
+    }
+    if (onOutdent != null) {
+      buttons.push({
+        text: canOutdent ? 'Outdent' : 'Outdent (already top level)',
+        onPress: canOutdent ? onOutdent : undefined,
+      });
+    }
+    if (onIndent != null) {
+      buttons.push({
+        text: canIndent ? 'Indent' : 'Indent (max depth)',
+        onPress: canIndent ? onIndent : undefined,
+      });
+    }
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Item', undefined, buttons);
+  };
 
   // Set title attribute on web for tooltips
   useEffect(() => {
@@ -89,7 +122,7 @@ export default function ListItemComponent({
       if (onMove) setTitle(moveButtonWebRef, 'Move item to another list');
       if (onDelete) setTitle(deleteButtonWebRef, 'Delete item');
     }
-  }, [onEdit, onMove, onDelete]);
+  }, [onEdit, onMove, onDelete, isMobileLayout, useChecklistOverflowMenu, itemMenuOpen]);
 
   const indentButtonRef = useRef<any>(null);
   const outdentButtonRef = useRef<any>(null);
@@ -118,7 +151,7 @@ export default function ListItemComponent({
       if (onOutdent) setTitle(outdentButtonRef, canOutdent ? 'Outdent (move left)' : 'Outdent (already top level)');
       if (onIndent) setTitle(indentButtonRef, canIndent ? 'Indent (move right)' : 'Indent (first item in section)');
     }
-  }, [onIndent, onOutdent, canIndent, canOutdent]);
+  }, [onIndent, onOutdent, canIndent, canOutdent, isMobileLayout, useChecklistOverflowMenu, itemMenuOpen]);
 
   return (
     <View
@@ -392,8 +425,90 @@ export default function ListItemComponent({
                   {item.name}
                 </Text>
               )}
-              {/* Edit, Move, and Delete buttons on same line as name on mobile */}
-              {Platform.OS !== 'web' && (
+              {/* On mobile layout: checklist items use overflow menu; others use inline action buttons */}
+              {isMobileLayout && useChecklistOverflowMenu && hasAnyItemAction && (
+                Platform.OS === 'web' && itemMenuOpen ? (
+                  <View style={styles.itemActionsInline}>
+                    {onEdit && (
+                      <TouchableOpacity
+                        ref={editButtonWebRef}
+                        style={styles.actionButton}
+                        onPress={() => { setItemMenuOpen(false); onEdit(); }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel="Edit item"
+                      >
+                        <FontAwesome name="edit" size={18} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    {onMove && (
+                      <TouchableOpacity
+                        ref={moveButtonWebRef}
+                        style={styles.actionButton}
+                        onPress={() => { setItemMenuOpen(false); onMove(); }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel="Move to list"
+                      >
+                        <FontAwesome name="arrows-alt" size={18} color={colors.primary} />
+                      </TouchableOpacity>
+                    )}
+                    {onDelete && (
+                      <TouchableOpacity
+                        ref={deleteButtonWebRef}
+                        style={styles.actionButton}
+                        onPress={() => { setItemMenuOpen(false); onDelete(); }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel="Delete item"
+                      >
+                        <FontAwesome name="trash" size={18} color="#FF3B30" />
+                      </TouchableOpacity>
+                    )}
+                    {onOutdent != null && (
+                      <TouchableOpacity
+                        ref={outdentButtonRef}
+                        style={styles.actionButton}
+                        onPress={() => { setItemMenuOpen(false); canOutdent && onOutdent(); }}
+                        disabled={!canOutdent}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel={canOutdent ? 'Outdent' : 'Outdent (already top level)'}
+                      >
+                        <FontAwesome name="outdent" size={16} color={canOutdent ? colors.text : colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    {onIndent != null && (
+                      <TouchableOpacity
+                        ref={indentButtonRef}
+                        style={[styles.actionButton, !canIndent && styles.actionButtonDisabled]}
+                        onPress={() => { setItemMenuOpen(false); canIndent && onIndent(); }}
+                        disabled={!canIndent}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel={canIndent ? 'Indent' : 'Indent (max depth)'}
+                      >
+                        <FontAwesome name="indent" size={16} color={canIndent ? colors.text : colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => setItemMenuOpen(false)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel="Close menu"
+                      accessibilityHint="Closes the item actions menu"
+                    >
+                      <FontAwesome name="ellipsis-v" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={Platform.OS === 'web' ? () => setItemMenuOpen((open) => !open) : openItemMenu}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="Item actions"
+                  accessibilityHint="Opens menu with edit, delete, indent, and outdent options"
+                >
+                  <FontAwesome name="ellipsis-v" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+                )
+              )}
+              {isMobileLayout && !useChecklistOverflowMenu && (
                 <View style={styles.itemActionsInline}>
                   {onEdit && (
                     <TouchableOpacity
@@ -501,8 +616,8 @@ export default function ListItemComponent({
         </View>
       )}
 
-      {/* Actions on web - show on the right */}
-      {Platform.OS === 'web' && (
+      {/* Actions on web - show on the right (desktop layout only) */}
+      {Platform.OS === 'web' && !isMobileLayout && (
         <View style={styles.itemActions}>
           {showCategorySelect && isGroceryList && categories.length > 0 && (
             <View style={styles.categorySelect}>
@@ -619,6 +734,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'flex-start',
     gap: 12,
+    position: 'relative',
     ...(Platform.OS !== 'web' ? {
       minHeight: 80, // Ensure minimum height on mobile
     } : {}),
