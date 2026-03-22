@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import re
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -36,7 +37,18 @@ if not SECRET_KEY:
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,10.0.0.25,kewlkidsorganizermobile.ngrok.app,*.ngrok.app,*.ngrok-free.app').split(',')
+# .kewlkids.ca matches apex + all subdomains (Django subdomain wildcard).
+_default_allowed = (
+    'localhost,127.0.0.1,0.0.0.0,10.0.0.25,'
+    'kewlkidsorganizermobile.ngrok.app,*.ngrok.app,*.ngrok-free.app,'
+    'kewlkids.ca,.kewlkids.ca'
+)
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', _default_allowed).split(',') if h.strip()]
+
+# Set USE_X_FORWARDED_HOST=True when TLS terminates at Cloudflare/ngrok so Host/scheme are correct.
+if os.getenv('USE_X_FORWARDED_HOST', '').lower() == 'true':
+    USE_X_FORWARDED_HOST = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Custom User Model
 AUTH_USER_MODEL = 'api.User'
@@ -229,10 +241,20 @@ if DEBUG:
         'PUT',
     ]
 else:
-    CORS_ALLOWED_ORIGINS = os.getenv(
-        'CORS_ALLOWED_ORIGINS',
-        'http://localhost:8081,http://localhost:19000,http://localhost:19006'
-    ).split(',')
+    CORS_ALLOWED_ORIGINS = [
+        o.strip()
+        for o in os.getenv(
+            'CORS_ALLOWED_ORIGINS',
+            'http://localhost:8081,http://localhost:19000,http://localhost:19006',
+        ).split(',')
+        if o.strip()
+    ]
+    # HTTPS (and optional port) for kewlkids.ca and any subdomain — needed when DEBUG=False
+    _cors_public = os.getenv('CORS_PUBLIC_APP_DOMAIN', 'kewlkids.ca').strip().lower()
+    CORS_ALLOWED_ORIGIN_REGEXES = []
+    if _cors_public:
+        escaped = re.escape(_cors_public)
+        CORS_ALLOWED_ORIGIN_REGEXES.append(rf'^https://([a-zA-Z0-9-]+\.)*{escaped}(:\d+)?$')
     CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'True') == 'True'
     CORS_ALLOW_HEADERS = [
         'accept',

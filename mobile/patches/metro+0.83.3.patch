@@ -1,0 +1,31 @@
+diff --git a/node_modules/metro/src/Server.js b/node_modules/metro/src/Server.js
+index 6adc6d1..9845a78 100644
+--- a/node_modules/metro/src/Server.js
++++ b/node_modules/metro/src/Server.js
+@@ -480,12 +480,24 @@ class Server {
+     if (req.url !== originalUrl) {
+       debug("Rewritten to:    %s", req.url);
+     }
+-    const reqHost = req.headers["x-forwarded-host"] || req.headers["host"];
++    // Proxies (e.g. Cloudflare) may send comma-separated X-Forwarded-* chains.
++    // Using the raw value breaks `new URL()` (e.g. base "https, https://host").
++    const _firstHeaderPart = (value) => {
++      if (value == null) {
++        return "";
++      }
++      const s = Array.isArray(value) ? value.join(",") : String(value);
++      const i = s.indexOf(",");
++      return (i === -1 ? s : s.slice(0, i)).trim();
++    };
++    const reqHost =
++      _firstHeaderPart(req.headers["x-forwarded-host"]) ||
++      _firstHeaderPart(req.headers["host"]);
+     if (!reqHost) {
+       throw new Error("No host header was found.");
+     }
+     const reqProtocol =
+-      req.headers["x-forwarded-proto"] ||
++      _firstHeaderPart(req.headers["x-forwarded-proto"]) ||
+       (req.socket?.encrypted === true ? "https" : "http");
+     const urlObj = new URL(req.url, reqProtocol + "://" + reqHost);
+     const formattedUrl = urlObj.toString();

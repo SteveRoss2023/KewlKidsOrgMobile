@@ -4,13 +4,30 @@ import navigationService from './navigationService';
 
 /**
  * API Configuration
- * On web, use localhost. On native (phone), use the computer's local IP address.
- * Update EXPO_PUBLIC_API_URL in .env file or set it to your computer's IP (e.g., http://10.0.0.25:8900/api)
+ * On web: localhost / ngrok detection / public domain (e.g. *.kewlkids.ca → organizer-api…).
+ * On native: EXPO_PUBLIC_API_URL or LAN IP. Public web host wins over EXPO_PUBLIC_API_URL so ngrok in .env does not break production domain.
  */
 import { Platform } from 'react-native';
+import {
+  getWebApiBaseUrl,
+  getRuntimeWebApiBaseUrlOverride,
+  isPublicCustomDomainWebHost,
+} from '../utils/webApiBaseUrl';
 
 const getApiBaseUrl = (): string => {
-  // Check if explicitly set in environment
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const runtime = getRuntimeWebApiBaseUrlOverride();
+    if (runtime) {
+      return runtime;
+    }
+    // Served from e.g. organizer.kewlkids.ca — use inferred API (organizer-api…) even if
+    // EXPO_PUBLIC_API_URL still points at ngrok from an old .env.
+    if (isPublicCustomDomainWebHost()) {
+      return getWebApiBaseUrl();
+    }
+  }
+
+  // Build-time explicit API URL (Expo public) — localhost / ngrok web, native builds, etc.
   if (process.env.EXPO_PUBLIC_API_URL) {
     const url = process.env.EXPO_PUBLIC_API_URL.trim();
     // Validate URL format
@@ -20,22 +37,8 @@ const getApiBaseUrl = (): string => {
     return url;
   }
 
-  // On web, detect if we're running on ngrok and use ngrok API URL
-  if (Platform.OS === 'web') {
-    // Check if we're accessing the app via ngrok
-    if (typeof window !== 'undefined' && window.location.hostname.includes('ngrok')) {
-      // If on ngrok web app, use ngrok API URL (same domain, different path)
-      // Replace web app ngrok domain with API ngrok domain
-      const hostname = window.location.hostname;
-      // Assuming API is on kewlkidsorganizermobile.ngrok.app and web is on kewlkidsorganizermobile-web.ngrok.app
-      if (hostname.includes('kewlkidsorganizermobile-web')) {
-        return 'https://kewlkidsorganizermobile.ngrok.app/api';
-      }
-      // Fallback: use same domain for API
-      return `https://${hostname.replace('-web', '')}/api`;
-    }
-    // Not on ngrok, use localhost
-    return 'http://localhost:8900/api';
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return getWebApiBaseUrl();
   }
 
   // On native (phone), use the computer's local IP address
@@ -45,6 +48,11 @@ const getApiBaseUrl = (): string => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+
+/** Same rules as the axios base URL; use when resolving media/WebSocket bases at runtime. */
+export function getResolvedApiBaseUrl(): string {
+  return getApiBaseUrl();
+}
 
 // Log API URL for debugging (only in development)
 if (__DEV__) {
@@ -69,6 +77,8 @@ const apiClient: AxiosInstance = axios.create({
  */
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
+    config.baseURL = getApiBaseUrl();
+
     const token = await tokenStorage.getAccessToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;

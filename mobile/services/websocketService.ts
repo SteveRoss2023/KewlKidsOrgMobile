@@ -2,6 +2,7 @@
  * WebSocket service for real-time chat messaging.
  */
 import { Platform } from 'react-native';
+import { getResolvedApiBaseUrl } from './api';
 
 export interface WebSocketMessage {
   type: string;
@@ -37,22 +38,12 @@ class WebSocketService {
     // Use the same logic as API service to get base URL
     let baseUrl: string;
 
-    if (process.env.EXPO_PUBLIC_API_URL) {
-      baseUrl = process.env.EXPO_PUBLIC_API_URL.trim();
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      baseUrl = getResolvedApiBaseUrl();
     } else if (Platform.OS === 'web') {
-      // Check if we're accessing the app via ngrok
-      if (typeof window !== 'undefined' && window.location.hostname.includes('ngrok')) {
-        const hostname = window.location.hostname;
-        if (hostname.includes('kewlkidsorganizermobile-web')) {
-          baseUrl = 'https://kewlkidsorganizermobile.ngrok.app/api';
-        } else {
-          baseUrl = `https://${hostname.replace('-web', '')}/api`;
-        }
-      } else {
-        baseUrl = 'http://localhost:8900/api';
-      }
+      baseUrl = 'http://localhost:8900/api';
     } else {
-      baseUrl = 'http://10.0.0.25:8900/api';
+      baseUrl = getResolvedApiBaseUrl();
     }
 
     // Remove /api suffix if present (WebSocket path doesn't need it)

@@ -44,6 +44,33 @@ class TemporaryLoginToken:
             return None, None
 
 
+def _web_app_base_from_referer(referer: str):
+    """Return scheme://host[:port] for Expo web when referer is ngrok, localhost, or PUBLIC_WEB_APP_DOMAIN."""
+    if not referer:
+        return None
+    try:
+        import os
+        from urllib.parse import urlparse
+
+        parsed = urlparse(referer)
+        netloc = parsed.netloc
+        if not netloc:
+            return None
+        host = parsed.hostname or netloc.split(':')[0]
+        if not host:
+            return None
+        if 'ngrok' in host:
+            return f'{parsed.scheme}://{netloc}'
+        if 'localhost' in host or host == '127.0.0.1':
+            return f'{parsed.scheme}://{netloc}'
+        public_suffix = os.getenv('PUBLIC_WEB_APP_DOMAIN', 'kewlkids.ca').strip().lower()
+        if public_suffix and (host == public_suffix or host.endswith(f'.{public_suffix}')):
+            return f'{parsed.scheme}://{netloc}'
+        return None
+    except Exception:
+        return None
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
@@ -2177,16 +2204,9 @@ def OneDriveOAuthCallbackView(request):
         referer = request.META.get('HTTP_REFERER', '')
         web_app_url = 'http://localhost:8081'  # Default Expo web port
         if referer:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(referer)
-                # If referer is from ngrok or localhost, use that
-                if 'ngrok' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-                elif 'localhost' in parsed.netloc or '127.0.0.1' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-            except:
-                pass
+            base = _web_app_base_from_referer(referer)
+            if base:
+                web_app_url = base
 
         redirect_url = f'{web_app_url}/(tabs)/onedrive-connect?success=true&service=onedrive&message={quote("OneDrive connected successfully!")}'
         escaped_url = html_escape.escape(redirect_url)
@@ -2988,16 +3008,9 @@ def GoogleDriveOAuthCallbackView(request):
         referer = request.META.get('HTTP_REFERER', '')
         web_app_url = 'http://localhost:8081'  # Default Expo web port
         if referer:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(referer)
-                # If referer is from ngrok or localhost, use that
-                if 'ngrok' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-                elif 'localhost' in parsed.netloc or '127.0.0.1' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-            except:
-                pass
+            base = _web_app_base_from_referer(referer)
+            if base:
+                web_app_url = base
 
         redirect_url = f'{web_app_url}/(tabs)/googledrive-connect?success=true&service=googledrive&message={quote("Google Drive connected successfully!")}'
         escaped_url = html_escape.escape(redirect_url)
@@ -3788,16 +3801,9 @@ def GooglePhotosOAuthCallbackView(request):
         referer = request.META.get('HTTP_REFERER', '')
         web_app_url = 'http://localhost:8081'  # Default Expo web port
         if referer:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(referer)
-                # If referer is from ngrok or localhost, use that
-                if 'ngrok' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-                elif 'localhost' in parsed.netloc or '127.0.0.1' in parsed.netloc:
-                    web_app_url = f'{parsed.scheme}://{parsed.netloc}'
-            except:
-                pass
+            base = _web_app_base_from_referer(referer)
+            if base:
+                web_app_url = base
 
         redirect_url = f'{web_app_url}/(tabs)/googlephotos-connect?success=true&service=googlephotos&message={quote("Google Photos connected successfully!")}'
         escaped_url = html_escape.escape(redirect_url)

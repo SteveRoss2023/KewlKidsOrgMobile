@@ -27,7 +27,7 @@ import chatService, { ChatRoom, Message } from '../../../services/chatService';
 import websocketService from '../../../services/websocketService';
 import { EncryptionManager } from '../../../utils/encryption';
 import { tokenStorage } from '../../../utils/storage';
-import { APIError } from '../../../services/api';
+import { APIError, getResolvedApiBaseUrl } from '../../../services/api';
 import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useFamily } from '../../../contexts/FamilyContext';
 import AuthenticatedImage from '../../../components/AuthenticatedImage';
@@ -133,22 +133,7 @@ export default function ConversationScreen() {
         // Construct full photo URL if it's a relative path
         let photoUrl = profile.photo_url;
         if (photoUrl && !photoUrl.startsWith('http://') && !photoUrl.startsWith('https://')) {
-          // Get base URL - use the same logic as API service
-          let apiBaseUrl: string;
-          if (process.env.EXPO_PUBLIC_API_URL) {
-            apiBaseUrl = process.env.EXPO_PUBLIC_API_URL.trim();
-          } else if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname.includes('ngrok')) {
-            const hostname = window.location.hostname;
-            if (hostname.includes('kewlkidsorganizermobile-web')) {
-              apiBaseUrl = 'https://kewlkidsorganizermobile.ngrok.app/api';
-            } else {
-              apiBaseUrl = `https://${hostname.replace('-web', '')}/api`;
-            }
-          } else if (Platform.OS === 'web') {
-            apiBaseUrl = 'http://localhost:8900/api';
-          } else {
-            apiBaseUrl = 'http://10.0.0.25:8900/api';
-          }
+          const apiBaseUrl = getResolvedApiBaseUrl();
 
           // Remove /api suffix for photo URL (photos are served at /api/users/{id}/photo/)
           const baseUrl = apiBaseUrl.replace(/\/api$/, '');
@@ -594,22 +579,7 @@ export default function ConversationScreen() {
         // Construct full photo URL if it's a relative path
         let photoUrl = message.sender_photo_url;
         if (photoUrl && !photoUrl.startsWith('http://') && !photoUrl.startsWith('https://')) {
-          // Get base URL - use the same logic as API service
-          let apiBaseUrl: string;
-          if (process.env.EXPO_PUBLIC_API_URL) {
-            apiBaseUrl = process.env.EXPO_PUBLIC_API_URL.trim();
-          } else if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname.includes('ngrok')) {
-            const hostname = window.location.hostname;
-            if (hostname.includes('kewlkidsorganizermobile-web')) {
-              apiBaseUrl = 'https://kewlkidsorganizermobile.ngrok.app/api';
-            } else {
-              apiBaseUrl = `https://${hostname.replace('-web', '')}/api`;
-            }
-          } else if (Platform.OS === 'web') {
-            apiBaseUrl = 'http://localhost:8900/api';
-          } else {
-            apiBaseUrl = 'http://10.0.0.25:8900/api';
-          }
+          const apiBaseUrl = getResolvedApiBaseUrl();
 
           // Remove /api suffix for photo URL (photos are served at /api/users/{id}/photo/)
           const baseUrl = apiBaseUrl.replace(/\/api$/, '');
