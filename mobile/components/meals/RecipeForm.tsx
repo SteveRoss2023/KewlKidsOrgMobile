@@ -21,6 +21,7 @@ import MealsService, {
   Recipe,
   RecipeImageAsset,
 } from '../../services/mealsService';
+import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
 
 let ImagePicker: any = null;
 if (Platform.OS !== 'web') {
@@ -172,7 +173,8 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
     }
   };
 
-  const displayImageUri = pickedImage?.uri ?? (clearImageRequested ? null : (recipe?.image_url && recipe.image_url.trim()) || null);
+  const displayImageUri =
+    pickedImage?.uri ?? (clearImageRequested ? null : resolveRecipeImageUrl(recipe?.image_url));
   const showFilePickerFallback = !ImagePicker;
 
   const handleSubmit = async () => {

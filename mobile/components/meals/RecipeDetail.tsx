@@ -13,6 +13,7 @@ import {
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import MealsService, { Recipe } from '../../services/mealsService';
+import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
 import { List } from '../../types/lists';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 
@@ -42,23 +43,8 @@ export default function RecipeDetail({
   useEffect(() => {
     // Reset image error and set image URI when recipe changes
     setImageError(false);
-    if (recipe.image_url && recipe.image_url.trim()) {
-      const url = normalizeImageUrl(recipe.image_url);
-      setImageUri(url);
-    } else {
-      setImageUri(null);
-    }
+    setImageUri(resolveRecipeImageUrl(recipe.image_url));
   }, [recipe.image_url]);
-
-  const normalizeImageUrl = (url: string): string => {
-    if (!url) return url;
-    let normalized = url.trim();
-    // Convert HTTP to HTTPS for better mobile compatibility
-    if (normalized.startsWith('http://')) {
-      normalized = normalized.replace('http://', 'https://');
-    }
-    return normalized;
-  };
 
   const handleAddToList = async () => {
     if (!selectedListId) return;

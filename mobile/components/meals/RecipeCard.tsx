@@ -12,6 +12,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import MealsService, { Recipe } from '../../services/mealsService';
 import ListService from '../../services/listService';
+import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
 import { List, ListItem } from '../../types/lists';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 
@@ -36,23 +37,8 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
     // Reset image error when recipe changes
     setImageError(false);
     // Set image URI when recipe changes
-    if (recipe.image_url && recipe.image_url.trim()) {
-      const url = normalizeImageUrl(recipe.image_url);
-      setImageUri(url);
-    } else {
-      setImageUri(null);
-    }
+    setImageUri(resolveRecipeImageUrl(recipe.image_url));
   }, [recipe, shoppingLists]);
-
-  const normalizeImageUrl = (url: string): string => {
-    if (!url) return url;
-    let normalized = url.trim();
-    // Convert HTTP to HTTPS for better mobile compatibility
-    if (normalized.startsWith('http://')) {
-      normalized = normalized.replace('http://', 'https://');
-    }
-    return normalized;
-  };
 
   const checkRecipeInLists = async () => {
     if (shoppingLists.length === 0) return;
