@@ -387,18 +387,32 @@ EXPO_PUBLIC_API_URL=https://kewlkidsorganizermobile.ngrok.app/api
 | `JWT_REFRESH_TOKEN_LIFETIME` | JWT refresh token lifetime (minutes) | `1440` | No |
 | `JWT_ALGORITHM` | JWT algorithm | `HS256` | No |
 | `JWT_SECRET_KEY` | JWT signing key | Uses `SECRET_KEY` | No |
-| `WEB_APP_URL` | Web app URL for redirects | `http://localhost:8081` | No |
+| `WEB_APP_URL` | Web app URL for redirects (emails, OAuth UI) | `https://organizer.kewlkids.ca` in production | No |
 
 ### Mobile Environment Variables
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `EXPO_PUBLIC_API_URL` | API base URL | Auto-detected | No |
+| `EXPO_PUBLIC_CUSTOM_DOMAIN` | Apex domain for `*.kewlkids.ca` detection | `kewlkids.ca` | No |
+| `EXPO_PUBLIC_WEB_APP_HOST` | Public browser hostname (no scheme) | `organizer.kewlkids.ca` | No |
+| `EXPO_PUBLIC_API_HOST` | Public API hostname (no scheme) | `organizer-api.kewlkids.ca` | No |
+| `EXPO_PUBLIC_API_URL` | API base URL for **native / Expo Go** (and non-localhost web if set) | See below | No |
 
-**API URL Auto-Detection:**
-- **Web (localhost)**: `http://localhost:8900/api`
-- **Web (ngrok)**: Automatically detected from window.location
-- **Native**: `http://10.0.0.25:8900/api` (update IP in `mobile/services/api.ts`)
+Copy [`mobile/.env.example`](../mobile/.env.example) to `mobile/.env` and adjust.
+
+**API URL resolution (web):**
+- **Runtime override** (`kewlkids_runtime_api_base_url` in session/localStorage): used first for debugging.
+- **`localhost` / `127.0.0.1`**: always `http://localhost:8900/api` (ignores stale `EXPO_PUBLIC_API_URL` pointing at ngrok or prod).
+- **`*.kewlkids.ca`**: `https://<EXPO_PUBLIC_API_HOST>/api` (defaults to `organizer-api.kewlkids.ca`).
+- **Otherwise**: `EXPO_PUBLIC_API_URL` if set, else inferred (ngrok / localhost).
+
+**Native / physical device:** set `EXPO_PUBLIC_API_URL` to your PC’s LAN URL, e.g. `http://10.0.0.25:8900/api`, or the fallback IP in [`mobile/services/api.ts`](mobile/services/api.ts) if unset.
+
+### Cloudflare + `kewlkids.ca` (app-admin)
+
+For public URLs on your domain, use **app-admin** to assign stable subdomains (recommended: web `organizer`, API `organizer-api`). Tunnel wildcard ingress routes by hostname; update **OAuth redirect URIs** in Azure/Google and **`WEB_APP_URL`** / **`EXPO_PUBLIC_*`** if you change labels.
+
+**Production web icons (`@expo/vector-icons` fonts):** If icons show as empty boxes, open DevTools → Network and confirm `.ttf` / `.woff` requests return fonts (not `index.html`). Fix static hosting so asset paths are not caught by SPA fallback; on Cloudflare, try disabling Rocket Loader / Auto Minify for the site and purging cache.
 
 ---
 

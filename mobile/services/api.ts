@@ -4,8 +4,9 @@ import navigationService from './navigationService';
 
 /**
  * API Configuration
- * On web: localhost / ngrok detection / public domain (e.g. *.kewlkids.ca → organizer-api…).
- * On native: EXPO_PUBLIC_API_URL or LAN IP. Public web host wins over EXPO_PUBLIC_API_URL so ngrok in .env does not break production domain.
+ * On web: runtime override → localhost/127.0.0.1 always uses local Django (see getWebApiBaseUrl) →
+ * public *.kewlkids.ca → EXPO_PUBLIC_API_URL (native/ngrok/device) → getWebApiBaseUrl.
+ * On native: EXPO_PUBLIC_API_URL or LAN fallback. Public web host wins over EXPO_PUBLIC_API_URL for custom domain.
  */
 import { Platform } from 'react-native';
 import {
@@ -20,14 +21,19 @@ const getApiBaseUrl = (): string => {
     if (runtime) {
       return runtime;
     }
-    // Served from e.g. organizer.kewlkids.ca — use inferred API (organizer-api…) even if
+    const h = window.location.hostname;
+    // Local dev: never use EXPO_PUBLIC_API_URL (may point at ngrok/prod) so tokens match local Django.
+    if (h === 'localhost' || h === '127.0.0.1') {
+      return getWebApiBaseUrl();
+    }
+    // Served from e.g. organizer.kewlkids.ca — use inferred API (EXPO_PUBLIC_API_HOST / defaults) even if
     // EXPO_PUBLIC_API_URL still points at ngrok from an old .env.
     if (isPublicCustomDomainWebHost()) {
       return getWebApiBaseUrl();
     }
   }
 
-  // Build-time explicit API URL (Expo public) — localhost / ngrok web, native builds, etc.
+  // Build-time explicit API URL (Expo public) — native builds, ngrok device testing, etc.
   if (process.env.EXPO_PUBLIC_API_URL) {
     const url = process.env.EXPO_PUBLIC_API_URL.trim();
     // Validate URL format

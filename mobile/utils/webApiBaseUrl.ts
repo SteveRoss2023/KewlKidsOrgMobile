@@ -1,12 +1,12 @@
 /**
  * API base URL (/api suffix) when the Expo app runs in the browser.
  * Used for ngrok, Cloudflare/custom domains (e.g. kewlkids.ca), and localhost.
- * Example hosts: organizer.kewlkids.ca (web), organizer-api.kewlkids.ca (API default).
  *
  * Build-time (Expo public, inlined at build):
  * - EXPO_PUBLIC_CUSTOM_DOMAIN — apex (default: kewlkids.ca). Matched for apex and *.domain.
- * - EXPO_PUBLIC_API_HOST — API hostname only. If unset and apex is kewlkids.ca, defaults to
- *   organizer-api.kewlkids.ca; otherwise api.<CUSTOM_DOMAIN>.
+ * - EXPO_PUBLIC_API_HOST — API hostname only (no scheme). Defaults for kewlkids.ca:
+ *   organizer-api.kewlkids.ca; otherwise api.<CUSTOM_DOMAIN>. Override when you change app-admin labels.
+ * - EXPO_PUBLIC_WEB_APP_HOST — browser app hostname (no scheme), default organizer.kewlkids.ca.
  *
  * Runtime (web only, no rebuild — checked on every getWebApiBaseUrl / getApiBaseUrl call):
  * - sessionStorage or localStorage key KEWLKIDS_RUNTIME_API_BASE_STORAGE_KEY
@@ -14,6 +14,25 @@
  *   (sessionStorage wins if both are set.)
  */
 export const KEWLKIDS_RUNTIME_API_BASE_STORAGE_KEY = 'kewlkids_runtime_api_base_url';
+
+const DEFAULT_WEB_APP_HOST_KEWLKIDS = 'organizer.kewlkids.ca';
+const DEFAULT_API_HOST_KEWLKIDS = 'organizer-api.kewlkids.ca';
+
+/** Public web app hostname (no scheme). */
+export function getResolvedWebAppHost(): string {
+  return process.env.EXPO_PUBLIC_WEB_APP_HOST?.trim() || DEFAULT_WEB_APP_HOST_KEWLKIDS;
+}
+
+function resolveDefaultApiHostForApex(customDomain: string): string {
+  const envHost = process.env.EXPO_PUBLIC_API_HOST?.trim();
+  if (envHost) {
+    return envHost;
+  }
+  if (customDomain === 'kewlkids.ca') {
+    return DEFAULT_API_HOST_KEWLKIDS;
+  }
+  return `api.${customDomain}`;
+}
 
 /** True when the web app is served from the configured public apex or its subdomains (e.g. organizer.kewlkids.ca). */
 export function isPublicCustomDomainWebHost(): boolean {
@@ -69,10 +88,7 @@ export function getWebApiBaseUrl(): string {
   const customDomain = process.env.EXPO_PUBLIC_CUSTOM_DOMAIN?.trim() || 'kewlkids.ca';
   const isCustomHost = hostname === customDomain || hostname.endsWith(`.${customDomain}`);
   if (isCustomHost) {
-    const apiHostEnv = process.env.EXPO_PUBLIC_API_HOST?.trim();
-    const defaultApiHost =
-      customDomain === 'kewlkids.ca' ? 'organizer-api.kewlkids.ca' : `api.${customDomain}`;
-    const apiHost = apiHostEnv || defaultApiHost;
+    const apiHost = resolveDefaultApiHostForApex(customDomain);
     if (hostname === apiHost) {
       return `${protocol}//${hostname}/api`;
     }
