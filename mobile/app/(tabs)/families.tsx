@@ -12,7 +12,7 @@ import AuthService from '../../services/authService';
 export default function FamiliesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { selectedFamily, refreshFamilies: refreshContextFamilies } = useFamily();
+  const { selectedFamily, refreshFamilies: refreshContextFamilies, bootstrapState, lastErrorMessage } = useFamily();
   const [families, setFamilies] = useState<Family[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -155,12 +155,27 @@ export default function FamiliesScreen() {
 
       {families.length === 0 ? (
         <View style={styles.emptyState}>
-          <FontAwesome name="users" size={48} color={colors.textSecondary} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No families yet</Text>
-          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>Create your first family to get started</Text>
-          <TouchableOpacity style={[styles.emptyCreateButton, { backgroundColor: colors.primary }]} onPress={handleCreateFamily}>
-            <Text style={styles.emptyCreateButtonText}>Create Family</Text>
-          </TouchableOpacity>
+          {bootstrapState === 'backend_unreachable' ? (
+            <>
+              <FontAwesome name="exclamation-triangle" size={48} color={colors.error} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Cannot reach server</Text>
+              <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+                {lastErrorMessage || 'Backend may not be running. Start it and retry.'}
+              </Text>
+              <TouchableOpacity style={[styles.emptyCreateButton, { backgroundColor: colors.primary }]} onPress={() => loadFamilies()}>
+                <Text style={styles.emptyCreateButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <FontAwesome name="users" size={48} color={colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No families yet</Text>
+              <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>Create your first family to get started</Text>
+              <TouchableOpacity style={[styles.emptyCreateButton, { backgroundColor: colors.primary }]} onPress={handleCreateFamily}>
+                <Text style={styles.emptyCreateButtonText}>Create Family</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ) : (
         <View style={styles.familiesList}>

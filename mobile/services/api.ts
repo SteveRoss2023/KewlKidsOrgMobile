@@ -368,6 +368,32 @@ export const handleAPIError = (error: AxiosError): APIError => {
   }
 };
 
+export type APIErrorCategory = 'auth' | 'network' | 'other';
+
+/**
+ * Classify errors for UI state handling only.
+ * This does not change request/retry semantics.
+ */
+export const classifyAPIError = (error: unknown): APIErrorCategory => {
+  const apiError = error instanceof APIError ? error : null;
+  if (apiError?.status === 401) {
+    return 'auth';
+  }
+  if (apiError?.status === 0) {
+    return 'network';
+  }
+  const message = apiError?.message?.toLowerCase() || '';
+  if (
+    message.includes('no response from server') ||
+    message.includes('unable to reach server') ||
+    message.includes('network error') ||
+    message.includes('request timeout')
+  ) {
+    return 'network';
+  }
+  return 'other';
+};
+
 /**
  * Health check
  */

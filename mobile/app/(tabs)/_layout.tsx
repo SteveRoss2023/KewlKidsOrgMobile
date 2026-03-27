@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Tabs, useRouter, useFocusEffect } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -9,12 +9,18 @@ import AuthService from '../../services/authService';
 export default function TabsLayout() {
   const { colors } = useTheme();
   const router = useRouter();
-  const { refreshFamilies } = useFamily();
+  const { refreshFamilies, bootstrapState, lastErrorMessage } = useFamily();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
     checkAuthentication();
   }, []);
+
+  useEffect(() => {
+    if (bootstrapState === 'auth_required') {
+      router.replace('/(auth)/login');
+    }
+  }, [bootstrapState, router]);
 
   // Refresh families when tabs come into focus (e.g., after login or returning from another screen)
   useFocusEffect(
@@ -72,6 +78,29 @@ export default function TabsLayout() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (bootstrapState === 'backend_unreachable') {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <FontAwesome name="exclamation-triangle" size={28} color={colors.error} />
+        <Text style={[styles.unavailableTitle, { color: colors.text }]}>Cannot reach server</Text>
+        <Text style={[styles.unavailableText, { color: colors.textSecondary }]}>
+          The app backend may not be running. Start the backend and try again.
+        </Text>
+        {lastErrorMessage ? (
+          <Text style={[styles.unavailableDetails, { color: colors.textSecondary }]} numberOfLines={3}>
+            {lastErrorMessage}
+          </Text>
+        ) : null}
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          onPress={() => refreshFamilies()}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -256,6 +285,33 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  unavailableTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  unavailableText: {
+    textAlign: 'center',
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  unavailableDetails: {
+    textAlign: 'center',
+    marginTop: 8,
+    fontSize: 12,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
 
