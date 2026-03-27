@@ -23,15 +23,15 @@ export function getResolvedWebAppHost(): string {
   return process.env.EXPO_PUBLIC_WEB_APP_HOST?.trim() || DEFAULT_WEB_APP_HOST_KEWLKIDS;
 }
 
-function resolveDefaultApiHostForApex(customDomain: string): string {
+function resolveDefaultApiHostForApex(customDomainLc: string): string {
   const envHost = process.env.EXPO_PUBLIC_API_HOST?.trim();
   if (envHost) {
     return envHost;
   }
-  if (customDomain === 'kewlkids.ca') {
+  if (customDomainLc === 'kewlkids.ca') {
     return DEFAULT_API_HOST_KEWLKIDS;
   }
-  return `api.${customDomain}`;
+  return `api.${customDomainLc}`;
 }
 
 /** True when the web app is served from the configured public apex or its subdomains (e.g. organizer.kewlkids.ca). */
@@ -39,8 +39,10 @@ export function isPublicCustomDomainWebHost(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
-  const customDomain = process.env.EXPO_PUBLIC_CUSTOM_DOMAIN?.trim() || 'kewlkids.ca';
-  const h = window.location.hostname;
+  const customDomain = (
+    process.env.EXPO_PUBLIC_CUSTOM_DOMAIN?.trim() || 'kewlkids.ca'
+  ).toLowerCase();
+  const h = window.location.hostname.toLowerCase();
   return h === customDomain || h.endsWith(`.${customDomain}`);
 }
 
@@ -85,12 +87,15 @@ export function getWebApiBaseUrl(): string {
     return `https://${hostname.replace('-web', '')}/api`;
   }
 
-  const customDomain = process.env.EXPO_PUBLIC_CUSTOM_DOMAIN?.trim() || 'kewlkids.ca';
-  const isCustomHost = hostname === customDomain || hostname.endsWith(`.${customDomain}`);
+  const customDomain = (
+    process.env.EXPO_PUBLIC_CUSTOM_DOMAIN?.trim() || 'kewlkids.ca'
+  ).toLowerCase();
+  const hostLc = hostname.toLowerCase();
+  const isCustomHost = hostLc === customDomain || hostLc.endsWith(`.${customDomain}`);
   if (isCustomHost) {
-    const apiHost = resolveDefaultApiHostForApex(customDomain);
-    if (hostname === apiHost) {
-      return `${protocol}//${hostname}/api`;
+    const apiHost = resolveDefaultApiHostForApex(customDomain).toLowerCase();
+    if (hostLc === apiHost) {
+      return `${protocol}//${apiHost}/api`;
     }
     return `${protocol}//${apiHost}/api`;
   }

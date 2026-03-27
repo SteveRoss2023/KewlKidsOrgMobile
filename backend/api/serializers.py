@@ -26,15 +26,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
         """Return the full URL for the photo (decrypted)."""
         if obj.photo:
             request = self.context.get('request')
-            # Use a special endpoint that decrypts the photo on-the-fly
-            if request:
+            public_base = getattr(settings, 'API_PUBLIC_BASE_URL', '') or ''
+            if public_base:
+                url = f'{public_base}/api/users/{obj.user.id}/photo/'
+            elif request:
                 url = request.build_absolute_uri(f'/api/users/{obj.user.id}/photo/')
-                # Normalize ngrok URLs to use https to prevent CORS preflight redirect issues
-                # Ngrok free tier requires HTTPS, so we should always use https for ngrok domains
-                if 'ngrok.app' in url and url.startswith('http://'):
-                    url = url.replace('http://', 'https://', 1)
-                return url
-            return f'/api/users/{obj.user.id}/photo/'
+            else:
+                return f'/api/users/{obj.user.id}/photo/'
+            if 'ngrok.app' in url and url.startswith('http://'):
+                url = url.replace('http://', 'https://', 1)
+            return url
         return None
 
     def update(self, instance, validated_data):
@@ -159,29 +160,25 @@ class RecipeSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         """Return the image URL - prefer stored image, fall back to original URL."""
         if obj.image and obj.image.name:
-            # Return full URL to stored image
             request = self.context.get('request')
+            media_path = obj.image.url
+            if not media_path.startswith('/'):
+                media_path = '/' + media_path
+            if not media_path.startswith('/media/'):
+                media_path = '/media/' + media_path.lstrip('/')
+
+            public_base = getattr(settings, 'API_PUBLIC_BASE_URL', '') or ''
+            if public_base:
+                image_url = f'{public_base.rstrip("/")}{media_path}'
+                return image_url
+
             if request:
-                # Get the actual host from the request
-                # request.get_host() returns the Host header, which should be correct
                 host = request.get_host()
                 scheme = request.scheme
-
-                # Build the media URL manually to ensure we use the correct host
-                media_path = obj.image.url
-                # Ensure media_path starts with /media/
-                if not media_path.startswith('/'):
-                    media_path = '/' + media_path
-                if not media_path.startswith('/media/'):
-                    media_path = '/media/' + media_path.lstrip('/')
-
                 image_url = f'{scheme}://{host}{media_path}'
-
-                # Log for debugging
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.debug(f"Built image URL: {image_url} from request host: {host}, scheme: {scheme}")
-
                 return image_url
             else:
                 # Fallback: construct URL from settings

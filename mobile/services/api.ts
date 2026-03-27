@@ -4,8 +4,8 @@ import navigationService from './navigationService';
 
 /**
  * API Configuration
- * On web: runtime override → localhost/127.0.0.1 always uses local Django (see getWebApiBaseUrl) →
- * public *.kewlkids.ca → EXPO_PUBLIC_API_URL (native/ngrok/device) → getWebApiBaseUrl.
+ * On web: runtime override → localhost/127.0.0.1 → getWebApiBaseUrl →
+ * public *.CUSTOM_DOMAIN (case-insensitive) → getWebApiBaseUrl (organizer-api); else EXPO_PUBLIC_API_URL.
  * On native: EXPO_PUBLIC_API_URL or LAN fallback. Public web host wins over EXPO_PUBLIC_API_URL for custom domain.
  */
 import { Platform } from 'react-native';

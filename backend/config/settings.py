@@ -50,6 +50,10 @@ if os.getenv('USE_X_FORWARDED_HOST', '').lower() == 'true':
     USE_X_FORWARDED_HOST = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+# Public API origin (scheme + host, no path). When set, serializers emit media/profile photo URLs
+# using this host so clients never get http://127.0.0.1:8900/... when the browser talks to Django via loopback.
+API_PUBLIC_BASE_URL = os.getenv('API_PUBLIC_BASE_URL', '').strip().rstrip('/')
+
 # Custom User Model
 AUTH_USER_MODEL = 'api.User'
 
