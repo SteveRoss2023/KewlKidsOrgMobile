@@ -27,6 +27,15 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Checklist integration (optional): one calendar row per checklist section
+    list_section = models.OneToOneField(
+        'lists.ListSection',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='calendar_event',
+    )
+
     # External calendar sync fields
     external_calendar_id = models.CharField(max_length=255, blank=True, null=True, help_text="ID from external calendar (Outlook/Google)")
     external_calendar_type = models.CharField(max_length=20, blank=True, null=True, choices=[('outlook', 'Outlook'), ('google', 'Google')])

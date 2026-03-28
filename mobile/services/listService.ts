@@ -98,9 +98,15 @@ class ListService {
   /**
    * Duplicate a checklist (new list, sections with today's dates, items uncompleted).
    */
-  async copyChecklist(listId: number, data: { name: string }): Promise<List> {
+  async copyChecklist(
+    listId: number,
+    data: { name: string }
+  ): Promise<List & { calendar_updated?: boolean }> {
     try {
-      const response = await apiClient.post<List>(`/lists/${listId}/copy/`, data);
+      const response = await apiClient.post<List & { calendar_updated?: boolean }>(
+        `/lists/${listId}/copy/`,
+        data
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
@@ -131,9 +137,14 @@ class ListService {
   /**
    * Create a list section
    */
-  async createListSection(data: CreateListSectionData): Promise<ListSection> {
+  async createListSection(
+    data: CreateListSectionData
+  ): Promise<ListSection & { calendar_updated?: boolean }> {
     try {
-      const response = await apiClient.post<ListSection>('/list-sections/', data);
+      const response = await apiClient.post<ListSection & { calendar_updated?: boolean }>(
+        '/list-sections/',
+        data
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
@@ -143,9 +154,15 @@ class ListService {
   /**
    * Update a list section
    */
-  async updateListSection(sectionId: number, data: UpdateListSectionData): Promise<ListSection> {
+  async updateListSection(
+    sectionId: number,
+    data: UpdateListSectionData
+  ): Promise<ListSection & { calendar_updated?: boolean }> {
     try {
-      const response = await apiClient.patch<ListSection>(`/list-sections/${sectionId}/`, data);
+      const response = await apiClient.patch<ListSection & { calendar_updated?: boolean }>(
+        `/list-sections/${sectionId}/`,
+        data
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
@@ -366,6 +383,28 @@ class ListService {
   async deleteGroceryCategory(categoryId: number): Promise<void> {
     try {
       await apiClient.delete(`/grocery-categories/${categoryId}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Push checklist-linked in-app calendar events to Outlook (requires Outlook connected + session key).
+   */
+  async pushChecklistEventsToOutlook(listId: number): Promise<{
+    created: number;
+    updated: number;
+    failed: number;
+    errors: string[];
+  }> {
+    try {
+      const response = await apiClient.post<{
+        created: number;
+        updated: number;
+        failed: number;
+        errors: string[];
+      }>('/calendar/outlook/push-checklist-events/', { list_id: listId });
+      return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
     }

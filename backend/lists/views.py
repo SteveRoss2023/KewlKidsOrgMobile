@@ -107,6 +107,11 @@ class ListViewSet(viewsets.ModelViewSet):
                 )
                 section_map[sec.id] = new_sec
 
+            from .checklist_calendar_sync import sync_checklist_section_calendar
+
+            for new_sec in section_map.values():
+                sync_checklist_section_calendar(new_sec, member)
+
             items = list(
                 ListItem.objects.filter(list=source).order_by('order', 'id')
             )
@@ -145,7 +150,9 @@ class ListViewSet(viewsets.ModelViewSet):
                     item_map[item.id] = new_item.id
 
         serializer = self.get_serializer(new_list)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        payload = dict(serializer.data)
+        payload['calendar_updated'] = True
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 def _item_depth(item):
@@ -162,6 +169,51 @@ class ListSectionViewSet(viewsets.ModelViewSet):
     """ListSection viewset for checklist sections."""
     serializer_class = ListSectionSerializer
     permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code == status.HTTP_201_CREATED:
+            sid = response.data.get('id')
+            if sid is not None:
+                section = ListSection.objects.filter(pk=sid).select_related('list').first()
+                if section and section.list.list_type == 'checklist':
+                    response.data['calendar_updated'] = True
+        return response
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK:
+            section = self.get_object()
+            if section.list.list_type == 'checklist':
+                response.data['calendar_updated'] = True
+        return response
+
+    def perform_create(self, serializer):
+        section = serializer.save()
+        member = get_object_or_404(Member, user=self.request.user, family=section.list.family)
+        from .checklist_calendar_sync import sync_checklist_section_calendar
+
+        sync_checklist_section_calendar(section, member)
+
+    def perform_update(self, serializer):
+        old_date = serializer.instance.section_date
+        section = serializer.save()
+        member = get_object_or_404(Member, user=self.request.user, family=section.list.family)
+        from .checklist_calendar_sync import sync_checklist_section_calendar, reslot_checklist_events_for_date
+
+        sync_checklist_section_calendar(section, member)
+        if old_date != section.section_date:
+            reslot_checklist_events_for_date(section.list.family, old_date)
+
+    def perform_destroy(self, instance):
+        family = instance.list.family
+        section_date = instance.section_date
+        is_checklist = instance.list.list_type == 'checklist'
+        instance.delete()
+        if is_checklist:
+            from .checklist_calendar_sync import reslot_checklist_events_for_date
+
+            reslot_checklist_events_for_date(family, section_date)
 
     def paginate_queryset(self, queryset):
         """Return all sections in one response when scoped to a list (small, bounded set)."""
@@ -194,6 +246,10 @@ class ListSectionViewSet(viewsets.ModelViewSet):
         items = ListItem.objects.filter(section=section)
         for item in items:
             _set_item_and_descendants_completed(item, completed, member)
+
+        from .checklist_calendar_sync import upsert_checklist_event_content
+
+        upsert_checklist_event_content(section, member)
 
         return Response(status=status.HTTP_200_OK)
 
@@ -363,6 +419,11 @@ class ListItemViewSet(viewsets.ModelViewSet):
 
         item = serializer.save(**save_kwargs)
 
+        if list_obj.list_type == 'checklist':
+            from .checklist_calendar_sync import after_checklist_list_item_change
+
+            after_checklist_list_item_change(item, self.request.user, old_section_id=None)
+
         # Auto-assign category for grocery lists
         if list_obj.list_type == 'grocery':
             from .utils import assign_category_to_item
@@ -371,6 +432,7 @@ class ListItemViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Validate checklist fields on update."""
         instance = serializer.instance
+        old_section_id = instance.section_id
         list_obj = instance.list
         if list_obj.list_type == 'checklist':
             if 'indent_level' in self.request.data:
@@ -390,7 +452,22 @@ class ListItemViewSet(viewsets.ModelViewSet):
                         if depth >= 10:
                             raise ValidationError({'parent': 'Maximum nesting depth (10) exceeded.'})
                         serializer.validated_data['section'] = parent.section
-        serializer.save()
+        item = serializer.save()
+        if list_obj.list_type == 'checklist':
+            from .checklist_calendar_sync import after_checklist_list_item_change
+
+            after_checklist_list_item_change(item, self.request.user, old_section_id=old_section_id)
+
+    def perform_destroy(self, instance):
+        list_id = instance.list_id
+        section_id = instance.section_id
+        user = self.request.user
+        list_type = instance.list.list_type
+        instance.delete()
+        if list_type == 'checklist':
+            from .checklist_calendar_sync import after_checklist_list_item_deleted
+
+            after_checklist_list_item_deleted(list_id, section_id, user)
 
     def update(self, request, *args, **kwargs):
         """Update item - special handling for list completion (all list types)."""
@@ -407,6 +484,9 @@ class ListItemViewSet(viewsets.ModelViewSet):
                 instance.completed_at = timezone.now()
                 instance.completed_by = member
                 instance.save(update_fields=['completed', 'completed_at', 'completed_by'])
+                from .checklist_calendar_sync import after_checklist_list_item_change
+
+                after_checklist_list_item_change(instance, request.user, old_section_id=instance.section_id)
                 serializer = self.get_serializer(instance)
                 return Response(serializer.data)
 

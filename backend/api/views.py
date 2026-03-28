@@ -15,7 +15,7 @@ from .models import UserProfile
 from .serializers import UserProfileSerializer, RecipeSerializer, MealPlanSerializer, EventSerializer, ChatRoomSerializer, MessageSerializer
 from meals.models import Recipe, MealPlan
 from families.models import Family, Member
-from events.models import Event
+from events.models import Event, CalendarSync
 from chat.models import ChatRoom, Message
 
 User = get_user_model()
@@ -1747,7 +1747,6 @@ from django.utils import timezone
 from datetime import timedelta
 from django.core.cache import cache
 from encryption.utils import get_session_user_key, set_session_user_key, get_user_key_from_request
-from events.models import CalendarSync
 from documents.models import OneDriveSync, GoogleDriveSync, GooglePhotosSync, Document, Folder
 from documents.googledrive_sync import GoogleDriveSync as GoogleDriveSyncService
 from documents.serializers import DocumentSerializer, FolderSerializer
@@ -2005,6 +2004,87 @@ def OutlookConnectionView(request):
             'connected_at': sync.created_at,
         })
     return Response({'connected': False})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def OutlookPushChecklistEventsView(request):
+    """Push checklist-linked app events to the user's Outlook calendar (on-demand)."""
+    from encryption.utils import get_user_key_from_request
+    from events.outlook_checklist_push import push_checklist_events_to_outlook
+    from lists.models import List as ChecklistList
+
+    member = Member.objects.filter(user=request.user).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = CalendarSync.objects.filter(
+        member=member, sync_type='outlook', sync_enabled=True
+    ).first()
+    if not sync_record:
+        return Response(
+            {'error': 'Outlook calendar not connected'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    raw_list_id = request.data.get('list_id')
+    raw_family_id = request.data.get('family')
+
+    filter_list_id = None
+    family = None
+
+    if raw_list_id is not None and str(raw_list_id).strip() != '':
+        try:
+            lid = int(raw_list_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid list_id'}, status=status.HTTP_400_BAD_REQUEST)
+        list_obj = get_object_or_404(
+            ChecklistList,
+            pk=lid,
+            family__members__user=request.user,
+            list_type='checklist',
+        )
+        family = list_obj.family
+        filter_list_id = lid
+    elif raw_family_id is not None and str(raw_family_id).strip() != '':
+        try:
+            fid = int(raw_family_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid family'}, status=status.HTTP_400_BAD_REQUEST)
+        family = get_object_or_404(Family, pk=fid, members__user=request.user)
+    else:
+        return Response(
+            {'error': 'Provide list_id (checklist) or family id'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user_key = get_user_key_from_request(request)
+    except ValueError as e:
+        err = str(e).lower()
+        if 'not in session' in err or 'password required' in err:
+            return Response(
+                {
+                    'error': 'Session expired. Please log in again to sync.',
+                    'requires_refresh': True,
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return Response({'error': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        result = push_checklist_events_to_outlook(
+            sync_record=sync_record,
+            user_key=user_key,
+            family=family,
+            list_id=filter_list_id,
+        )
+        return Response(result, status=status.HTTP_200_OK)
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).exception('Outlook checklist push failed')
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # OneDrive OAuth

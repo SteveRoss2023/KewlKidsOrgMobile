@@ -35,6 +35,7 @@ import GlobalNavBar from '../../../components/GlobalNavBar';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useFamily } from '../../../contexts/FamilyContext';
 import ListService from '../../../services/listService';
+import oauthService from '../../../services/oauthService';
 import { List, ListItem, ListSection, GroceryCategory, CreateListItemData, UpdateListItemData } from '../../../types/lists';
 import ListItemComponent from '../../../components/lists/ListItemComponent';
 import SectionRow from '../../../components/lists/SectionRow';
@@ -327,6 +328,8 @@ export default function ListDetailScreen() {
   const [sectionFormSaving, setSectionFormSaving] = useState(false);
   const [copyChecklistModalOpen, setCopyChecklistModalOpen] = useState(false);
   const [copyChecklistSaving, setCopyChecklistSaving] = useState(false);
+  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [outlookPushLoading, setOutlookPushLoading] = useState(false);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -432,6 +435,29 @@ export default function ListDetailScreen() {
       fetchCategories();
     }
   }, [list?.id, list?.list_type, selectedFamily?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isChecklistList) {
+        setOutlookConnected(false);
+        return undefined;
+      }
+      let cancelled = false;
+      (async () => {
+        try {
+          const status = await oauthService.checkConnection('outlook');
+          if (!cancelled) {
+            setOutlookConnected(!!status.connected);
+          }
+        } catch {
+          if (!cancelled) setOutlookConnected(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [isChecklistList])
+  );
 
   // Reset title font size when list changes
   useEffect(() => {
@@ -930,6 +956,24 @@ export default function ListDetailScreen() {
     return items.length > 0 && items.every((i) => i.completed);
   }, [checklistItemsBySection]);
 
+  const handlePushChecklistToOutlook = async () => {
+    if (!list || outlookPushLoading) return;
+    setOutlookPushLoading(true);
+    try {
+      const r = await ListService.pushChecklistEventsToOutlook(list.id);
+      if (r.failed === 0) {
+        alert(`Outlook updated (${r.created} created, ${r.updated} updated).`);
+      } else {
+        const hint = r.errors?.[0] ? ` ${r.errors[0]}` : '';
+        alert(`Outlook sync finished with ${r.failed} error(s).${hint}`);
+      }
+    } catch (err) {
+      alert((err as APIError)?.message || 'Could not sync to Outlook.');
+    } finally {
+      setOutlookPushLoading(false);
+    }
+  };
+
   const handleSectionToggleComplete = async (section: ListSection) => {
     const targetCompleted = !isSectionAllCompleted(section.id);
     const sectionItemIds = (checklistItemsBySection.get(section.id) ?? []).map((i) => i.id);
@@ -953,12 +997,15 @@ export default function ListDetailScreen() {
     const { title, section_date } = payload;
     setSectionFormSaving(true);
     try {
-      await ListService.createListSection({
+      const created = await ListService.createListSection({
         list: list.id,
         order: sections.length,
         title,
         section_date,
       });
+      if (created.calendar_updated) {
+        alert('Calendar updated');
+      }
       await fetchListSections();
       setShowAddSection(false);
     } catch (err) {
@@ -982,7 +1029,10 @@ export default function ListDetailScreen() {
         )
       );
       try {
-        await ListService.updateListSection(s.id, { title, section_date });
+        const updated = await ListService.updateListSection(s.id, { title, section_date });
+        if (updated.calendar_updated) {
+          alert('Calendar updated');
+        }
       } catch (err) {
         setSections(previousSections);
         throw err;
@@ -1001,6 +1051,9 @@ export default function ListDetailScreen() {
     setCopyChecklistSaving(true);
     try {
       const newList = await ListService.copyChecklist(list.id, { name });
+      if (newList.calendar_updated) {
+        alert('Calendar events added');
+      }
       setCopyChecklistModalOpen(false);
       router.push(`/(tabs)/lists/${newList.id}`);
     } catch (err) {
@@ -1916,6 +1969,35 @@ export default function ListDetailScreen() {
                 <FontAwesome name="history" size={16} color={colors.primary} />
                 <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
               </TouchableOpacity>
+              {isChecklistList && (
+                <TouchableOpacity
+                  onPress={handlePushChecklistToOutlook}
+                  disabled={!outlookConnected || outlookPushLoading}
+                  style={[
+                    styles.historyButton,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      opacity: !outlookConnected || outlookPushLoading ? 0.45 : 1,
+                    },
+                  ]}
+                  accessibilityLabel="Sync checklist events to Outlook"
+                  accessibilityHint={
+                    outlookConnected
+                      ? 'Creates or updates Outlook calendar events for this checklist'
+                      : 'Connect Outlook in Settings to enable sync'
+                  }
+                >
+                  {outlookPushLoading ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <FontAwesome name="calendar" size={16} color={colors.primary} />
+                  )}
+                  <Text style={[styles.historyButtonText, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {Platform.OS === 'web' ? 'Sync to Outlook' : 'Outlook'}
+                  </Text>
+                </TouchableOpacity>
+              )}
               {isChecklistList && sections.length > 0 && (
                 <TouchableOpacity
                   onPress={areAllSectionsCollapsed ? expandAllSections : collapseAllSections}

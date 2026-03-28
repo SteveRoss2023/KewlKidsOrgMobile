@@ -31,6 +31,11 @@ urlpatterns = [
     path('calendar/outlook/oauth/initiate/', views.OutlookOAuthInitiateView, name='outlook-oauth-initiate'),
     path('calendar/outlook/oauth/callback/', views.OutlookOAuthCallbackView, name='outlook-oauth-callback'),
     path('calendar/outlook/connection/', views.OutlookConnectionView, name='outlook-connection'),
+    path(
+        'calendar/outlook/push-checklist-events/',
+        views.OutlookPushChecklistEventsView,
+        name='outlook-push-checklist-events',
+    ),
 
     # OneDrive OAuth endpoints
     path('onedrive/oauth/initiate/', views.OneDriveOAuthInitiateView, name='onedrive-oauth-initiate'),

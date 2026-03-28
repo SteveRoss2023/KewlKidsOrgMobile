@@ -288,13 +288,16 @@ class EventSerializer(serializers.ModelSerializer):
             return obj.created_by.user.profile.display_name or obj.created_by.user.email
         return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
 
+    list_section = serializers.PrimaryKeyRelatedField(read_only=True, allow_null=True)
+
     class Meta:
         model = Event
         fields = [
             'id', 'family', 'created_by', 'created_by_username', 'title', 'notes', 'location',
-            'starts_at', 'ends_at', 'is_all_day', 'color', 'created_at', 'updated_at'
+            'starts_at', 'ends_at', 'is_all_day', 'color', 'list_section',
+            'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'list_section']
 
 
 class ChatRoomSerializer(serializers.ModelSerializer):
