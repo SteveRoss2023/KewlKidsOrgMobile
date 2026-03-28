@@ -40,6 +40,7 @@ import ListItemComponent from '../../../components/lists/ListItemComponent';
 import SectionRow from '../../../components/lists/SectionRow';
 import SectionFormModal from '../../../components/lists/SectionFormModal';
 import AddSectionForm from '../../../components/lists/AddSectionForm';
+import CopyChecklistModal from '../../../components/lists/CopyChecklistModal';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
@@ -324,6 +325,8 @@ export default function ListDetailScreen() {
   const [showAddSection, setShowAddSection] = useState(false);
   const [editSection, setEditSection] = useState<ListSection | null>(null);
   const [sectionFormSaving, setSectionFormSaving] = useState(false);
+  const [copyChecklistModalOpen, setCopyChecklistModalOpen] = useState(false);
+  const [copyChecklistSaving, setCopyChecklistSaving] = useState(false);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -990,6 +993,21 @@ export default function ListDetailScreen() {
       alert((err as APIError)?.message || 'Failed to update section. Try again.');
     } finally {
       setSectionFormSaving(false);
+    }
+  };
+
+  const confirmCopyChecklist = async (name: string) => {
+    if (!list || list.list_type !== 'checklist') return;
+    setCopyChecklistSaving(true);
+    try {
+      const newList = await ListService.copyChecklist(list.id, { name });
+      setCopyChecklistModalOpen(false);
+      router.push(`/(tabs)/lists/${newList.id}`);
+    } catch (err) {
+      console.error('Error copying checklist:', err);
+      alert((err as APIError)?.message || 'Failed to copy checklist. Try again.');
+    } finally {
+      setCopyChecklistSaving(false);
     }
   };
 
@@ -1809,21 +1827,40 @@ export default function ListDetailScreen() {
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.actionsBarTop}>
           <View style={styles.actionButtonsPrimary}>
-            {isSupported && !showAddItem && !showAddSection && !editingItem && (
+            {isSupported && !showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && (
               <VoiceButton
                 onPress={handleVoiceClick}
                 isListening={isListening}
-                disabled={adding || updatingItem}
+                disabled={adding || updatingItem || copyChecklistSaving}
               />
             )}
-            {!showAddItem && !showAddSection && !editingItem ? (
+            {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen ? (
               <>
+                {isChecklistList && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCopyChecklistModalOpen(true);
+                      setShowAddSection(false);
+                      setShowAddItem(false);
+                      setEditSection(null);
+                    }}
+                    style={[styles.copyListButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    accessibilityLabel="Copy checklist"
+                    accessibilityHint="Creates a duplicate list with section dates set to today"
+                  >
+                    <FontAwesome name="copy" size={16} color={colors.primary} />
+                    <Text style={[styles.copyListButtonText, { color: colors.textSecondary }]}>
+                      {Platform.OS === 'web' ? 'Copy list' : 'Copy'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 {isChecklistList && (
                   <TouchableOpacity
                     onPress={() => {
                       setShowAddSection(true);
                       setShowAddItem(false);
                       setEditSection(null);
+                      setCopyChecklistModalOpen(false);
                     }}
                     style={[styles.addButton, { backgroundColor: colors.primary }]}
                   >
@@ -1838,6 +1875,7 @@ export default function ListDetailScreen() {
                     setShowAddItem(true);
                     setShowAddSection(false);
                     setEditSection(null);
+                    setCopyChecklistModalOpen(false);
                   }}
                   style={[styles.addButton, { backgroundColor: colors.primary }]}
                 >
@@ -1857,7 +1895,7 @@ export default function ListDetailScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-          {!showAddItem && !showAddSection && !editingItem && (
+          {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && (
             <View style={styles.actionButtonsSecondary}>
               {isSupported && (
                 <TooltipButton
@@ -2132,6 +2170,7 @@ export default function ListDetailScreen() {
                       onToggleComplete={() => handleSectionToggleComplete(section)}
                       onEditSection={() => {
                         setShowAddSection(false);
+                        setCopyChecklistModalOpen(false);
                         setEditSection(section);
                       }}
                       onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
@@ -2240,6 +2279,7 @@ export default function ListDetailScreen() {
                       onToggleComplete={() => handleSectionToggleComplete(section)}
                       onEditSection={() => {
                         setShowAddSection(false);
+                        setCopyChecklistModalOpen(false);
                         setEditSection(section);
                       }}
                       onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
@@ -2325,6 +2365,7 @@ export default function ListDetailScreen() {
                     onToggleComplete={() => handleSectionToggleComplete(section)}
                     onEditSection={() => {
                       setShowAddSection(false);
+                      setCopyChecklistModalOpen(false);
                       setEditSection(section);
                     }}
                     onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
@@ -2556,6 +2597,17 @@ export default function ListDetailScreen() {
             if (!sectionFormSaving) setEditSection(null);
           }}
           onSave={submitEditSection}
+        />
+      )}
+      {isChecklistList && list && (
+        <CopyChecklistModal
+          visible={copyChecklistModalOpen}
+          sourceListName={list.name}
+          saving={copyChecklistSaving}
+          onCancel={() => {
+            if (!copyChecklistSaving) setCopyChecklistModalOpen(false);
+          }}
+          onConfirm={confirmCopyChecklist}
         />
       )}
       <ConfirmModal
@@ -2851,6 +2903,30 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#fff',
+    fontSize: Platform.OS === 'web' ? 14 : 13,
+    fontWeight: '600',
+  },
+  copyListButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 14 : 10,
+    paddingVertical: Platform.OS === 'web' ? 10 : 8,
+    gap: 6,
+    flexShrink: 0,
+    borderWidth: 1,
+    ...Platform.select({
+      web: { cursor: 'pointer' as const },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+        elevation: 1,
+      },
+    }),
+  },
+  copyListButtonText: {
     fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },

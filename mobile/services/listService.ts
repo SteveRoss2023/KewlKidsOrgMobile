@@ -96,6 +96,18 @@ class ListService {
   }
 
   /**
+   * Duplicate a checklist (new list, sections with today's dates, items uncompleted).
+   */
+  async copyChecklist(listId: number, data: { name: string }): Promise<List> {
+    try {
+      const response = await apiClient.post<List>(`/lists/${listId}/copy/`, data);
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
    * Get sections for a checklist list
    */
   async getListSections(listId: number): Promise<ListSection[]> {

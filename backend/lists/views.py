@@ -13,7 +13,8 @@ from .models import List, ListItem, ListSection, GroceryCategory, CompletedListI
 from .serializers import ListSerializer, ListItemSerializer, ListSectionSerializer, GroceryCategorySerializer, CompletedListItemSerializer
 from families.models import Family, Member
 from django.contrib.auth import get_user_model
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from django.db import transaction
 
 User = get_user_model()
 
@@ -64,6 +65,87 @@ class ListViewSet(viewsets.ModelViewSet):
         if list_obj.list_type == 'grocery':
             from .utils import ensure_default_categories
             ensure_default_categories(family)
+
+    @action(detail=True, methods=['post'], url_path='copy')
+    def copy(self, request, pk=None):
+        """Duplicate a checklist: new list, sections (dates set to today), items (uncompleted), same structure."""
+        source = self.get_object()
+        if source.list_type != 'checklist':
+            return Response(
+                {'detail': 'Only checklist lists can be copied.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw_name = request.data.get('name')
+        name = (raw_name or '').strip() if raw_name is not None else ''
+        if not name:
+            name = f'Copy of {source.name}'
+        if len(name) > 200:
+            return Response(
+                {'detail': 'Name must be at most 200 characters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        member = get_object_or_404(Member, user=request.user, family=source.family)
+
+        with transaction.atomic():
+            new_list = List.objects.create(
+                family=source.family,
+                created_by=member,
+                name=name,
+                description=source.description,
+                list_type='checklist',
+                color=source.color,
+                archived=False,
+            )
+            section_map = {}
+            for sec in source.sections.all().order_by('section_date', 'order'):
+                new_sec = ListSection.objects.create(
+                    list=new_list,
+                    order=sec.order,
+                    section_date=date.today(),
+                    title=sec.title,
+                    bullet_style=sec.bullet_style,
+                )
+                section_map[sec.id] = new_sec
+
+            items = list(
+                ListItem.objects.filter(list=source).order_by('order', 'id')
+            )
+            remaining = list(items)
+            item_map = {}
+            while remaining:
+                ready = [
+                    i for i in remaining
+                    if i.parent_id is None or i.parent_id in item_map
+                ]
+                if not ready:
+                    break
+                for item in ready:
+                    remaining.remove(item)
+                    new_section = None
+                    if item.section_id:
+                        new_section = section_map.get(item.section_id)
+                    new_parent_id = item_map.get(item.parent_id) if item.parent_id else None
+                    new_item = ListItem.objects.create(
+                        list=new_list,
+                        created_by=member,
+                        assigned_to=item.assigned_to,
+                        section=new_section,
+                        parent_id=new_parent_id,
+                        indent_level=item.indent_level,
+                        name=item.name,
+                        notes=item.notes,
+                        quantity=item.quantity,
+                        category=item.category,
+                        completed=False,
+                        completed_at=None,
+                        completed_by=None,
+                        order=item.order,
+                        due_date=item.due_date,
+                    )
+                    item_map[item.id] = new_item.id
+
+        serializer = self.get_serializer(new_list)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 def _item_depth(item):
