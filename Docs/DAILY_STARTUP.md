@@ -1,8 +1,19 @@
 # Daily Startup Guide
 
-Quick reference for starting the app each day. Use this after logging in or restarting your computer.
+## At a glance
 
-**Production (Cloudflare):** [https://organizer.kewlkids.ca](https://organizer.kewlkids.ca) — no need to start this from your laptop; local steps below are for **development** only.
+| What | Where | Command |
+|------|-------|---------|
+| **Backend** | `backend/` + venv | `python manage.py runserver` |
+| **Frontend (dev)** | `mobile/` | `npm start` (then **`w`** for web, or `npm run web`) |
+| **Update prod static web** | `mobile/` | `npm run build` |
+| **Serve `dist` for Cloudflare tunnel** | `mobile/` | `npx serve -s dist -l 8085` |
+
+**Summary:** Develop with **backend + `npm start`**. Ship web UI changes with **`npm run build`**, then **`serve`** on **8085**; **app-admin / Cloudflare** points **[organizer.kewlkids.ca](https://organizer.kewlkids.ca)** at this PC.
+
+---
+
+Quick reference for starting the app each day (after login or reboot).
 
 ---
 

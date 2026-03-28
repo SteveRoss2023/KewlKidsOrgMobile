@@ -1,9 +1,23 @@
 # KewlKids Organizer Mobile - Startup Procedure
 
+## At a glance
+
+| What | Directory | Command |
+|------|-----------|---------|
+| **Backend (API)** | `backend/` (venv activated) | `python manage.py runserver` → [http://localhost:8900](http://localhost:8900) |
+| **Frontend — developing** | `mobile/` | `npm start` (Expo; press **`w`** for web, or use `npm run web`) |
+| **Frontend — refresh production static files** | `mobile/` | `npm run build` (writes `dist`; run again after code changes) |
+| **Serve `dist` (origin for Cloudflare / app-admin tunnel)** | `mobile/` | `npx serve -s dist -l 8085` |
+
+**Your production web flow:** **`npm run build`** → **`npx serve -s dist -l 8085`** on this PC → **Cloudflare Tunnel** (app-admin) exposes **[organizer.kewlkids.ca](https://organizer.kewlkids.ca)** to that port. API is separate (**organizer-api.kewlkids.ca** / local `runserver` as you use it).
+
+---
+
 This document covers local development (Django backend + Expo app) and how that relates to **production**, which is served through **Cloudflare** at **[https://organizer.kewlkids.ca](https://organizer.kewlkids.ca)** (API typically **`organizer-api.kewlkids.ca`**). **ngrok** is no longer used for day-to-day work; a [reference section](#reference-ngrok-optional-tunneling) is kept if you ever need tunneling.
 
 ## Table of Contents
 
+0. [At a glance](#at-a-glance)
 1. [Prerequisites](#prerequisites)
 2. [Port Configuration](#port-configuration)
 3. [Backend Startup](#backend-startup)
