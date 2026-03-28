@@ -34,6 +34,22 @@ import { speak } from '../../utils/voiceFeedback';
 
 type ViewType = 'month' | 'week' | 'day' | 'agenda';
 
+/** Matches react-native-calendars default when `firstDay` is omitted (Sunday). */
+const MONTH_CALENDAR_FIRST_DAY = 0;
+
+/** Inclusive start and end dates for the 6×7 cells shown in month view. */
+function getVisibleMonthGridRange(anchor: Date, firstDayOfWeek = MONTH_CALENDAR_FIRST_DAY) {
+  const y = anchor.getFullYear();
+  const m = anchor.getMonth();
+  const firstOfMonth = new Date(y, m, 1);
+  const dow = firstOfMonth.getDay();
+  const offset = (dow - firstDayOfWeek + 7) % 7;
+  const gridStart = new Date(y, m, 1 - offset);
+  const gridEnd = new Date(gridStart);
+  gridEnd.setDate(gridEnd.getDate() + 41);
+  return { gridStart, gridEnd };
+}
+
 const COLOR_PRESETS = [
   { name: 'Blue', value: '#3b82f6' },
   { name: 'Purple', value: '#8b5cf6' },
@@ -193,7 +209,7 @@ export default function CalendarScreen() {
   const handleNavigate = (action: 'TODAY' | 'PREV' | 'NEXT') => {
     const newDate = new Date(currentDate);
     if (action === 'TODAY') {
-      setCurrentDate(new Date());
+      setCurrentDate(getTodayLocal());
     } else if (action === 'PREV') {
       if (view === 'month') {
         newDate.setMonth(newDate.getMonth() - 1);
@@ -515,15 +531,6 @@ export default function CalendarScreen() {
     return marked;
   };
 
-  // Get events for selected date
-  const getEventsForDate = (date: Date) => {
-    const dateStr = getLocalDateString(date);
-    return events.filter((event) => {
-      const eventDateStr = getLocalDateString(event.starts_at);
-      return eventDateStr === dateStr;
-    });
-  };
-
   const formatDateTime = (isoString: string) => {
     const date = new Date(isoString);
     return {
@@ -586,6 +593,17 @@ export default function CalendarScreen() {
     const dates = Object.keys(agendaItems).sort();
     return dates;
   }, [agendaItems]);
+
+  const monthViewGridRange = useMemo(
+    () => getVisibleMonthGridRange(currentDate, MONTH_CALENDAR_FIRST_DAY),
+    [currentDate.getFullYear(), currentDate.getMonth()]
+  );
+
+  const monthViewListDates = useMemo(() => {
+    const startStr = getLocalDateString(monthViewGridRange.gridStart);
+    const endStr = getLocalDateString(monthViewGridRange.gridEnd);
+    return sortedDates.filter((d) => d >= startStr && d <= endStr);
+  }, [sortedDates, monthViewGridRange]);
 
   // Create event directly (from voice)
   const handleCreateEventDirectly = async (eventData: any) => {
@@ -825,7 +843,7 @@ export default function CalendarScreen() {
           >
             {view === 'month' && (
               <Calendar
-                key={`calendar-${events.length}-${view}-${calendarKey}`}
+                key={`calendar-${currentDate.getFullYear()}-${currentDate.getMonth()}-${events.length}-${view}-${calendarKey}`}
                 current={selectedDateStr}
                 onDayPress={(day) => {
                   // On mobile, just select the day to show events below
@@ -895,31 +913,72 @@ export default function CalendarScreen() {
             {view === 'month' && (
               <View style={styles.eventsListContainer}>
                 <Text style={[styles.eventsListTitle, { color: colors.text }]}>
-                  Events for {currentDate.toLocaleDateString()}
+                  Events in month view
                 </Text>
-                {getEventsForDate(currentDate).length === 0 ? (
+                <Text style={[styles.eventsListSubtitle, { color: colors.textSecondary }]}>
+                  {monthViewGridRange.gridStart.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })}{' '}
+                  –{' '}
+                  {monthViewGridRange.gridEnd.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </Text>
+                {monthViewListDates.length === 0 ? (
                   <Text style={[styles.agendaEmptyText, { color: colors.textSecondary }]}>
-                    No events scheduled for this day
+                    No events in this month view
                   </Text>
                 ) : (
-                  getEventsForDate(currentDate).map((event) => (
-                    <TouchableOpacity
-                      key={event.id}
-                      style={[styles.eventItem, { backgroundColor: colors.surface, borderLeftColor: event.color || '#3b82f6' }]}
-                      onPress={() => handleSelectEvent(event)}
-                    >
-                      <Text style={[styles.eventTitle, { color: colors.text }]}>{event.title}</Text>
-                      {event.location && (
-                        <Text style={[styles.eventLocation, { color: colors.textSecondary }]}>
-                          📍 {event.location}
+                  monthViewListDates.map((date) => {
+                    const dayEvents = agendaItems[date] || [];
+                    return (
+                      <View key={date} style={styles.monthViewDateSection}>
+                        <Text style={[styles.agendaDateHeader, { color: colors.text }]}>
+                          {(() => {
+                            const [year, month, day] = date.split('-').map(Number);
+                            const localDate = new Date(year, month - 1, day);
+                            return localDate.toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              month: 'long',
+                              day: 'numeric',
+                              year: 'numeric',
+                            });
+                          })()}
                         </Text>
-                      )}
-                      <Text style={[styles.eventTime, { color: colors.textSecondary }]}>
-                        {new Date(event.starts_at).toLocaleString()}
-                        {event.ends_at && ` - ${new Date(event.ends_at).toLocaleString()}`}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
+                        {dayEvents.map((event) => (
+                          <TouchableOpacity
+                            key={event.id}
+                            style={[
+                              styles.eventItem,
+                              { backgroundColor: colors.surface, borderLeftColor: event.color || '#3b82f6' },
+                            ]}
+                            onPress={() => handleSelectEvent(event)}
+                          >
+                            <Text style={[styles.eventTitle, { color: colors.text }]}>{event.title}</Text>
+                            {event.location && (
+                              <Text style={[styles.eventLocation, { color: colors.textSecondary }]}>
+                                📍 {event.location}
+                              </Text>
+                            )}
+                            <Text style={[styles.eventTime, { color: colors.textSecondary }]}>
+                              {new Date(event.starts_at).toLocaleTimeString('en-US', {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                              {event.ends_at &&
+                                ` - ${new Date(event.ends_at).toLocaleTimeString('en-US', {
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                })}`}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    );
+                  })
                 )}
               </View>
             )}
@@ -1619,7 +1678,14 @@ const styles = StyleSheet.create({
   eventsListTitle: {
     fontSize: 18,
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  eventsListSubtitle: {
+    fontSize: 14,
     marginBottom: 12,
+  },
+  monthViewDateSection: {
+    marginBottom: 24,
   },
   eventItem: {
     padding: 12,
