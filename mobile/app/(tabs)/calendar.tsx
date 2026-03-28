@@ -92,6 +92,7 @@ export default function CalendarScreen() {
     viewRef.current = view;
   }, [view]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [showEventDetail, setShowEventDetail] = useState(false);
   const [showEventForm, setShowEventForm] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -339,6 +340,7 @@ export default function CalendarScreen() {
     });
     setSelectedEvent(null);
     setIsEditing(false);
+    setShowEventDetail(false);
     setShowEventForm(true);
   };
 
@@ -349,22 +351,36 @@ export default function CalendarScreen() {
     handleSelectSlot(date);
   };
 
-  // Handle event click - open form in edit mode
+  // Tap existing event: read-only detail first; Edit opens the form.
   const handleSelectEvent = (event: Event) => {
-    const eventColor = event.color || '#3b82f6';
+    setSelectedEvent(event);
+    setShowEventDetail(true);
+  };
 
+  const closeEventDetail = () => {
+    setShowEventDetail(false);
+    setSelectedEvent(null);
+    setCalendarKey((prev) => prev + 1);
+  };
+
+  const openEventEditForm = () => {
+    if (!selectedEvent) return;
+    const event = selectedEvent;
+    const eventColor = event.color || '#3b82f6';
     setFormData({
       family: event.family,
       title: event.title,
       notes: event.notes || '',
       location: event.location || '',
       starts_at: formatLocalDateTime(new Date(event.starts_at)),
-      ends_at: event.ends_at ? formatLocalDateTime(new Date(event.ends_at)) : formatLocalDateTime(new Date(event.starts_at)),
+      ends_at: event.ends_at
+        ? formatLocalDateTime(new Date(event.ends_at))
+        : formatLocalDateTime(new Date(event.starts_at)),
       is_all_day: event.is_all_day,
       color: eventColor,
     });
-    setSelectedEvent(event);
     setIsEditing(true);
+    setShowEventDetail(false);
     setShowEventForm(true);
   };
 
@@ -453,6 +469,8 @@ export default function CalendarScreen() {
       await CalendarService.deleteEvent(selectedEvent.id);
       await fetchEvents();
       setShowDeleteModal(false);
+      setShowEventDetail(false);
+      setShowEventForm(false);
       setSelectedEvent(null);
       stop();
       reset();
@@ -481,6 +499,7 @@ export default function CalendarScreen() {
     });
     setSelectedEvent(null);
     setIsEditing(false);
+    setShowEventDetail(false);
   };
 
   // Helper function to get date string in local timezone (YYYY-MM-DD)
@@ -688,6 +707,7 @@ export default function CalendarScreen() {
     });
     setSelectedEvent(null);
     setIsEditing(false);
+    setShowEventDetail(false);
     setShowEventForm(true);
   };
 
@@ -989,6 +1009,130 @@ export default function CalendarScreen() {
 
       {/* Floating Action Button removed - + button is now in toolbar for both web and mobile */}
 
+      {/* Event detail (read-only); Edit opens the full form modal */}
+      <Modal
+        visible={showEventDetail && !!selectedEvent}
+        animationType="slide"
+        transparent={true}
+        statusBarTranslucent={true}
+        onRequestClose={closeEventDetail}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closeEventDetail}
+          />
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalContentInner, { backgroundColor: colors.surface }]}>
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Event</Text>
+                  <TouchableOpacity onPress={closeEventDetail} style={styles.closeButton}>
+                    <Text style={[styles.closeButtonText, { color: colors.text }]}>×</Text>
+                  </TouchableOpacity>
+                </View>
+                {selectedEvent && (
+                  <>
+                    <ScrollView
+                      style={styles.eventDetailScroll}
+                      contentContainerStyle={styles.eventDetailScrollContent}
+                      keyboardShouldPersistTaps="handled"
+                      nestedScrollEnabled
+                    >
+                      <Text style={[styles.eventDetailEventTitle, { color: colors.text }]}>
+                        {selectedEvent.title}
+                      </Text>
+                      {selectedEvent.is_all_day ? (
+                        <>
+                          <Text style={[styles.eventDetailMeta, { color: colors.textSecondary }]}>
+                            {new Date(selectedEvent.starts_at).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              month: 'long',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}{' '}
+                            (all day)
+                          </Text>
+                          {selectedEvent.ends_at &&
+                            getLocalDateString(selectedEvent.starts_at) !==
+                              getLocalDateString(selectedEvent.ends_at) && (
+                              <Text style={[styles.eventDetailMeta, { color: colors.textSecondary }]}>
+                                Through{' '}
+                                {new Date(selectedEvent.ends_at).toLocaleDateString('en-US', {
+                                  weekday: 'long',
+                                  month: 'long',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </Text>
+                            )}
+                        </>
+                      ) : (
+                        <>
+                          <Text style={[styles.eventDetailMeta, { color: colors.textSecondary }]}>
+                            Starts {new Date(selectedEvent.starts_at).toLocaleString()}
+                          </Text>
+                          {selectedEvent.ends_at && (
+                            <Text style={[styles.eventDetailMeta, { color: colors.textSecondary }]}>
+                              Ends {new Date(selectedEvent.ends_at).toLocaleString()}
+                            </Text>
+                          )}
+                        </>
+                      )}
+                      {selectedEvent.location ? (
+                        <Text style={[styles.eventDetailMeta, { color: colors.textSecondary }]}>
+                          {selectedEvent.location}
+                        </Text>
+                      ) : null}
+                      <Text style={[styles.eventDetailNotesLabel, { color: colors.text }]}>Notes</Text>
+                      <Text
+                        selectable={Platform.OS !== 'web'}
+                        style={[
+                          styles.eventDetailNotesBody,
+                          { color: colors.text },
+                          Platform.OS === 'web' && ({ whiteSpace: 'pre-wrap' } as const),
+                        ]}
+                      >
+                        {selectedEvent.notes?.trim() ? selectedEvent.notes : 'No notes'}
+                      </Text>
+                    </ScrollView>
+                    <View
+                      style={[
+                        styles.eventDetailFooter,
+                        { borderTopColor: colors.border, backgroundColor: colors.surface },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        style={[
+                          styles.deleteButton,
+                          { backgroundColor: '#ef4444', marginRight: 0, flex: 0, alignSelf: 'flex-start' },
+                        ]}
+                        onPress={() => {
+                          setShowEventDetail(false);
+                          setShowDeleteModal(true);
+                        }}
+                      >
+                        <Text style={styles.deleteButtonText}>Delete</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.button,
+                          { backgroundColor: colors.primary, flex: 0, minWidth: 120, paddingHorizontal: 20 },
+                        ]}
+                        onPress={openEventEditForm}
+                      >
+                        <Text style={styles.buttonText}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       {/* Event Form Modal */}
       <Modal
         visible={showEventForm}
@@ -997,6 +1141,7 @@ export default function CalendarScreen() {
         statusBarTranslucent={true}
         onRequestClose={() => {
           setShowEventForm(false);
+          setShowEventDetail(false);
           setSelectedEvent(null);
           setIsEditing(false);
           setCalendarKey(prev => prev + 1);
@@ -1008,6 +1153,7 @@ export default function CalendarScreen() {
             activeOpacity={1}
             onPress={() => {
               setShowEventForm(false);
+              setShowEventDetail(false);
               setSelectedEvent(null);
               setIsEditing(false);
               setCalendarKey(prev => prev + 1);
@@ -1028,6 +1174,7 @@ export default function CalendarScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setShowEventForm(false);
+                  setShowEventDetail(false);
                   setSelectedEvent(null);
                   setIsEditing(false);
                   setCalendarKey(prev => prev + 1);
@@ -1501,6 +1648,7 @@ export default function CalendarScreen() {
                   style={[styles.button, { backgroundColor: colors.background, borderColor: colors.border, marginRight: 6 }]}
                   onPress={() => {
                     setShowEventForm(false);
+                    setShowEventDetail(false);
                     setSelectedEvent(null);
                     setIsEditing(false);
                     setCalendarKey(prev => prev + 1);
@@ -1772,6 +1920,42 @@ const styles = StyleSheet.create({
   closeButtonText: {
     fontSize: 32,
     lineHeight: 32,
+  },
+  eventDetailScroll: {
+    flex: 1,
+  },
+  eventDetailScrollContent: {
+    padding: 16,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  eventDetailEventTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  eventDetailMeta: {
+    fontSize: 16,
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  eventDetailNotesLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  eventDetailNotesBody: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  eventDetailFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
   },
   formScroll: {
     flex: 1,
