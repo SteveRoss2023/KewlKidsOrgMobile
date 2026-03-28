@@ -1,35 +1,18 @@
-import React, { useState, useRef, useEffect, createElement } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-  Alert,
-  Modal,
-  Pressable,
-} from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { ListSection } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useIsMobileLayout } from '../../hooks/useIsMobileLayout';
-import { formatLocalISODate } from '../../utils/sectionSort';
 
-function formatSectionDateLabel(iso: string | undefined): string {
+function formatSectionDateLabel(iso: string | undefined, opts?: { compactYear?: boolean }): string {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—';
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function dateFromIso(iso: string | undefined): Date {
-  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    const [y, m, d] = iso.split('-').map(Number);
-    return new Date(y, m - 1, d);
+  if (opts?.compactYear) {
+    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
   }
-  return new Date();
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function isLightColor(hex: string): boolean {
@@ -51,14 +34,13 @@ interface SectionRowProps {
   itemCount?: number;
   onIndentAll?: () => void;
   onOutdentAll?: () => void;
-  onRenameSection?: (newTitle: string) => void;
+  /** Opens add/edit form (name + date) from the parent screen */
+  onEditSection?: () => void;
   onDeleteSection?: () => void;
   listColor?: string;
   onSectionDrag?: () => void;
   /** Show the drag handle icon (e.g. on web where the whole row is draggable). When onSectionDrag is also set, the icon is pressable. */
   showSectionDragHandle?: boolean;
-  /** ISO YYYY-MM-DD; compact display + edit beside title */
-  onChangeSectionDate?: (iso: string) => void;
 }
 
 export default function SectionRow({
@@ -69,68 +51,38 @@ export default function SectionRow({
   onToggleCollapse,
   onIndentAll,
   onOutdentAll,
-  onRenameSection,
+  onEditSection,
   onDeleteSection,
   listColor,
   onSectionDrag,
   showSectionDragHandle = false,
-  onChangeSectionDate,
 }: SectionRowProps) {
-  const { colors, theme } = useTheme();
+  const { colors } = useTheme();
 
   // Match grocery: list color as header fill when set; otherwise surface
   const headerBg = listColor || colors.surface;
   const useLight = listColor ? isLightColor(listColor) : false;
   const headerTextColor = listColor ? (useLight ? '#000000' : '#FFFFFF') : colors.text;
   const headerIconColor = listColor ? (useLight ? '#00000080' : '#FFFFFF80') : colors.textSecondary;
+  /** Calendar affordance: primary on default header (light/dark via theme); on tinted header match other row icons */
+  const calendarIconColor = listColor ? headerIconColor : colors.primary;
   const checkboxBorderColor = listColor ? (useLight ? '#333' : '#ddd') : colors.border;
-
-  const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState(section.title);
-  const inputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    if (editing) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [editing]);
-
-  useEffect(() => {
-    setEditValue(section.title);
-  }, [section.title]);
-
-  const handleSave = () => {
-    const trimmed = editValue.trim();
-    setEditing(false);
-    if (trimmed && trimmed !== section.title && onRenameSection) {
-      onRenameSection(trimmed);
-    } else {
-      setEditValue(section.title);
-    }
-  };
 
   const isMobileLayout = useIsMobileLayout();
   const showSectionOverflowMenu = isMobileLayout;
   const hasAnySectionAction = !!(
-    onRenameSection ||
+    onEditSection ||
     onDeleteSection ||
     onOutdentAll ||
-    onIndentAll ||
-    onChangeSectionDate
+    onIndentAll
   );
 
   const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
-  const [showDateModal, setShowDateModal] = useState(false);
-  const [iosDraftDate, setIosDraftDate] = useState(() => dateFromIso(section.section_date));
-
-  useEffect(() => {
-    setIosDraftDate(dateFromIso(section.section_date));
-  }, [section.section_date]);
 
   const openSectionMenu = () => {
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
-    if (onRenameSection) {
-      buttons.push({ text: 'Rename section', onPress: () => setEditing(true) });
+    if (onEditSection) {
+      buttons.push({ text: 'Edit section', onPress: onEditSection });
     }
     if (onDeleteSection) {
       buttons.push({ text: 'Delete section', onPress: onDeleteSection, style: 'destructive' });
@@ -140,9 +92,6 @@ export default function SectionRow({
     }
     if (onIndentAll) {
       buttons.push({ text: 'Indent all', onPress: onIndentAll });
-    }
-    if (onChangeSectionDate) {
-      buttons.push({ text: 'Change section date', onPress: () => setShowDateModal(true) });
     }
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Section', undefined, buttons);
@@ -162,10 +111,10 @@ export default function SectionRow({
       };
       if (onIndentAll) setTitle(indentRef, 'Indent all items +1');
       if (onOutdentAll) setTitle(outdentRef, 'Outdent all items -1');
-      if (onRenameSection) setTitle(editBtnRef, 'Edit section name');
+      if (onEditSection) setTitle(editBtnRef, 'Edit section');
       if (onDeleteSection) setTitle(deleteBtnRef, 'Delete section and all its items');
     }
-  }, [onIndentAll, onOutdentAll, onRenameSection, onDeleteSection, isMobileLayout, sectionMenuOpen]);
+  }, [onIndentAll, onOutdentAll, onEditSection, onDeleteSection, isMobileLayout, sectionMenuOpen]);
 
   return (
     <View
@@ -204,131 +153,39 @@ export default function SectionRow({
           </View>
         )
       )}
-      {editing ? (
-        <TextInput
-          ref={inputRef}
-          style={[styles.titleInput, { color: headerTextColor, borderColor: headerIconColor }]}
-          value={editValue}
-          onChangeText={setEditValue}
-          onBlur={handleSave}
-          onSubmitEditing={handleSave}
-          returnKeyType="done"
-          selectTextOnFocus
-        />
-      ) : (
-        <TouchableOpacity
-          style={styles.titleContainer}
-          onPress={onToggleCollapse}
-          activeOpacity={onToggleCollapse ? 0.6 : 1}
-          accessibilityLabel={collapsed ? 'Expand section' : 'Collapse section'}
+      <TouchableOpacity
+        style={styles.titleContainer}
+        onPress={onToggleCollapse}
+        activeOpacity={onToggleCollapse ? 0.6 : 1}
+        accessibilityLabel={collapsed ? 'Expand section' : 'Collapse section'}
+      >
+        <Text
+          style={[
+            styles.title,
+            { color: headerTextColor },
+            allCompleted && styles.titleCompleted,
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
         >
-          <Text
-            style={[
-              styles.title,
-              { color: headerTextColor },
-              allCompleted && styles.titleCompleted,
-            ]}
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
-            {section.title}
-          </Text>
-        </TouchableOpacity>
-      )}
-      {onChangeSectionDate && !editing && (
-        <>
-          {Platform.OS === 'web' ? (
-            <View style={styles.dateWebWrap} pointerEvents="box-none">
-              {createElement('input', {
-                type: 'date',
-                value: section.section_date || '',
-                onChange: (e: { target: { value: string } }) => onChangeSectionDate(e.target.value),
-                'aria-label': 'Section date',
-                style: {
-                  width: 118,
-                  padding: '4px 6px',
-                  borderRadius: 6,
-                  border: `1px solid ${colors.border}`,
-                  backgroundColor: listColor
-                    ? useLight
-                      ? 'rgba(255,255,255,0.9)'
-                      : 'rgba(0,0,0,0.25)'
-                    : colors.background,
-                  color: headerTextColor,
-                  fontSize: 12,
-                  flexShrink: 0,
-                  cursor: 'pointer',
-                },
-              })}
-            </View>
-          ) : (
-            <TouchableOpacity
-              onPress={() => setShowDateModal(true)}
-              style={styles.dateNativeTouch}
-              accessibilityLabel="Section date"
-              accessibilityHint="Opens date picker"
-            >
-              <Text style={[styles.dateNativeText, { color: headerIconColor }]} numberOfLines={1}>
-                {formatSectionDateLabel(section.section_date)}
-              </Text>
-            </TouchableOpacity>
-          )}
-          {Platform.OS === 'android' && showDateModal && (
-            <DateTimePicker
-              value={iosDraftDate}
-              mode="date"
-              display="default"
-              textColor={colors.text}
-              accentColor={colors.primary}
-              themeVariant={theme === 'dark' ? 'dark' : 'light'}
-              onChange={(event, selectedDate) => {
-                setShowDateModal(false);
-                if (event.type === 'set' && selectedDate) {
-                  onChangeSectionDate(formatLocalISODate(selectedDate));
-                }
-              }}
-            />
-          )}
-          {Platform.OS === 'ios' && (
-            <Modal visible={showDateModal} transparent animationType="fade">
-              <View style={styles.dateModalBackdrop}>
-                <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDateModal(false)} />
-                <View style={[styles.dateModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <DateTimePicker
-                    value={iosDraftDate}
-                    mode="date"
-                    display="spinner"
-                    textColor={colors.text}
-                    accentColor={colors.primary}
-                    themeVariant={theme === 'dark' ? 'dark' : 'light'}
-                    onChange={(_event, selectedDate) => {
-                      if (selectedDate) setIosDraftDate(selectedDate);
-                    }}
-                  />
-                  <TouchableOpacity
-                    style={[styles.dateModalDone, { backgroundColor: colors.primary }]}
-                    onPress={() => {
-                      onChangeSectionDate(formatLocalISODate(iosDraftDate));
-                      setShowDateModal(false);
-                    }}
-                  >
-                    <Text style={styles.dateModalDoneText}>Done</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </Modal>
-          )}
-        </>
-      )}
-      {!editing && showSectionOverflowMenu && hasAnySectionAction ? (
+          {section.title}
+        </Text>
+      </TouchableOpacity>
+      <View style={styles.dateChipTouch} accessibilityLabel="Section date">
+        <FontAwesome name="calendar" size={11} color={calendarIconColor} style={styles.dateChipCalendarIcon} />
+        <Text style={[styles.dateChipText, { color: headerIconColor }]} numberOfLines={1}>
+          {formatSectionDateLabel(section.section_date, { compactYear: true })}
+        </Text>
+      </View>
+      {showSectionOverflowMenu && hasAnySectionAction ? (
         Platform.OS === 'web' && sectionMenuOpen ? (
           <View style={styles.sectionMenuIconsRow}>
-            {onRenameSection && (
+            {onEditSection && (
               <TouchableOpacity
                 ref={editBtnRef}
                 style={styles.sectionActionButton}
-                onPress={() => { setSectionMenuOpen(false); setEditing(true); }}
-                accessibilityLabel="Rename section"
+                onPress={() => { setSectionMenuOpen(false); onEditSection(); }}
+                accessibilityLabel="Edit section"
               >
                 <FontAwesome name="pencil" size={14} color={headerIconColor} />
               </TouchableOpacity>
@@ -363,15 +220,6 @@ export default function SectionRow({
                 <FontAwesome name="indent" size={14} color={headerIconColor} />
               </TouchableOpacity>
             )}
-            {onChangeSectionDate && Platform.OS !== 'web' && (
-              <TouchableOpacity
-                style={styles.sectionActionButton}
-                onPress={() => { setSectionMenuOpen(false); setShowDateModal(true); }}
-                accessibilityLabel="Change section date"
-              >
-                <FontAwesome name="calendar" size={14} color={headerIconColor} />
-              </TouchableOpacity>
-            )}
             <TouchableOpacity
               style={styles.sectionActionButton}
               onPress={() => setSectionMenuOpen(false)}
@@ -386,22 +234,22 @@ export default function SectionRow({
           onPress={Platform.OS === 'web' ? () => setSectionMenuOpen((open) => !open) : openSectionMenu}
           style={styles.sectionActionButton}
           accessibilityLabel="Section actions"
-          accessibilityHint="Opens menu with rename, delete, and indent options"
+          accessibilityHint="Opens menu with edit, delete, and indent options"
         >
           <FontAwesome name="ellipsis-v" size={14} color={headerIconColor} />
         </TouchableOpacity>
         )
-      ) : !editing && !showSectionOverflowMenu && onRenameSection && (
+      ) : !showSectionOverflowMenu && onEditSection && (
         <TouchableOpacity
           ref={editBtnRef}
-          onPress={() => setEditing(true)}
+          onPress={onEditSection}
           style={styles.sectionActionButton}
-          accessibilityLabel="Edit section name"
+          accessibilityLabel="Edit section"
         >
           <FontAwesome name="pencil" size={14} color={headerIconColor} />
         </TouchableOpacity>
       )}
-      {!editing && !showSectionOverflowMenu && onDeleteSection && (
+      {!showSectionOverflowMenu && onDeleteSection && (
         <TouchableOpacity
           ref={deleteBtnRef}
           onPress={onDeleteSection}
@@ -473,57 +321,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  dateWebWrap: {
-    flexShrink: 0,
-    maxWidth: 120,
-  },
-  dateNativeTouch: {
+  dateChipTouch: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flexShrink: 0,
     paddingVertical: 4,
     paddingHorizontal: 4,
-    maxWidth: 100,
+    maxWidth: 128,
+    gap: 4,
   },
-  dateNativeText: {
+  dateChipCalendarIcon: {
+    flexShrink: 0,
+  },
+  dateChipText: {
     fontSize: 12,
     fontWeight: '500',
-  },
-  dateModalBackdrop: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  dateModalCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 16,
-    marginHorizontal: 24,
-    maxWidth: 360,
-  },
-  dateModalDone: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  dateModalDoneText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
+    flexShrink: 1,
   },
   titleCompleted: {
     textDecorationLine: 'line-through',
     opacity: 0.6,
-  },
-  titleInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: Platform.OS === 'web' ? 4 : 6,
-    ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
   },
   sectionActionButton: {
     padding: 6,

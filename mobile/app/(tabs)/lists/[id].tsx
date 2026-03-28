@@ -38,6 +38,8 @@ import ListService from '../../../services/listService';
 import { List, ListItem, ListSection, GroceryCategory, CreateListItemData, UpdateListItemData } from '../../../types/lists';
 import ListItemComponent from '../../../components/lists/ListItemComponent';
 import SectionRow from '../../../components/lists/SectionRow';
+import SectionFormModal from '../../../components/lists/SectionFormModal';
+import AddSectionForm from '../../../components/lists/AddSectionForm';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
@@ -319,7 +321,9 @@ export default function ListDetailScreen() {
   const [listItems, setListItems] = useState<ListItem[]>([]);
   const [sections, setSections] = useState<ListSection[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
-  const [addingSectionName, setAddingSectionName] = useState<string | null>(null);
+  const [showAddSection, setShowAddSection] = useState(false);
+  const [editSection, setEditSection] = useState<ListSection | null>(null);
+  const [sectionFormSaving, setSectionFormSaving] = useState(false);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -941,33 +945,51 @@ export default function ListDetailScreen() {
     }
   };
 
-  const handleRenameSection = async (section: ListSection, newTitle: string) => {
-    const previousSections = sections.map((s) => ({ ...s }));
-    setSections((prev) =>
-      prev.map((s) => (s.id === section.id ? { ...s, title: newTitle } : s))
-    );
+  const submitAddSection = async (payload: { title: string; section_date: string }) => {
+    if (!list) return;
+    const { title, section_date } = payload;
+    setSectionFormSaving(true);
     try {
-      await ListService.updateListSection(section.id, { title: newTitle });
+      await ListService.createListSection({
+        list: list.id,
+        order: sections.length,
+        title,
+        section_date,
+      });
+      await fetchListSections();
+      setShowAddSection(false);
     } catch (err) {
-      console.error('Error renaming section:', err);
-      setSections(previousSections);
-      alert((err as APIError)?.message || 'Failed to rename section. Try again.');
+      console.error('Error creating section:', err);
+      alert((err as APIError)?.message || 'Failed to create section. Try again.');
+    } finally {
+      setSectionFormSaving(false);
     }
   };
 
-  const handleChangeSectionDate = async (section: ListSection, iso: string) => {
-    if (!iso || iso === section.section_date) return;
-    const previousSections = sections.map((s) => ({ ...s }));
-    setSections((prev) => {
-      const next = prev.map((s) => (s.id === section.id ? { ...s, section_date: iso } : s));
-      return sortSectionsByDateAndOrder(next);
-    });
+  const submitEditSection = async (payload: { title: string; section_date: string }) => {
+    if (!editSection || !list) return;
+    const { title, section_date } = payload;
+    const s = editSection;
+    setSectionFormSaving(true);
     try {
-      await ListService.updateListSection(section.id, { section_date: iso });
+      const previousSections = sections.map((x) => ({ ...x }));
+      setSections((prev) =>
+        sortSectionsByDateAndOrder(
+          prev.map((x) => (x.id === s.id ? { ...x, title, section_date } : x))
+        )
+      );
+      try {
+        await ListService.updateListSection(s.id, { title, section_date });
+      } catch (err) {
+        setSections(previousSections);
+        throw err;
+      }
+      setEditSection(null);
     } catch (err) {
-      console.error('Error updating section date:', err);
-      setSections(previousSections);
-      alert((err as APIError)?.message || 'Failed to update section date. Try again.');
+      console.error('Error updating section:', err);
+      alert((err as APIError)?.message || 'Failed to update section. Try again.');
+    } finally {
+      setSectionFormSaving(false);
     }
   };
 
@@ -1787,18 +1809,22 @@ export default function ListDetailScreen() {
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.actionsBarTop}>
           <View style={styles.actionButtonsPrimary}>
-            {isSupported && !showAddItem && !editingItem && (
+            {isSupported && !showAddItem && !showAddSection && !editingItem && (
               <VoiceButton
                 onPress={handleVoiceClick}
                 isListening={isListening}
                 disabled={adding || updatingItem}
               />
             )}
-            {!showAddItem && !editingItem ? (
+            {!showAddItem && !showAddSection && !editingItem ? (
               <>
                 {isChecklistList && (
                   <TouchableOpacity
-                    onPress={() => setAddingSectionName('')}
+                    onPress={() => {
+                      setShowAddSection(true);
+                      setShowAddItem(false);
+                      setEditSection(null);
+                    }}
                     style={[styles.addButton, { backgroundColor: colors.primary }]}
                   >
                     <FontAwesome name="plus" size={16} color="#fff" />
@@ -1808,7 +1834,11 @@ export default function ListDetailScreen() {
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  onPress={() => setShowAddItem(true)}
+                  onPress={() => {
+                    setShowAddItem(true);
+                    setShowAddSection(false);
+                    setEditSection(null);
+                  }}
                   style={[styles.addButton, { backgroundColor: colors.primary }]}
                 >
                   <FontAwesome name="plus" size={16} color="#fff" />
@@ -1827,7 +1857,7 @@ export default function ListDetailScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-          {!showAddItem && !editingItem && (
+          {!showAddItem && !showAddSection && !editingItem && (
             <View style={styles.actionButtonsSecondary}>
               {isSupported && (
                 <TooltipButton
@@ -1887,42 +1917,6 @@ export default function ListDetailScreen() {
             </View>
           )}
         </View>
-        {isChecklistList && addingSectionName !== null && (
-          <View style={[styles.addSectionRow, { borderTopColor: colors.border }]}>
-            <FontAwesome name="plus" size={16} color={colors.primary} />
-            <TextInput
-              autoFocus
-              style={[styles.addSectionInput, { color: colors.text, borderColor: colors.primary }]}
-              placeholder="Section name..."
-              placeholderTextColor={colors.textSecondary}
-              value={addingSectionName}
-              onChangeText={setAddingSectionName}
-              onSubmitEditing={async () => {
-                const sectionName = addingSectionName.trim();
-                if (!sectionName) { setAddingSectionName(null); return; }
-                try {
-                  await ListService.createListSection({
-                    list: list!.id,
-                    order: sections.length,
-                    title: sectionName,
-                    section_date: formatLocalISODate(),
-                  });
-                  await fetchListSections();
-                } catch (err) {
-                  console.error('Error creating section:', err);
-                }
-                setAddingSectionName(null);
-              }}
-              returnKeyType="done"
-            />
-            <TouchableOpacity
-              onPress={() => setAddingSectionName(null)}
-              style={{ padding: 6 }}
-            >
-              <FontAwesome name="times" size={16} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        )}
         {isGroceryList && availableRecipes.length > 0 && (
           <View style={styles.recipeFilterRow}>
             <FontAwesome name="filter" size={16} color={colors.textSecondary} />
@@ -1981,6 +1975,19 @@ export default function ListDetailScreen() {
             isChecklistList={isChecklistList}
             sections={sections}
             loading={adding}
+          />
+        </ScrollView>
+      )}
+
+      {isChecklistList && showAddSection && !editingItem && (
+        <ScrollView
+          style={[styles.addItemFormContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <AddSectionForm
+            onSubmit={submitAddSection}
+            onCancel={() => setShowAddSection(false)}
+            loading={sectionFormSaving}
           />
         </ScrollView>
       )}
@@ -2123,7 +2130,10 @@ export default function ListDetailScreen() {
                       allCompleted={allCompleted}
                       listColor={listColor}
                       onToggleComplete={() => handleSectionToggleComplete(section)}
-                      onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                      onEditSection={() => {
+                        setShowAddSection(false);
+                        setEditSection(section);
+                      }}
                       onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
                       collapsed={isCollapsed}
                       onToggleCollapse={() => {
@@ -2138,7 +2148,6 @@ export default function ListDetailScreen() {
                       onOutdentAll={() => handleOutdentAllInSection(section.id)}
                       itemCount={sectionItems.length}
                       showSectionDragHandle
-                      onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                     />
                     {!isCollapsed && (
                       <View style={styles.checklistItemsContainer}>
@@ -2229,7 +2238,10 @@ export default function ListDetailScreen() {
                       allCompleted={allCompleted}
                       listColor={listColor}
                       onToggleComplete={() => handleSectionToggleComplete(section)}
-                      onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                      onEditSection={() => {
+                        setShowAddSection(false);
+                        setEditSection(section);
+                      }}
                       onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
                       collapsed={isCollapsed}
                       onToggleCollapse={() => {
@@ -2244,7 +2256,6 @@ export default function ListDetailScreen() {
                       onOutdentAll={() => handleOutdentAllInSection(section.id)}
                       itemCount={sectionItems.length}
                       onSectionDrag={drag}
-                      onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                     />
                     {!isCollapsed && (
                       <View style={styles.checklistItemsContainer}>
@@ -2312,7 +2323,10 @@ export default function ListDetailScreen() {
                     allCompleted={allCompleted}
                     listColor={listColor}
                     onToggleComplete={() => handleSectionToggleComplete(section)}
-                    onRenameSection={(newTitle) => handleRenameSection(section, newTitle)}
+                    onEditSection={() => {
+                      setShowAddSection(false);
+                      setEditSection(section);
+                    }}
                     onDeleteSection={() => setDeleteSectionConfirm({ isOpen: true, section })}
                     collapsed={isCollapsed}
                     onToggleCollapse={() => {
@@ -2327,7 +2341,6 @@ export default function ListDetailScreen() {
                     onOutdentAll={() => handleOutdentAllInSection(section.id)}
                     itemCount={sectionItems.length}
                     showSectionDragHandle
-                    onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                   />
                   {!isCollapsed && (
                     <View style={styles.checklistItemsContainer}>
@@ -2534,6 +2547,17 @@ export default function ListDetailScreen() {
         cancelText="Cancel"
         showCancel={true}
       />
+      {isChecklistList && (
+        <SectionFormModal
+          visible={editSection !== null}
+          section={editSection}
+          saving={sectionFormSaving}
+          onDismiss={() => {
+            if (!sectionFormSaving) setEditSection(null);
+          }}
+          onSave={submitEditSection}
+        />
+      )}
       <ConfirmModal
         visible={deleteRecipeConfirm.isOpen}
         title="Delete Recipe Items"
@@ -2803,14 +2827,6 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
-  addSectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    marginTop: 4,
-  },
   voiceHelpButton: {
     width: 36,
     height: 36,
@@ -3039,16 +3055,6 @@ const styles = StyleSheet.create({
     minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  addSectionInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: Platform.OS === 'web' ? 6 : 8,
-    ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
   },
   itemContainer: {
     marginBottom: 8,
