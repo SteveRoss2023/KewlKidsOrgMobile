@@ -11,6 +11,16 @@ export function normalizeText(text: string): string {
 }
 
 /**
+ * Normalize list item / spoken names for matching: hyphens become spaces first so
+ * "Strap-on cover" aligns with speech "strap on cover" (plain normalizeText would drop
+ * the hyphen and merge words).
+ */
+export function normalizeTextForListItemMatch(text: string): string {
+  if (!text) return '';
+  return normalizeText(text.replace(/-/g, ' '));
+}
+
+/**
  * Capitalize words in a string
  */
 export function capitalizeWords(text: string): string {
@@ -38,6 +48,85 @@ export function isCancelCommand(text: string): boolean {
   return cancelPhrases.some((phrase) => normalized === phrase || normalized.startsWith(phrase + ' '));
 }
 
+/** Yes / go ahead (voice delete confirm). */
+export function isAffirmativeResponse(text: string): boolean {
+  const n = normalizeText(text);
+  if (!n) return false;
+  const affirm = [
+    'yes',
+    'yeah',
+    'yep',
+    'sure',
+    'ok',
+    'okay',
+    'do it',
+    'delete it',
+    'go ahead',
+    'confirm',
+    'right',
+  ];
+  return affirm.some((a) => n === a || n.startsWith(a + ' '));
+}
+
+/** No / don't delete (voice delete confirm). */
+export function isNegativeResponse(text: string): boolean {
+  const n = normalizeText(text);
+  if (!n) return false;
+  const neg = ['no', 'nope', "don't", 'dont', 'negative'];
+  return neg.some((a) => n === a || n.startsWith(a + ' '));
+}
+
+const SPOKEN_ORDINAL: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  sixth: 6,
+  seventh: 7,
+  eighth: 8,
+  ninth: 9,
+  tenth: 10,
+};
+
+/**
+ * Parse 1..max from disambiguation or section pick ("1", "one", "number 2", "first").
+ */
+export function parseVoiceSelectionNumber(text: string, max: number): number | null {
+  if (!text || max < 1) return null;
+  const n = normalizeText(text);
+  if (!n) return null;
+
+  if (/^\d+$/.test(n)) {
+    const v = parseInt(n, 10);
+    if (v >= 1 && v <= max) return v;
+    return null;
+  }
+
+  const digitMatch = n.match(/\b(\d{1,2})\b/);
+  if (digitMatch) {
+    const v = parseInt(digitMatch[1], 10);
+    if (v >= 1 && v <= max) return v;
+  }
+
+  for (const word of n.split(/\s+/)) {
+    const v = SPOKEN_ORDINAL[word];
+    if (v !== undefined && v >= 1 && v <= max) return v;
+  }
+
+  return null;
+}
+
 /**
  * Parse "create list [name]" command
  * Always prompts for list type after name is provided
@@ -52,6 +141,43 @@ export function parseCreateList(text: string): { type: 'createList'; name: strin
     };
   }
   return null;
+}
+
+/**
+ * True when the user intends to start checklist "add item" flow (no item name yet).
+ * Matches: add (alone), add item, add items, add an item, add a item
+ */
+export function parseChecklistBareAddItemIntent(text: string): boolean {
+  const n = normalizeText(text);
+  return /^(add|add\s+item|add\s+items|add\s+an\s+item|add\s+a\s+item)$/.test(n);
+}
+
+/**
+ * Bare delete on checklist: then say section or item.
+ */
+export function parseChecklistBareDeleteIntent(text: string): boolean {
+  const n = normalizeText(text);
+  return /^(delete|delete\s+item|delete\s+items)$/.test(n);
+}
+
+/**
+ * Bare update on checklist: then say section or item, then new name.
+ */
+export function parseChecklistBareUpdateIntent(text: string): boolean {
+  const n = normalizeText(text);
+  return /^(update|update\s+item|update\s+items)$/.test(n);
+}
+
+/**
+ * Parse "add section" or "add section [title]" (checklist only at call site).
+ */
+export function parseAddSectionCommand(text: string): { title?: string } | null {
+  const normalized = normalizeText(text);
+  const m = normalized.match(/^add\s+section(?:\s+(.+))?$/);
+  if (!m) return null;
+  const rest = m[1]?.trim();
+  if (!rest) return {};
+  return { title: capitalizeWords(rest) };
 }
 
 /**
@@ -108,16 +234,89 @@ export function findMatchingItems<T>(
   searchText: string,
   getName: (item: T) => string = (item: any) => item.name
 ): T[] {
-  const normalizedSearch = normalizeText(searchText);
+  const normalizedSearch = normalizeTextForListItemMatch(searchText);
+  if (!normalizedSearch) return [];
 
   return items.filter((item) => {
     const itemName = getName(item);
-    const normalizedItemName = normalizeText(itemName);
-    return (
-      normalizedItemName.includes(normalizedSearch) ||
-      normalizedSearch.includes(normalizedItemName)
-    );
+    const normalizedItemName = normalizeTextForListItemMatch(itemName);
+    if (!normalizedItemName) return false;
+
+    if (normalizedItemName.includes(normalizedSearch)) return true;
+
+    // Avoid treating the spoken phrase as a haystack for single-word item names:
+    // "strap on cover".includes("on") would match an item literally named "on".
+    const searchTokens = normalizedSearch.split(/\s+/).filter(Boolean);
+    const itemTokens = normalizedItemName.split(/\s+/).filter(Boolean);
+    const multiWordSearch = searchTokens.length > 1;
+    const singleWordItem = itemTokens.length === 1;
+    if (multiWordSearch && singleWordItem) return false;
+
+    return normalizedSearch.includes(normalizedItemName);
   });
+}
+
+/** Fuzzy match checklist sections by title (same rules as findMatchingItems). */
+export function findMatchingSections<T extends { title: string }>(
+  sections: T[],
+  searchText: string
+): T[] {
+  return findMatchingItems(sections, searchText, (s) => s.title);
+}
+
+/**
+ * Strip "item name", "item", parentheses from spoken delete query ("delete item name (x)" → x).
+ */
+export function stripChecklistVoiceItemQueryForSearch(rawName: string): string {
+  let s = rawName.trim();
+  s = s.replace(/^\(+/, '').replace(/\)+$/, '').trim();
+  s = s.replace(/^the\s+/i, '').trim();
+  s = s.replace(/^(item\s+name|item)\s+/i, '').trim();
+  return normalizeTextForListItemMatch(s);
+}
+
+/** Items whose name contains the full normalized phrase (stricter than fuzzy bidirectional match). */
+export function findItemsWithNormalizedPhraseInName<T>(
+  items: T[],
+  normalizedPhrase: string,
+  getName: (item: T) => string = (item: any) => item.name
+): T[] {
+  if (!normalizedPhrase) return [];
+  return items.filter((item) =>
+    normalizeTextForListItemMatch(getName(item)).includes(normalizedPhrase)
+  );
+}
+
+/**
+ * Checklist voice delete: no partial-word matches.
+ * - Multi-word query: item name must contain the full normalized phrase (all words, in order, together).
+ * - Single-word query: that word must appear as a whole token (not e.g. "cover" inside "recover").
+ */
+export function findChecklistVoiceDeleteMatches<T>(
+  items: T[],
+  normalizedQuery: string,
+  getName: (item: T) => string = (item: any) => item.name
+): T[] {
+  const q = normalizedQuery.trim();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return items.filter((item) => {
+    const itemNorm = normalizeTextForListItemMatch(getName(item));
+    if (!itemNorm) return false;
+    if (tokens.length === 1) {
+      const itemTokens = itemNorm.split(/\s+/).filter(Boolean);
+      return itemTokens.includes(tokens[0]);
+    }
+    return itemNorm.includes(q);
+  });
+}
+
+/** Spoken label for what we searched (after stripping "item name", parens). */
+export function formatDeleteQueryForSpeech(rawCapture: string): string {
+  let s = rawCapture.trim().replace(/^\(+/, '').replace(/\)+$/, '').trim();
+  s = s.replace(/^the\s+item\s+/i, '').replace(/^the\s+/i, '').trim();
+  s = s.replace(/^(item\s+name|item)\s+/i, '').trim();
+  return capitalizeWords(s);
 }
 
 /**

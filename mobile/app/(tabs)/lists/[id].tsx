@@ -51,10 +51,36 @@ import { APIError } from '../../../services/api';
 import apiClient from '../../../services/api';
 import { useVoiceRecognition } from '../../../hooks/useVoiceRecognition';
 import { speak } from '../../../utils/voiceFeedback';
-import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } from '../../../utils/voiceCommands';
+import {
+  parseAddItem,
+  parseDeleteItem,
+  parseUpdateItem,
+  findMatchingItems,
+  parseChecklistBareAddItemIntent,
+  parseChecklistBareDeleteIntent,
+  parseChecklistBareUpdateIntent,
+  parseAddSectionCommand,
+  findMatchingSections,
+  isCancelCommand,
+  capitalizeWords,
+  parseVoiceSelectionNumber,
+  normalizeText,
+  stripChecklistVoiceItemQueryForSearch,
+  findChecklistVoiceDeleteMatches,
+  isAffirmativeResponse,
+  isNegativeResponse,
+  formatDeleteQueryForSpeech,
+} from '../../../utils/voiceCommands';
 import VoiceButton from '../../../components/VoiceButton';
 import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
 import { sortSectionsByDateAndOrder, formatLocalISODate } from '../../../utils/sectionSort';
+
+function formatSectionDateForVoice(sectionDate: string | undefined): string {
+  if (!sectionDate || !/^\d{4}-\d{2}-\d{2}$/.test(sectionDate)) return '';
+  const [y, m, d] = sectionDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 function TooltipButton({
   children,
@@ -389,10 +415,37 @@ export default function ListDetailScreen() {
   const [dropTargetChecklistItemId, setDropTargetChecklistItemId] = useState<number | null>(null);
   const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
   const lastProcessedTranscriptRef = useRef('');
+  const deleteConfirmFromVoicePickRef = useRef(false);
   const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<ListItem[]>([]);
-  const [pendingAction, setPendingAction] = useState<'delete' | 'update' | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    'delete' | 'update' | 'checklist_update_multi' | null
+  >(null);
   const [showVoiceHelpModal, setShowVoiceHelpModal] = useState(false);
+  const [checklistVoicePhase, setChecklistVoicePhase] = useState<
+    | 'idle'
+    | 'add_section_or_item'
+    | 'pick_section'
+    | 'item_name'
+    | 'section_title'
+    | 'delete_section_or_item'
+    | 'delete_pick_item'
+    | 'update_section_or_item'
+    | 'update_pick_item'
+    | 'update_new_name'
+    | 'delete_confirm'
+  >('idle');
+  const [pendingSectionsForVoice, setPendingSectionsForVoice] = useState<ListSection[]>([]);
+  const [pendingItemsForVoice, setPendingItemsForVoice] = useState<ListItem[]>([]);
+  const [pendingChecklistItemName, setPendingChecklistItemName] = useState<string | null>(null);
+  const [checklistTargetSectionId, setChecklistTargetSectionId] = useState<number | null>(null);
+  const [checklistSectionPickKind, setChecklistSectionPickKind] = useState<
+    'add' | 'delete' | 'update' | null
+  >(null);
+  const [checklistUpdateTargetItemId, setChecklistUpdateTargetItemId] = useState<number | null>(null);
+  const [checklistDeleteConfirmItemId, setChecklistDeleteConfirmItemId] = useState<number | null>(null);
+  const [voiceDeletePickModalOpen, setVoiceDeletePickModalOpen] = useState(false);
+  const [voiceDeletePickCandidates, setVoiceDeletePickCandidates] = useState<ListItem[]>([]);
 
   const needTitleShrink =
     (Platform.OS === 'android' || isNarrowViewport) && !!list?.name;
@@ -513,22 +566,73 @@ export default function ListDetailScreen() {
     if (transcript === lastProcessedTranscriptRef.current) return;
     lastProcessedTranscriptRef.current = transcript;
 
+    const rawTrimmed = transcript.trim();
+
+    const clearChecklistVoice = () => {
+      setChecklistVoicePhase('idle');
+      setPendingSectionsForVoice([]);
+      setPendingItemsForVoice([]);
+      setPendingChecklistItemName(null);
+      setChecklistTargetSectionId(null);
+      setChecklistSectionPickKind(null);
+      setChecklistUpdateTargetItemId(null);
+      setChecklistDeleteConfirmItemId(null);
+      setVoiceDeletePickModalOpen(false);
+      setVoiceDeletePickCandidates([]);
+      deleteConfirmFromVoicePickRef.current = false;
+    };
+
     const handleVoiceCommand = async () => {
       const text = transcript.toLowerCase().trim();
+      const stripLeadingThe = (s: string) => s.replace(/^the\s+/i, '').trim();
 
       try {
+        if (isChecklistList && checklistVoicePhase !== 'idle' && isCancelCommand(transcript)) {
+          stop();
+          clearChecklistVoice();
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          speak('Cancelled.');
+          return;
+        }
+
         // Handle number selection for multiple matches
         if (awaitingNumberSelection) {
-          const number = parseInt(text);
-          if (number >= 1 && number <= pendingMatches.length) {
+          if (isCancelCommand(transcript)) {
+            stop();
+            setAwaitingNumberSelection(false);
+            setPendingMatches([]);
+            setPendingAction(null);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Cancelled.');
+            return;
+          }
+
+          const number = parseVoiceSelectionNumber(transcript, pendingMatches.length);
+          if (number != null) {
             const selected = pendingMatches[number - 1];
             stop();
+
+            if (pendingAction === 'checklist_update_multi') {
+              setAwaitingNumberSelection(false);
+              setPendingMatches([]);
+              setPendingAction(null);
+              setChecklistUpdateTargetItemId(selected.id);
+              setChecklistVoicePhase('update_new_name');
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak('What should the new name be?', () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              });
+              return;
+            }
 
             if (pendingAction === 'delete') {
               try {
                 await ListService.deleteListItem(selected.id);
                 await fetchListItems();
-                speak('Item deleted successfully.');
+                speak(`Deleted ${selected.name}.`);
               } catch (err) {
                 console.error('Error deleting item:', err);
                 speak('Sorry, I could not delete the item.');
@@ -542,15 +646,625 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             return;
-          } else {
-            speak('Invalid selection. Please try again.');
-            setAwaitingNumberSelection(false);
-            setPendingMatches([]);
-            setPendingAction(null);
+          }
+
+          speak(
+            `Please say which item, 1 through ${pendingMatches.length}. For example, 1, 2, one, or two.`,
+            () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            }
+          );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_confirm') {
+          stop();
+          if (isNegativeResponse(transcript)) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Okay, not deleting.');
+            return;
+          }
+          if (isAffirmativeResponse(transcript)) {
+            const delId = checklistDeleteConfirmItemId;
+            if (delId == null) {
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            const toDelete = listItems.find((i) => i.id === delId);
+            try {
+              await ListService.deleteListItem(delId);
+              await fetchListItems();
+              speak(toDelete ? `Deleted ${toDelete.name}.` : 'Item deleted.');
+            } catch (err) {
+              console.error('Error deleting item:', err);
+              speak('Sorry, I could not delete the item.');
+            }
+            clearChecklistVoice();
             lastProcessedTranscriptRef.current = '';
             reset();
             return;
           }
+          speak('Say yes to delete, or no to cancel.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'add_section_or_item') {
+          stop();
+          const nAdd = parseVoiceSelectionNumber(transcript, sections.length);
+          if (nAdd != null) {
+            const section = sections[nAdd - 1];
+            setChecklistTargetSectionId(section.id);
+            setChecklistVoicePhase('item_name');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the item be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const secAddMatches = findMatchingSections(sections, stripLeadingThe(rawTrimmed));
+          if (secAddMatches.length === 1) {
+            setChecklistTargetSectionId(secAddMatches[0].id);
+            setChecklistVoicePhase('item_name');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the item be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          if (secAddMatches.length > 1) {
+            setPendingSectionsForVoice(secAddMatches);
+            setChecklistSectionPickKind('add');
+            setChecklistVoicePhase('pick_section');
+            let amsg = 'Which section? ';
+            secAddMatches.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              amsg += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            amsg += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(amsg, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const guessedName =
+            normalizeText(capitalizeWords(rawTrimmed)) === 'add' ? null : capitalizeWords(rawTrimmed);
+          if (!rawTrimmed || !guessedName) {
+            speak('Say the section number or name, or the item name first.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          setPendingChecklistItemName(guessedName);
+          setPendingSectionsForVoice(sections);
+          setChecklistSectionPickKind('add');
+          setChecklistVoicePhase('pick_section');
+          let imsg = `Which section for ${guessedName}? `;
+          sections.forEach((s, i) => {
+            const dateLbl = formatSectionDateForVoice(s.section_date);
+            imsg += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+          });
+          imsg += 'Say the number.';
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          speak(imsg, () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+          });
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'pick_section') {
+          stop();
+          const n = parseVoiceSelectionNumber(transcript, pendingSectionsForVoice.length);
+          if (n != null) {
+            const section = pendingSectionsForVoice[n - 1];
+            setPendingSectionsForVoice([]);
+            const kind = checklistSectionPickKind ?? 'add';
+            setChecklistSectionPickKind(null);
+
+            if (kind === 'delete') {
+              const inDel = listItems
+                .filter((i) => i.section === section.id)
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+              if (inDel.length === 0) {
+                speak('No items in that section to delete.', () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                });
+                clearChecklistVoice();
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                return;
+              }
+              setPendingItemsForVoice(inDel);
+              setChecklistVoicePhase('delete_pick_item');
+              let dmsg = 'Which item to delete? ';
+              inDel.forEach((it, i) => {
+                dmsg += `${i + 1}: ${it.name}. `;
+              });
+              dmsg += 'Say the number.';
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(dmsg, () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              });
+              return;
+            }
+
+            if (kind === 'update') {
+              const inUpd = listItems
+                .filter((i) => i.section === section.id)
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+              if (inUpd.length === 0) {
+                speak('No items in that section to update.', () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                });
+                clearChecklistVoice();
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                return;
+              }
+              setPendingItemsForVoice(inUpd);
+              setChecklistVoicePhase('update_pick_item');
+              let umsg = 'Which item to update? ';
+              inUpd.forEach((it, i) => {
+                umsg += `${i + 1}: ${it.name}. `;
+              });
+              umsg += 'Say the number.';
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(umsg, () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              });
+              return;
+            }
+
+            const nameSnapshot = pendingChecklistItemName;
+            setPendingChecklistItemName(null);
+
+            if (nameSnapshot) {
+              setChecklistVoicePhase('idle');
+              try {
+                await ListService.createListItem({
+                  list: list.id,
+                  name: nameSnapshot,
+                  section: section.id,
+                });
+                await fetchListItems();
+                speak('Item added successfully.');
+              } catch (err) {
+                console.error('Error adding checklist item:', err);
+                speak('Sorry, I could not add the item. Please try again.');
+              }
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+
+            setChecklistTargetSectionId(section.id);
+            setChecklistVoicePhase('item_name');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the item be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+
+          speak(
+            `Please say a number from 1 to ${pendingSectionsForVoice.length}. For example, 1, 2, one, or two.`,
+            () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+            }
+          );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_pick_item') {
+          stop();
+          const dn = parseVoiceSelectionNumber(transcript, pendingItemsForVoice.length);
+          if (dn != null) {
+            const delIt = pendingItemsForVoice[dn - 1];
+            try {
+              await ListService.deleteListItem(delIt.id);
+              await fetchListItems();
+              speak(`Deleted ${delIt.name}.`);
+            } catch (err) {
+              console.error('Error deleting item:', err);
+              speak('Sorry, I could not delete the item.');
+            }
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          speak(
+            `Please say which item, 1 through ${pendingItemsForVoice.length}. For example, 1, 2, one, or two.`,
+            () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            }
+          );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_pick_item') {
+          stop();
+          const un = parseVoiceSelectionNumber(transcript, pendingItemsForVoice.length);
+          if (un != null) {
+            const upIt = pendingItemsForVoice[un - 1];
+            setPendingItemsForVoice([]);
+            setChecklistUpdateTargetItemId(upIt.id);
+            setChecklistVoicePhase('update_new_name');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the new name be?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          speak(
+            `Please say which item, 1 through ${pendingItemsForVoice.length}. For example, 1, 2, one, or two.`,
+            () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            }
+          );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_new_name') {
+          stop();
+          if (!rawTrimmed) {
+            speak("I didn't catch that. What should the new name be?", () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          const newNm = capitalizeWords(rawTrimmed);
+          const upId = checklistUpdateTargetItemId;
+          if (upId == null) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          try {
+            await ListService.updateListItem(upId, { name: newNm });
+            await fetchListItems();
+            speak('Item updated successfully.');
+          } catch (err) {
+            console.error('Error updating item:', err);
+            speak('Sorry, I could not update the item. Please try again.');
+          }
+          clearChecklistVoice();
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_section_or_item') {
+          stop();
+          const nd = parseVoiceSelectionNumber(transcript, sections.length);
+          if (nd != null) {
+            const s = sections[nd - 1];
+            const inD = listItems
+              .filter((i) => i.section === s.id)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            if (inD.length === 0) {
+              speak('No items in that section to delete.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingItemsForVoice(inD);
+            setChecklistVoicePhase('delete_pick_item');
+            let dm = 'Which item to delete? ';
+            inD.forEach((it, i) => {
+              dm += `${i + 1}: ${it.name}. `;
+            });
+            dm += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(dm, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const secDM = findMatchingSections(sections, stripLeadingThe(rawTrimmed));
+          if (secDM.length === 1) {
+            const s1 = secDM[0];
+            const inD1 = listItems
+              .filter((i) => i.section === s1.id)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            if (inD1.length === 0) {
+              speak('No items in that section to delete.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingItemsForVoice(inD1);
+            setChecklistVoicePhase('delete_pick_item');
+            let dm1 = 'Which item to delete? ';
+            inD1.forEach((it, i) => {
+              dm1 += `${i + 1}: ${it.name}. `;
+            });
+            dm1 += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(dm1, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          if (secDM.length > 1) {
+            setPendingSectionsForVoice(secDM);
+            setChecklistSectionPickKind('delete');
+            setChecklistVoicePhase('pick_section');
+            let sm = 'Which section? ';
+            secDM.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              sm += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            sm += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(sm, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const itemDM = findMatchingItems(listItems, stripLeadingThe(rawTrimmed), (i) => i.name);
+          if (itemDM.length === 1) {
+            try {
+              await ListService.deleteListItem(itemDM[0].id);
+              await fetchListItems();
+              speak(`Deleted ${itemDM[0].name}.`);
+            } catch (err) {
+              console.error('Error deleting item:', err);
+              speak('Sorry, I could not delete the item.');
+            }
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          if (itemDM.length > 1) {
+            setPendingMatches(itemDM);
+            setPendingAction('delete');
+            setAwaitingNumberSelection(true);
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            let m = 'I found multiple matching items. Please specify which one to delete: ';
+            itemDM.forEach((item, index) => {
+              m += `${index + 1}: ${item.name}. `;
+            });
+            speak(m, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 500);
+            });
+            return;
+          }
+          speak('No matching section or item. Say the section number or name, or the item name to delete.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_section_or_item') {
+          stop();
+          const nu = parseVoiceSelectionNumber(transcript, sections.length);
+          if (nu != null) {
+            const su = sections[nu - 1];
+            const inU = listItems
+              .filter((i) => i.section === su.id)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            if (inU.length === 0) {
+              speak('No items in that section to update.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingItemsForVoice(inU);
+            setChecklistVoicePhase('update_pick_item');
+            let um = 'Which item to update? ';
+            inU.forEach((it, i) => {
+              um += `${i + 1}: ${it.name}. `;
+            });
+            um += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(um, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const secUM = findMatchingSections(sections, stripLeadingThe(rawTrimmed));
+          if (secUM.length === 1) {
+            const s1u = secUM[0];
+            const inU1 = listItems
+              .filter((i) => i.section === s1u.id)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            if (inU1.length === 0) {
+              speak('No items in that section to update.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingItemsForVoice(inU1);
+            setChecklistVoicePhase('update_pick_item');
+            let um1 = 'Which item to update? ';
+            inU1.forEach((it, i) => {
+              um1 += `${i + 1}: ${it.name}. `;
+            });
+            um1 += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(um1, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          if (secUM.length > 1) {
+            setPendingSectionsForVoice(secUM);
+            setChecklistSectionPickKind('update');
+            setChecklistVoicePhase('pick_section');
+            let smu = 'Which section? ';
+            secUM.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              smu += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            smu += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(smu, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          const itemUM = findMatchingItems(listItems, stripLeadingThe(rawTrimmed), (i) => i.name);
+          if (itemUM.length === 1) {
+            setChecklistUpdateTargetItemId(itemUM[0].id);
+            setChecklistVoicePhase('update_new_name');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the new name be?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+          if (itemUM.length > 1) {
+            setPendingMatches(itemUM);
+            setPendingAction('checklist_update_multi');
+            setAwaitingNumberSelection(true);
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            let m = 'I found multiple matching items. Please specify which one to update: ';
+            itemUM.forEach((item, index) => {
+              m += `${index + 1}: ${item.name}. `;
+            });
+            speak(m, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 500);
+            });
+            return;
+          }
+          speak('No matching section or item. Say the section number or name, or the item to update.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'item_name') {
+          stop();
+          if (!rawTrimmed) {
+            speak("I didn't catch a name. Try again.", () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          const name = capitalizeWords(rawTrimmed);
+          const sid = checklistTargetSectionId;
+          if (sid == null) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          try {
+            await ListService.createListItem({
+              list: list.id,
+              name,
+              section: sid,
+            });
+            await fetchListItems();
+            speak('Item added successfully.');
+          } catch (err) {
+            console.error('Error adding checklist item:', err);
+            speak('Sorry, I could not add the item. Please try again.');
+          }
+          clearChecklistVoice();
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'section_title') {
+          stop();
+          if (!rawTrimmed) {
+            speak('What should the section be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          const title = capitalizeWords(rawTrimmed);
+          try {
+            const created = await ListService.createListSection({
+              list: list.id,
+              order: sections.length,
+              title,
+              section_date: formatLocalISODate(),
+            });
+            await fetchListSections();
+            if (created.calendar_updated) {
+              speak('Section added. Calendar updated.');
+            } else {
+              speak('Section added successfully.');
+            }
+          } catch (err) {
+            console.error('Error adding section:', err);
+            speak('Sorry, I could not add the section. Please try again.');
+          }
+          clearChecklistVoice();
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
         }
 
         // Ignore transcripts that look like feedback messages
@@ -567,6 +1281,8 @@ export default function ListDetailScreen() {
           'error',
           'try again',
           'please specify',
+          'cancelled',
+          'calendar updated',
         ];
         if (feedbackPatterns.some((pattern) => text.includes(pattern))) {
           console.log('🎤 [LIST DETAIL] Ignoring feedback message:', text);
@@ -576,27 +1292,164 @@ export default function ListDetailScreen() {
           return;
         }
 
-        // Parse add item command
-        const addItemCmd = parseAddItem(text);
-        if (addItemCmd) {
-          stop();
-
-          try {
-            await ListService.createListItem({
-              list: list.id,
-              name: addItemCmd.name,
+        if (isChecklistList) {
+          const addSec = parseAddSectionCommand(text);
+          if (addSec) {
+            stop();
+            if (addSec.title) {
+              try {
+                const created = await ListService.createListSection({
+                  list: list.id,
+                  order: sections.length,
+                  title: addSec.title,
+                  section_date: formatLocalISODate(),
+                });
+                await fetchListSections();
+                if (created.calendar_updated) {
+                  speak('Section added. Calendar updated.');
+                } else {
+                  speak('Section added successfully.');
+                }
+              } catch (err) {
+                console.error('Error adding section:', err);
+                speak('Sorry, I could not add the section. Please try again.');
+              }
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setChecklistVoicePhase('section_title');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the section be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
             });
-            await fetchListItems();
-            speak('Item added successfully.');
+            return;
+          }
+
+          if (parseChecklistBareAddItemIntent(text)) {
+            stop();
+            if (sections.length === 0) {
+              speak(
+                'This checklist has no sections yet. Say add section to create one first.',
+                () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                }
+              );
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingChecklistItemName(null);
+            setChecklistVoicePhase('add_section_or_item');
             lastProcessedTranscriptRef.current = '';
             reset();
+            speak('Say the section number or name, or the item name first.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
             return;
-          } catch (err) {
-            console.error('Error adding item:', err);
-            speak('Sorry, I could not add the item. Please try again.');
+          }
+
+          const addNamed = parseAddItem(text);
+          if (addNamed) {
+            stop();
+            if (sections.length === 0) {
+              speak(
+                'This checklist has no sections yet. Say add section to create one first.',
+                () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                }
+              );
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            // "add add" / echo → name "Add" is not a real item; prompt for name after section
+            const itemNameForPending =
+              normalizeText(addNamed.name) === 'add' ? null : addNamed.name;
+            setPendingChecklistItemName(itemNameForPending);
+            setPendingSectionsForVoice(sections);
+            setChecklistSectionPickKind('add');
+            setChecklistVoicePhase('pick_section');
+            let msg = 'Which section? ';
+            sections.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              msg += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            msg += 'Say the number.';
             lastProcessedTranscriptRef.current = '';
             reset();
+            speak(msg, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
             return;
+          }
+
+          if (parseChecklistBareDeleteIntent(text)) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setChecklistVoicePhase('delete_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+
+          if (parseChecklistBareUpdateIntent(text)) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setChecklistVoicePhase('update_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            });
+            return;
+          }
+        } else {
+          const addItemCmd = parseAddItem(text);
+          if (addItemCmd) {
+            stop();
+
+            try {
+              await ListService.createListItem({
+                list: list.id,
+                name: addItemCmd.name,
+              });
+              await fetchListItems();
+              speak('Item added successfully.');
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            } catch (err) {
+              console.error('Error adding item:', err);
+              speak('Sorry, I could not add the item. Please try again.');
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
           }
         }
 
@@ -605,20 +1458,68 @@ export default function ListDetailScreen() {
         if (deleteItemCmd) {
           stop();
 
-          const matches = findMatchingItems(listItems, deleteItemCmd.name, (item) => item.name);
+          if (isChecklistList) {
+            const searchNorm = stripChecklistVoiceItemQueryForSearch(deleteItemCmd.name);
+            const spokenQuery = formatDeleteQueryForSpeech(deleteItemCmd.name);
+            const matches = findChecklistVoiceDeleteMatches(listItems, searchNorm);
+            if (matches.length === 0) {
+              const noneMsg = spokenQuery
+                ? `No item found for ${spokenQuery}. Check the name and try again.`
+                : 'No item found. Check the name and try again.';
+              speak(noneMsg, () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            if (matches.length === 1) {
+              const it = matches[0];
+              const sec = sections.find((s) => s.id === it.section);
+              const secLabel = sec?.title ?? 'an unknown section';
+              setChecklistDeleteConfirmItemId(it.id);
+              setChecklistVoicePhase('delete_confirm');
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(
+                `${it.name} was found in section ${secLabel}. Would you like to delete it? Say yes or no.`,
+                () => {
+                  setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+                }
+              );
+              return;
+            }
+            setVoiceDeletePickCandidates(matches);
+            setVoiceDeletePickModalOpen(true);
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(
+              'Several items matched your delete request. Tap the correct one on the screen to delete it.',
+              () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 2800 }), 400);
+              }
+            );
+            return;
+          }
+
+          const matches = findMatchingItems(
+            listItems,
+            stripLeadingThe(deleteItemCmd.name),
+            (item) => item.name
+          );
           if (matches.length === 0) {
-            speak('Sorry, I could not find that item.');
+            speak('No items with that name found. Please try again.');
           } else if (matches.length === 1) {
             try {
               await ListService.deleteListItem(matches[0].id);
               await fetchListItems();
-              speak('Item deleted successfully.');
+              speak(`Deleted ${matches[0].name}.`);
             } catch (err) {
               console.error('Error deleting item:', err);
               speak('Sorry, I could not delete the item.');
             }
           } else {
-            // Multiple matches - ask for clarification
             let message = 'I found multiple matching items. Please specify which one to delete: ';
             matches.forEach((item, index) => {
               message += `${index + 1}: ${item.name}. `;
@@ -629,7 +1530,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             speak(message, () => {
               setTimeout(() => {
-                start();
+                start({ ignoreTranscriptsForMs: 2000 });
               }, 500);
             });
             return;
@@ -644,7 +1545,11 @@ export default function ListDetailScreen() {
         if (updateItemCmd) {
           stop();
 
-          const matches = findMatchingItems(listItems, updateItemCmd.oldName, (item) => item.name);
+          const matches = findMatchingItems(
+            listItems,
+            stripLeadingThe(updateItemCmd.oldName),
+            (item) => item.name
+          );
           if (matches.length === 0) {
             speak('Sorry, I could not find that item.');
           } else if (matches.length === 1) {
@@ -670,7 +1575,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             speak(message, () => {
               setTimeout(() => {
-                start();
+                start({ ignoreTranscriptsForMs: 2000 });
               }, 500);
             });
             return;
@@ -680,8 +1585,13 @@ export default function ListDetailScreen() {
           return;
         }
 
-        // No command matched
-        speak('Please use one of these commands: add item name, delete item name, or update item name to new name');
+        if (isChecklistList) {
+          speak(
+            'Try: add, delete, update, add section, add with an item name, delete item name, or update old name to new name.'
+          );
+        } else {
+          speak('Please use one of these commands: add item name, delete item name, or update item name to new name');
+        }
         lastProcessedTranscriptRef.current = '';
         reset();
       } catch (error) {
@@ -692,12 +1602,44 @@ export default function ListDetailScreen() {
     };
 
     handleVoiceCommand();
-  }, [transcript, list, listItems, awaitingNumberSelection, pendingMatches, pendingAction, isSupported]);
+  }, [
+    transcript,
+    list,
+    listItems,
+    sections,
+    awaitingNumberSelection,
+    pendingMatches,
+    pendingAction,
+    isSupported,
+    isChecklistList,
+    checklistVoicePhase,
+    pendingSectionsForVoice,
+    pendingChecklistItemName,
+    checklistTargetSectionId,
+    pendingItemsForVoice,
+    checklistSectionPickKind,
+    checklistUpdateTargetItemId,
+    checklistDeleteConfirmItemId,
+  ]);
 
   const handleVoiceClick = () => {
     if (isListening) {
       stop();
       reset();
+      setAwaitingNumberSelection(false);
+      setPendingMatches([]);
+      setPendingAction(null);
+      setChecklistVoicePhase('idle');
+      setPendingSectionsForVoice([]);
+      setPendingChecklistItemName(null);
+      setChecklistTargetSectionId(null);
+      setPendingItemsForVoice([]);
+      setChecklistSectionPickKind(null);
+      setChecklistUpdateTargetItemId(null);
+      setChecklistDeleteConfirmItemId(null);
+      setVoiceDeletePickModalOpen(false);
+      setVoiceDeletePickCandidates([]);
+      deleteConfirmFromVoicePickRef.current = false;
       return;
     }
 
@@ -711,6 +1653,17 @@ export default function ListDetailScreen() {
     setAwaitingNumberSelection(false);
     setPendingMatches([]);
     setPendingAction(null);
+    setChecklistVoicePhase('idle');
+    setPendingSectionsForVoice([]);
+    setPendingItemsForVoice([]);
+    setPendingChecklistItemName(null);
+    setChecklistTargetSectionId(null);
+    setChecklistSectionPickKind(null);
+    setChecklistUpdateTargetItemId(null);
+    setChecklistDeleteConfirmItemId(null);
+    setVoiceDeletePickModalOpen(false);
+    setVoiceDeletePickCandidates([]);
+    deleteConfirmFromVoicePickRef.current = false;
 
     // Start recognition briefly to capture user gesture (required for permission)
     // Then stop it, speak instruction, and restart after instruction finishes
@@ -718,9 +1671,13 @@ export default function ListDetailScreen() {
       start();
       setTimeout(() => {
         stop();
-        speak('What would you like to do', () => {
+        speak(
+          isChecklistList
+            ? 'What would you like to do? Add an item, add a section, delete, or update.'
+            : 'What would you like to do',
+          () => {
             setTimeout(() => {
-              start();
+              start({ ignoreTranscriptsForMs: 2000 });
             }, 100);
           }
         );
@@ -1331,7 +2288,8 @@ export default function ListDetailScreen() {
     }
   };
 
-  const handleDeleteItem = (item: ListItem) => {
+  const handleDeleteItem = (item: ListItem, options?: { fromVoiceDeletePick?: boolean }) => {
+    deleteConfirmFromVoicePickRef.current = !!options?.fromVoiceDeletePick;
     setDeleteConfirm({
       isOpen: true,
       itemId: item.id,
@@ -1342,12 +2300,23 @@ export default function ListDetailScreen() {
   const confirmDeleteItem = async () => {
     if (!deleteConfirm.itemId) return;
 
+    const fromVoicePick = deleteConfirmFromVoicePickRef.current;
+    const deletedName = deleteConfirm.itemName;
+
     try {
       await ListService.deleteListItem(deleteConfirm.itemId);
       await fetchListItems();
       setDeleteConfirm({ isOpen: false, itemId: null, itemName: '' });
+      deleteConfirmFromVoicePickRef.current = false;
+      if (fromVoicePick) {
+        stop();
+        reset();
+        lastProcessedTranscriptRef.current = '';
+        speak(deletedName ? `${deletedName} was deleted.` : 'Item was deleted.');
+      }
     } catch (err) {
       console.error('Error deleting item:', err);
+      deleteConfirmFromVoicePickRef.current = false;
       setDeleteConfirm({ isOpen: false, itemId: null, itemName: '' });
       alert('Failed to delete item. Please try again.');
     }
@@ -1897,12 +2866,12 @@ export default function ListDetailScreen() {
                       setShowAddItem(false);
                       setEditSection(null);
                     }}
-                    style={[styles.copyListButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    style={[styles.addButton, { backgroundColor: colors.primary }]}
                     accessibilityLabel="Copy checklist"
                     accessibilityHint="Creates a duplicate list with section dates set to today"
                   >
-                    <FontAwesome name="copy" size={16} color={colors.primary} />
-                    <Text style={[styles.copyListButtonText, { color: colors.textSecondary }]}>
+                    <FontAwesome name="copy" size={16} color="#fff" />
+                    <Text style={styles.addButtonText}>
                       {Platform.OS === 'web' ? 'Copy list' : 'Copy'}
                     </Text>
                   </TouchableOpacity>
@@ -2653,7 +3622,10 @@ export default function ListDetailScreen() {
         title="Delete Item"
         message={`Are you sure you want to delete "${deleteConfirm.itemName}"? This action cannot be undone.`}
         type="error"
-        onClose={() => setDeleteConfirm({ isOpen: false, itemId: null, itemName: '' })}
+        onClose={() => {
+          deleteConfirmFromVoicePickRef.current = false;
+          setDeleteConfirm({ isOpen: false, itemId: null, itemName: '' });
+        }}
         onConfirm={confirmDeleteItem}
         confirmText="Delete"
         cancelText="Cancel"
@@ -2691,6 +3663,75 @@ export default function ListDetailScreen() {
           }}
           onConfirm={confirmCopyChecklist}
         />
+      )}
+      {isChecklistList && (
+        <Modal
+          visible={voiceDeletePickModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setVoiceDeletePickModalOpen(false);
+            setVoiceDeletePickCandidates([]);
+            stop();
+            reset();
+            lastProcessedTranscriptRef.current = '';
+          }}
+        >
+          <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+            <View style={[styles.modalContentSecondary, { backgroundColor: colors.surface }]}>
+              <View style={styles.modalHeaderSecondary}>
+                <Text style={[styles.modalTitleSecondary, { color: colors.text }]}>Which item?</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setVoiceDeletePickModalOpen(false);
+                    setVoiceDeletePickCandidates([]);
+                    stop();
+                    reset();
+                    lastProcessedTranscriptRef.current = '';
+                  }}
+                  style={styles.modalCloseButtonSecondary}
+                  accessibilityLabel="Close"
+                >
+                  <FontAwesome name="times" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.voiceDeletePickHint, { color: colors.textSecondary }]}>
+                Tap the row you want to delete. You will be asked to confirm.
+              </Text>
+              <ScrollView
+                style={styles.voiceDeletePickList}
+                keyboardShouldPersistTaps="handled"
+              >
+                {voiceDeletePickCandidates.map((cand) => {
+                  const sec = sections.find((s) => s.id === cand.section);
+                  const secLabel = sec?.title ?? 'Section';
+                  return (
+                    <TouchableOpacity
+                      key={cand.id}
+                      style={[
+                        styles.voiceDeletePickRow,
+                        { borderColor: colors.border, backgroundColor: colors.background },
+                      ]}
+                      onPress={() => {
+                        setVoiceDeletePickModalOpen(false);
+                        setVoiceDeletePickCandidates([]);
+                        stop();
+                        reset();
+                        lastProcessedTranscriptRef.current = '';
+                        handleDeleteItem(cand, { fromVoiceDeletePick: true });
+                      }}
+                    >
+                      <Text style={[styles.voiceDeletePickItemName, { color: colors.text }]}>{cand.name}</Text>
+                      <Text style={[styles.voiceDeletePickSectionLabel, { color: colors.textSecondary }]}>
+                        {secLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       )}
       <ConfirmModal
         visible={deleteRecipeConfirm.isOpen}
@@ -2802,11 +3843,38 @@ export default function ListDetailScreen() {
         type="info"
         onClose={() => setShowVoiceHelpModal(false)}
         confirmText="OK"
-        details={[
-          { label: 'Add item', items: ['add [item name]'] },
-          { label: 'Delete item', items: ['delete [item name]'] },
-          { label: 'Update item', items: ['update [old name] to [new name]'] },
-        ]}
+        details={
+          isChecklistList
+            ? [
+                {
+                  label: 'Add item',
+                  items: [
+                    'add — say section number or name, or item name first',
+                    'add [item name] — then pick section',
+                  ],
+                },
+                { label: 'Add section', items: ['add section', 'add section [title]'] },
+                {
+                  label: 'Delete item',
+                  items: [
+                    'delete — say section or item name',
+                    'delete [item name] — confirms with section before deleting',
+                  ],
+                },
+                {
+                  label: 'Update item',
+                  items: [
+                    'update — say section or item, then new name',
+                    'update [old name] to [new name]',
+                  ],
+                },
+              ]
+            : [
+                { label: 'Add item', items: ['add [item name]'] },
+                { label: 'Delete item', items: ['delete [item name]'] },
+                { label: 'Update item', items: ['update [old name] to [new name]'] },
+              ]
+        }
       />
     </View>
   );
@@ -2985,30 +4053,6 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#fff',
-    fontSize: Platform.OS === 'web' ? 14 : 13,
-    fontWeight: '600',
-  },
-  copyListButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 8,
-    paddingHorizontal: Platform.OS === 'web' ? 14 : 10,
-    paddingVertical: Platform.OS === 'web' ? 10 : 8,
-    gap: 6,
-    flexShrink: 0,
-    borderWidth: 1,
-    ...Platform.select({
-      web: { cursor: 'pointer' as const },
-      default: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 2,
-        elevation: 1,
-      },
-    }),
-  },
-  copyListButtonText: {
     fontSize: Platform.OS === 'web' ? 14 : 13,
     fontWeight: '600',
   },
@@ -3291,6 +4335,28 @@ const styles = StyleSheet.create({
   },
   modalCloseButtonSecondary: {
     padding: 4,
+  },
+  voiceDeletePickHint: {
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  voiceDeletePickList: {
+    maxHeight: 360,
+  },
+  voiceDeletePickRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  voiceDeletePickItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  voiceDeletePickSectionLabel: {
+    fontSize: 13,
+    marginTop: 4,
   },
   itemPreview: {
     padding: 12,

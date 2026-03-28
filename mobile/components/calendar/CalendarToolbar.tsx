@@ -62,8 +62,8 @@ export default function CalendarToolbar({
           </TouchableOpacity>
         </View>
 
-        {/* Hide label on week and month view for web mobile to save space */}
-        {view !== 'week' && view !== 'month' && (
+        {/* Hide label on month view only (grid shows month); week needs range with month */}
+        {view !== 'month' && (
           <Text style={[styles.label, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
             {label}
           </Text>

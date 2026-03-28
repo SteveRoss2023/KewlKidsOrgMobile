@@ -31,6 +31,14 @@ export default function WeekView({ currentDate, events, onSlotPress, onEventPres
   };
 
   const weekStart = getWeekStart();
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+
+  const crossesMonthOrYear =
+    weekStart.getMonth() !== weekEnd.getMonth() || weekStart.getFullYear() !== weekEnd.getFullYear();
+  const weekRangeTitle = crossesMonthOrYear
+    ? `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} – ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    : weekStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   // Helper to get date string in local timezone (YYYY-MM-DD)
   const getLocalDateString = (date: Date | string) => {
@@ -228,6 +236,17 @@ export default function WeekView({ currentDate, events, onSlotPress, onEventPres
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  weekRangeRow: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    alignItems: 'center',
+  },
+  weekRangeTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   dayHeaders: {
     flexDirection: 'row',

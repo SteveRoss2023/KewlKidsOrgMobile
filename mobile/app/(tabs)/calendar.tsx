@@ -525,7 +525,11 @@ export default function CalendarScreen() {
       weekStart.setDate(weekStart.getDate() - weekStart.getDay());
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
-      return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      const startOpts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+      if (weekStart.getFullYear() !== weekEnd.getFullYear()) {
+        startOpts.year = 'numeric';
+      }
+      return `${weekStart.toLocaleDateString('en-US', startOpts)} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (view === 'day') {
       return currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     }
