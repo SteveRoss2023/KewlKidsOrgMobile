@@ -1757,15 +1757,6 @@ export default function ListDetailScreen() {
             )}
             {!showAddItem && !editingItem ? (
               <>
-                <TouchableOpacity
-                  onPress={() => setShowAddItem(true)}
-                  style={[styles.addButton, { backgroundColor: colors.primary }]}
-                >
-                  <FontAwesome name="plus" size={16} color="#fff" />
-                  <Text style={styles.addButtonText}>
-                    {Platform.OS === 'web' ? 'Add Item' : 'Item'}
-                  </Text>
-                </TouchableOpacity>
                 {isChecklistList && (
                   <TouchableOpacity
                     onPress={() => setAddingSectionName('')}
@@ -1777,6 +1768,15 @@ export default function ListDetailScreen() {
                     </Text>
                   </TouchableOpacity>
                 )}
+                <TouchableOpacity
+                  onPress={() => setShowAddItem(true)}
+                  style={[styles.addButton, { backgroundColor: colors.primary }]}
+                >
+                  <FontAwesome name="plus" size={16} color="#fff" />
+                  <Text style={styles.addButtonText}>
+                    {Platform.OS === 'web' ? 'Add Item' : 'Item'}
+                  </Text>
+                </TouchableOpacity>
               </>
             ) : editingItem && !supportsDragAndDrop ? (
               <TouchableOpacity
@@ -1866,7 +1866,6 @@ export default function ListDetailScreen() {
                     list: list!.id,
                     order: sections.length,
                     title: sectionName,
-                    bullet_style: 'number',
                   });
                   await fetchListSections();
                 } catch (err) {

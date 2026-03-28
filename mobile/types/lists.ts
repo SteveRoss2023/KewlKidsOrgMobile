@@ -139,7 +139,8 @@ export interface CreateListSectionData {
   list: number;
   order: number;
   title: string;
-  bullet_style: 'number' | 'dot';
+  /** Optional; backend defaults. Not shown in UI. */
+  bullet_style?: 'number' | 'dot';
 }
 
 export interface UpdateListSectionData {

@@ -47,10 +47,6 @@ export default function SectionRow({
   showSectionDragHandle = false,
 }: SectionRowProps) {
   const { colors } = useTheme();
-  const bullet =
-    section.bullet_style === 'number'
-      ? `${section.order + 1}.`
-      : '\u2022';
 
   // Match grocery: list color as header fill when set; otherwise surface
   const headerBg = listColor || colors.surface;
@@ -163,9 +159,6 @@ export default function SectionRow({
           </View>
         )
       )}
-      <View style={styles.bulletContainer}>
-        <Text style={[styles.bullet, { color: headerTextColor }]}>{bullet}</Text>
-      </View>
       {editing ? (
         <TextInput
           ref={inputRef}
@@ -323,14 +316,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     gap: 10,
-  },
-  bulletContainer: {
-    minWidth: 24,
-    alignItems: 'center',
-  },
-  bullet: {
-    fontSize: 16,
-    fontWeight: '600',
   },
   checkbox: {
     width: 22,
