@@ -2,6 +2,8 @@
 Seed "Coyote Fall Task List (2025)" checklist from plan data.
 Usage: python manage.py seed_coyote_checklist --family=1
 """
+import datetime
+
 from django.core.management.base import BaseCommand
 from lists.models import List, ListSection, ListItem
 from families.models import Family, Member
@@ -65,19 +67,26 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.SUCCESS(f'Created list id={list_obj.id}'))
 
+        # section_date drives sort (earliest first); order ties same-day sections
         sections_data = [
-            (0, 'Put Shaw Direct on Pause (Sept 29, 2025 - Mar 31, 2026)', 'dot'),
-            (1, '1. Truck (Friday/Saturday) - Friday Sept 19/20 - Done', 'number'),
-            (2, '2. Pack Gazebo\'s - Saturday/Sunday Sept 20/21-', 'number'),
-            (3, '3. Trailer (Inside) - Saturday Sept 27th', 'number'),
-            (4, '4. Get Golf Cart ready - Saturday Sept 27th (After Golf or Early Sunday Morning)', 'number'),
-            (5, '5. Trailer (Outside) - Sunday Sept 28th', 'number'),
-            (6, '6. 1st Trip - Thursday September 25th, 2025', 'number'),
-            (7, '7. Final Trip - Sunday September 28th, 2025', 'number'),
+            (0, 'Put Shaw Direct on Pause (Sept 29, 2025 - Mar 31, 2026)', 'dot', datetime.date(2025, 9, 29)),
+            (1, '1. Truck (Friday/Saturday) - Friday Sept 19/20 - Done', 'number', datetime.date(2025, 9, 19)),
+            (2, '2. Pack Gazebo\'s - Saturday/Sunday Sept 20/21-', 'number', datetime.date(2025, 9, 20)),
+            (3, '3. Trailer (Inside) - Saturday Sept 27th', 'number', datetime.date(2025, 9, 27)),
+            (4, '4. Get Golf Cart ready - Saturday Sept 27th (After Golf or Early Sunday Morning)', 'number', datetime.date(2025, 9, 27)),
+            (5, '5. Trailer (Outside) - Sunday Sept 28th', 'number', datetime.date(2025, 9, 28)),
+            (6, '6. 1st Trip - Thursday September 25th, 2025', 'number', datetime.date(2025, 9, 25)),
+            (7, '7. Final Trip - Sunday September 28th, 2025', 'number', datetime.date(2025, 9, 28)),
         ]
         sections = []
-        for order, title, bullet_style in sections_data:
-            sec = ListSection.objects.create(list=list_obj, order=order, title=title, bullet_style=bullet_style)
+        for order, title, bullet_style, section_date in sections_data:
+            sec = ListSection.objects.create(
+                list=list_obj,
+                order=order,
+                title=title,
+                bullet_style=bullet_style,
+                section_date=section_date,
+            )
             sections.append(sec)
         self.stdout.write(self.style.SUCCESS(f'Created {len(sections)} sections'))
 

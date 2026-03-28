@@ -50,6 +50,7 @@ import { speak } from '../../../utils/voiceFeedback';
 import { parseAddItem, parseDeleteItem, parseUpdateItem, findMatchingItems } from '../../../utils/voiceCommands';
 import VoiceButton from '../../../components/VoiceButton';
 import ThemeAwarePicker from '../../../components/lists/ThemeAwarePicker';
+import { sortSectionsByDateAndOrder, formatLocalISODate } from '../../../utils/sectionSort';
 
 function TooltipButton({
   children,
@@ -402,7 +403,7 @@ export default function ListDetailScreen() {
     try {
       const fetched = await ListService.getListSections(rid);
       if (listIdRef.current !== rid) return;
-      setSections(fetched);
+      setSections(sortSectionsByDateAndOrder(fetched));
     } catch (err) {
       console.error('Error fetching list sections:', err);
     }
@@ -763,7 +764,9 @@ export default function ListDetailScreen() {
         ListService.getListItems(listId).then(items => setListItems(items)),
       ];
       if (list?.list_type === 'checklist') {
-        promises.push(ListService.getListSections(listId).then(s => setSections(s)));
+        promises.push(
+          ListService.getListSections(listId).then((s) => setSections(sortSectionsByDateAndOrder(s)))
+        );
       }
       if (list?.list_type === 'grocery') {
         promises.push(fetchCategories());
@@ -949,6 +952,22 @@ export default function ListDetailScreen() {
       console.error('Error renaming section:', err);
       setSections(previousSections);
       alert((err as APIError)?.message || 'Failed to rename section. Try again.');
+    }
+  };
+
+  const handleChangeSectionDate = async (section: ListSection, iso: string) => {
+    if (!iso || iso === section.section_date) return;
+    const previousSections = sections.map((s) => ({ ...s }));
+    setSections((prev) => {
+      const next = prev.map((s) => (s.id === section.id ? { ...s, section_date: iso } : s));
+      return sortSectionsByDateAndOrder(next);
+    });
+    try {
+      await ListService.updateListSection(section.id, { section_date: iso });
+    } catch (err) {
+      console.error('Error updating section date:', err);
+      setSections(previousSections);
+      alert((err as APIError)?.message || 'Failed to update section date. Try again.');
     }
   };
 
@@ -1432,14 +1451,24 @@ export default function ListDetailScreen() {
       setDraggedSectionId(null);
       return;
     }
+    const sortedByKey = sortSectionsByDateAndOrder(sections);
+    const datesSequence = sortedByKey.map((s) => s.section_date);
     const newSections = [...sections];
     const [moved] = newSections.splice(dragIndex, 1);
     newSections.splice(dropIndex, 0, moved);
-    const updated = newSections.map((s, i) => ({ ...s, order: i }));
-    setSections(updated);
+    const updated = newSections.map((s, i) => ({
+      ...s,
+      order: i,
+      section_date: datesSequence[i] ?? s.section_date,
+    }));
+    setSections(sortSectionsByDateAndOrder(updated));
     setReorderingSections(true);
     try {
-      await Promise.all(updated.map((s, i) => ListService.updateListSection(s.id, { order: i })));
+      await Promise.all(
+        updated.map((s, i) =>
+          ListService.updateListSection(s.id, { order: i, section_date: datesSequence[i] })
+        )
+      );
     } catch (err) {
       console.error('Error reordering sections:', err);
       await fetchListSections();
@@ -1455,11 +1484,21 @@ export default function ListDetailScreen() {
   };
 
   const handleChecklistSectionDragEndMobile = async (data: ListSection[]) => {
-    const updated = data.map((s, i) => ({ ...s, order: i }));
-    setSections(updated);
+    const sortedByKey = sortSectionsByDateAndOrder(sections);
+    const datesSequence = sortedByKey.map((s) => s.section_date);
+    const updated = data.map((s, i) => ({
+      ...s,
+      order: i,
+      section_date: datesSequence[i] ?? s.section_date,
+    }));
+    setSections(sortSectionsByDateAndOrder(updated));
     setReorderingSections(true);
     try {
-      await Promise.all(updated.map((s, i) => ListService.updateListSection(s.id, { order: i })));
+      await Promise.all(
+        updated.map((s, i) =>
+          ListService.updateListSection(s.id, { order: i, section_date: datesSequence[i] })
+        )
+      );
     } catch (err) {
       console.error('Error reordering sections:', err);
       await fetchListSections();
@@ -1866,6 +1905,7 @@ export default function ListDetailScreen() {
                     list: list!.id,
                     order: sections.length,
                     title: sectionName,
+                    section_date: formatLocalISODate(),
                   });
                   await fetchListSections();
                 } catch (err) {
@@ -2098,6 +2138,7 @@ export default function ListDetailScreen() {
                       onOutdentAll={() => handleOutdentAllInSection(section.id)}
                       itemCount={sectionItems.length}
                       showSectionDragHandle
+                      onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                     />
                     {!isCollapsed && (
                       <View style={styles.checklistItemsContainer}>
@@ -2203,6 +2244,7 @@ export default function ListDetailScreen() {
                       onOutdentAll={() => handleOutdentAllInSection(section.id)}
                       itemCount={sectionItems.length}
                       onSectionDrag={drag}
+                      onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                     />
                     {!isCollapsed && (
                       <View style={styles.checklistItemsContainer}>
@@ -2285,6 +2327,7 @@ export default function ListDetailScreen() {
                     onOutdentAll={() => handleOutdentAllInSection(section.id)}
                     itemCount={sectionItems.length}
                     showSectionDragHandle
+                    onChangeSectionDate={(iso) => handleChangeSectionDate(section, iso)}
                   />
                   {!isCollapsed && (
                     <View style={styles.checklistItemsContainer}>

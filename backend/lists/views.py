@@ -99,7 +99,7 @@ class ListSectionViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 pass
 
-        return queryset.order_by('list', 'order')
+        return queryset.order_by('list', 'section_date', 'order')
 
     @action(detail=True, methods=['post'], url_path='set-all-completed')
     def set_all_completed(self, request, pk=None):

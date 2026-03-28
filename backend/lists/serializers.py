@@ -44,7 +44,7 @@ class ListSectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ListSection
-        fields = ['id', 'list', 'order', 'title', 'bullet_style']
+        fields = ['id', 'list', 'order', 'section_date', 'title', 'bullet_style']
         read_only_fields = ['id']
 
 

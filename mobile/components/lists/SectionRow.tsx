@@ -1,9 +1,36 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
+import React, { useState, useRef, useEffect, createElement } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  Alert,
+  Modal,
+  Pressable,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { ListSection } from '../../types/lists';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useIsMobileLayout } from '../../hooks/useIsMobileLayout';
+import { formatLocalISODate } from '../../utils/sectionSort';
+
+function formatSectionDateLabel(iso: string | undefined): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—';
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function dateFromIso(iso: string | undefined): Date {
+  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date();
+}
 
 function isLightColor(hex: string): boolean {
   const color = hex.replace('#', '');
@@ -30,6 +57,8 @@ interface SectionRowProps {
   onSectionDrag?: () => void;
   /** Show the drag handle icon (e.g. on web where the whole row is draggable). When onSectionDrag is also set, the icon is pressable. */
   showSectionDragHandle?: boolean;
+  /** ISO YYYY-MM-DD; compact display + edit beside title */
+  onChangeSectionDate?: (iso: string) => void;
 }
 
 export default function SectionRow({
@@ -45,8 +74,9 @@ export default function SectionRow({
   listColor,
   onSectionDrag,
   showSectionDragHandle = false,
+  onChangeSectionDate,
 }: SectionRowProps) {
-  const { colors } = useTheme();
+  const { colors, theme } = useTheme();
 
   // Match grocery: list color as header fill when set; otherwise surface
   const headerBg = listColor || colors.surface;
@@ -81,9 +111,21 @@ export default function SectionRow({
 
   const isMobileLayout = useIsMobileLayout();
   const showSectionOverflowMenu = isMobileLayout;
-  const hasAnySectionAction = !!(onRenameSection || onDeleteSection || onOutdentAll || onIndentAll);
+  const hasAnySectionAction = !!(
+    onRenameSection ||
+    onDeleteSection ||
+    onOutdentAll ||
+    onIndentAll ||
+    onChangeSectionDate
+  );
 
   const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [iosDraftDate, setIosDraftDate] = useState(() => dateFromIso(section.section_date));
+
+  useEffect(() => {
+    setIosDraftDate(dateFromIso(section.section_date));
+  }, [section.section_date]);
 
   const openSectionMenu = () => {
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
@@ -98,6 +140,9 @@ export default function SectionRow({
     }
     if (onIndentAll) {
       buttons.push({ text: 'Indent all', onPress: onIndentAll });
+    }
+    if (onChangeSectionDate) {
+      buttons.push({ text: 'Change section date', onPress: () => setShowDateModal(true) });
     }
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Section', undefined, buttons);
@@ -183,11 +228,97 @@ export default function SectionRow({
               { color: headerTextColor },
               allCompleted && styles.titleCompleted,
             ]}
-            numberOfLines={2}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             {section.title}
           </Text>
         </TouchableOpacity>
+      )}
+      {onChangeSectionDate && !editing && (
+        <>
+          {Platform.OS === 'web' ? (
+            <View style={styles.dateWebWrap} pointerEvents="box-none">
+              {createElement('input', {
+                type: 'date',
+                value: section.section_date || '',
+                onChange: (e: { target: { value: string } }) => onChangeSectionDate(e.target.value),
+                'aria-label': 'Section date',
+                style: {
+                  width: 118,
+                  padding: '4px 6px',
+                  borderRadius: 6,
+                  border: `1px solid ${colors.border}`,
+                  backgroundColor: listColor
+                    ? useLight
+                      ? 'rgba(255,255,255,0.9)'
+                      : 'rgba(0,0,0,0.25)'
+                    : colors.background,
+                  color: headerTextColor,
+                  fontSize: 12,
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                },
+              })}
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setShowDateModal(true)}
+              style={styles.dateNativeTouch}
+              accessibilityLabel="Section date"
+              accessibilityHint="Opens date picker"
+            >
+              <Text style={[styles.dateNativeText, { color: headerIconColor }]} numberOfLines={1}>
+                {formatSectionDateLabel(section.section_date)}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {Platform.OS === 'android' && showDateModal && (
+            <DateTimePicker
+              value={iosDraftDate}
+              mode="date"
+              display="default"
+              textColor={colors.text}
+              accentColor={colors.primary}
+              themeVariant={theme === 'dark' ? 'dark' : 'light'}
+              onChange={(event, selectedDate) => {
+                setShowDateModal(false);
+                if (event.type === 'set' && selectedDate) {
+                  onChangeSectionDate(formatLocalISODate(selectedDate));
+                }
+              }}
+            />
+          )}
+          {Platform.OS === 'ios' && (
+            <Modal visible={showDateModal} transparent animationType="fade">
+              <View style={styles.dateModalBackdrop}>
+                <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDateModal(false)} />
+                <View style={[styles.dateModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <DateTimePicker
+                    value={iosDraftDate}
+                    mode="date"
+                    display="spinner"
+                    textColor={colors.text}
+                    accentColor={colors.primary}
+                    themeVariant={theme === 'dark' ? 'dark' : 'light'}
+                    onChange={(_event, selectedDate) => {
+                      if (selectedDate) setIosDraftDate(selectedDate);
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={[styles.dateModalDone, { backgroundColor: colors.primary }]}
+                    onPress={() => {
+                      onChangeSectionDate(formatLocalISODate(iosDraftDate));
+                      setShowDateModal(false);
+                    }}
+                  >
+                    <Text style={styles.dateModalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          )}
+        </>
       )}
       {!editing && showSectionOverflowMenu && hasAnySectionAction ? (
         Platform.OS === 'web' && sectionMenuOpen ? (
@@ -230,6 +361,15 @@ export default function SectionRow({
                 accessibilityLabel="Indent all"
               >
                 <FontAwesome name="indent" size={14} color={headerIconColor} />
+              </TouchableOpacity>
+            )}
+            {onChangeSectionDate && Platform.OS !== 'web' && (
+              <TouchableOpacity
+                style={styles.sectionActionButton}
+                onPress={() => { setSectionMenuOpen(false); setShowDateModal(true); }}
+                accessibilityLabel="Change section date"
+              >
+                <FontAwesome name="calendar" size={14} color={headerIconColor} />
               </TouchableOpacity>
             )}
             <TouchableOpacity
@@ -327,10 +467,49 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     flex: 1,
+    minWidth: 0,
   },
   title: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  dateWebWrap: {
+    flexShrink: 0,
+    maxWidth: 120,
+  },
+  dateNativeTouch: {
+    flexShrink: 0,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    maxWidth: 100,
+  },
+  dateNativeText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  dateModalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  dateModalCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    marginHorizontal: 24,
+    maxWidth: 360,
+  },
+  dateModalDone: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  dateModalDoneText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
   titleCompleted: {
     textDecorationLine: 'line-through',

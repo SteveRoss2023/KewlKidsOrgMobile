@@ -1,6 +1,8 @@
 """
 List and ListItem models for shopping and todo lists with encrypted fields.
 """
+from datetime import date
+
 from django.db import models
 from django.contrib.auth import get_user_model
 from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
@@ -79,13 +81,15 @@ class ListSection(models.Model):
 
     list = models.ForeignKey(List, on_delete=models.CASCADE, related_name='sections')
     order = models.IntegerField(default=0)
+    section_date = models.DateField(default=date.today)
     title = EncryptedCharField(max_length=500)
     bullet_style = models.CharField(max_length=10, choices=BULLET_STYLE_CHOICES, default='number')
 
     class Meta:
-        ordering = ['order']
+        ordering = ['section_date', 'order']
         indexes = [
             models.Index(fields=['list', 'order']),
+            models.Index(fields=['list', 'section_date', 'order']),
         ]
 
     def __str__(self):

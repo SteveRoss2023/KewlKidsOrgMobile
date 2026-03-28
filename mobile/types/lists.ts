@@ -60,6 +60,8 @@ export interface ListSection {
   id: number;
   list: number;
   order: number;
+  /** ISO YYYY-MM-DD */
+  section_date?: string;
   title: string;
   bullet_style: 'number' | 'dot';
 }
@@ -139,6 +141,8 @@ export interface CreateListSectionData {
   list: number;
   order: number;
   title: string;
+  /** ISO YYYY-MM-DD; defaults to today on backend if omitted */
+  section_date?: string;
   /** Optional; backend defaults. Not shown in UI. */
   bullet_style?: 'number' | 'dot';
 }
@@ -146,6 +150,8 @@ export interface CreateListSectionData {
 export interface UpdateListSectionData {
   order?: number;
   title?: string;
+  /** ISO YYYY-MM-DD */
+  section_date?: string;
   bullet_style?: 'number' | 'dot';
 }
 
