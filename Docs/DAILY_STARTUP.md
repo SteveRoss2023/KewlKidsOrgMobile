@@ -2,14 +2,15 @@
 
 Quick reference for starting the app each day. Use this after logging in or restarting your computer.
 
+**Production (Cloudflare):** [https://organizer.kewlkids.ca](https://organizer.kewlkids.ca) — no need to start this from your laptop; local steps below are for **development** only.
+
 ---
 
 ## Quick Start
 
-**Choose your setup:**
+**Typical local dev:** Steps 1–4 (Redis → backend → Expo → open web or device).
 
-- **Local Only** (Steps 1-3): Testing on same computer/network
-- **With Ngrok** (Steps 1-4): Needed for email links, invitations, or testing on different network
+**Static web preview:** After changing the web app, run `npm run build` in `mobile/`, then serve `dist` (e.g. `npx serve -s dist -l 8085`). This is **not** hot reload; use `npm start` / `npm run web` for day-to-day UI work.
 
 ---
 
@@ -59,14 +60,16 @@ python manage.py runserver
 
 ---
 
-### 3. Start Mobile App
+### 3. Start Mobile App (Expo dev)
 
 **Open a new terminal/command prompt:**
 
 ```bash
 cd mobile
-npx expo start
+npm start
 ```
+
+(`npm start` → `npx expo start`. Use `npm run web` to open web directly.)
 
 **✅ Verify:** QR code appears in terminal, Metro bundler is running
 
@@ -76,7 +79,8 @@ npx expo start
 
 **For Web Browser:**
 - Press `w` in the Expo terminal, or
-- Navigate to http://localhost:8081
+- Run `npm run web` from `mobile/`
+- Expo prints the URL (often http://localhost:8081)
 
 **For Mobile Device:**
 - Open Expo Go app on your phone
@@ -85,40 +89,27 @@ npx expo start
 
 ---
 
-### 5. Start Ngrok Tunnels
+### 5. (Optional) Static web build — production-like bundle
 
-**⚠️ Required if you:**
-- Test email verification links
-- Test family invitation links
-- Test on mobile device not on same Wi-Fi network
-- Need webhooks from external services
+Use when you want to test the **exported** site (same workflow as deploying to **organizer.kewlkids.ca**), not the live dev server:
 
-**Terminal 3 - API Tunnel (Required for email/invitation links):**
 ```bash
-ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
+cd mobile
+npm run build
+npx serve -s dist -l 8085
 ```
 
-**Terminal 4 - Web Tunnel (Required if testing email/invitation links on web):**
-```bash
-ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
-```
-
-**✅ Verify:**
-- Check ngrok dashboard shows active tunnels
-- API accessible at: https://kewlkidsorganizermobile.ngrok.app/api/
-- Web app accessible at: https://kewlkidsorganizermobile-web.ngrok.app
-
-**Note:** If you're only testing locally on the same network and don't need email/invitation links, you can skip ngrok.
+Rebuild with `npm run build` whenever code changes; `serve` only shows the last export.
 
 ---
 
-### 5. Verify Everything Works
+### 6. Verify Everything Works
 
 - ✅ Backend: http://localhost:8900/api/ responds
-- ✅ Mobile app loads in browser/Expo Go
+- ✅ Mobile app loads in browser or Expo Go
 - ✅ Can log in and see data
 - ✅ API calls work (check browser console for errors)
-- ✅ (If using ngrok) Email/invitation links work correctly
+- ✅ Email / invitation links: use **production** **organizer.kewlkids.ca** or ensure `WEB_APP_URL` in backend `.env` matches where the user opens the app
 
 ---
 
@@ -147,44 +138,30 @@ python manage.py migrate
 ### Mobile app can't connect to API?
 
 **Check IP address:**
-- Update `mobile/services/api.ts` line 43 with your current IP
+- Update `mobile/services/api.ts` (fallback LAN IP) if needed
 - Find IP: `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
-- Default in code: `http://10.0.0.25:8900/api`
+- Or set `EXPO_PUBLIC_API_URL=http://YOUR_IP:8900/api` in `mobile/.env`
 
 **Backend not accessible:**
 - Ensure backend is running on `0.0.0.0:8900` (not just `localhost`)
 - Check firewall allows port 8900
 - Verify same Wi-Fi network for mobile device
 
----
-
-### Ngrok not working?
-
-**Check authtoken:**
-```bash
-ngrok config check
-```
-
-**Restart tunnel:**
-- Stop ngrok (Ctrl+C)
-- Restart: `ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app`
+**Web on organizer.kewlkids.ca:**
+- API should resolve to **organizer-api.kewlkids.ca** via `EXPO_PUBLIC_API_HOST` (see `mobile/.env.example`)
 
 ---
 
 ## Daily Startup Checklist
 
-Copy this checklist and check off as you go:
-
 ```
-[ ] Terminal 1: Backend started (port 8900)
+[ ] Terminal 1: Redis running (redis-cli ping → PONG)
+[ ] Terminal 2: Backend started (port 8900)
 [ ] Backend accessible at http://localhost:8900/api/
-[ ] Terminal 2: Mobile app started (Expo running)
-[ ] QR code visible in terminal
+[ ] Terminal 3: Mobile app started (npm start in mobile/)
 [ ] App connected (web browser or Expo Go)
 [ ] Can log in successfully
-[ ] Terminal 3: Ngrok API tunnel running (if needed)
-[ ] Terminal 4: Ngrok Web tunnel running (if needed)
-[ ] Email/invitation links work (if testing)
+[ ] (Optional) npm run build + serve dist — only if testing static export
 ```
 
 ---
@@ -198,10 +175,17 @@ cd backend
 python manage.py runserver
 ```
 
-### Windows PowerShell - Mobile:
+### Windows PowerShell - Mobile (dev):
 ```powershell
 cd mobile
-npx expo start
+npm start
+```
+
+### Windows PowerShell - Static web preview:
+```powershell
+cd mobile
+npm run build
+npx serve -s dist -l 8085
 ```
 
 ### Mac/Linux - Backend:
@@ -211,20 +195,10 @@ source venv/bin/activate
 python manage.py runserver
 ```
 
-### Mac/Linux - Mobile:
+### Mac/Linux - Mobile (dev):
 ```bash
 cd mobile
-npx expo start
-```
-
-### Ngrok API (required for email/invitation links):
-```bash
-ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
-```
-
-### Ngrok Web (required if testing email/invitation links on web):
-```bash
-ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
+npm start
 ```
 
 ---
@@ -234,8 +208,10 @@ ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
 | Service | Port | URL |
 |---------|------|-----|
 | Backend API | 8900 | http://localhost:8900/api/ |
-| Mobile Web | 8081 | http://localhost:8081 |
+| Expo / Metro (typical) | 8081 | Shown in Expo terminal |
+| Static preview (example) | 8085 | After `serve -s dist -l 8085` |
 | Admin Panel | 8900 | http://localhost:8900/admin/ |
+| Production web | 443 | https://organizer.kewlkids.ca |
 
 ---
 
@@ -250,11 +226,9 @@ If this is your first time setting up:
 
 2. **Mobile:**
    - Install dependencies: `cd mobile && npm install`
-   - Update IP address in `mobile/services/api.ts` (line 43)
+   - Copy `mobile/.env.example` to `mobile/.env` and set LAN IP / `EXPO_PUBLIC_*` as needed
 
-3. **Ngrok (optional):**
-   - Install ngrok and configure authtoken
-   - Reserve domains if using custom domains
+3. **Production:** Cloudflare + tunnel/DNS for **organizer.kewlkids.ca** and **organizer-api.kewlkids.ca** (see STARTUP_PROCEDURE.md)
 
 ---
 
@@ -263,8 +237,8 @@ If this is your first time setting up:
 **To stop all services:**
 
 1. **Backend:** Press `Ctrl+C` in backend terminal
-2. **Mobile:** Press `Ctrl+C` in mobile terminal
-3. **Ngrok:** Press `Ctrl+C` in ngrok terminals
+2. **Mobile / Expo:** Press `Ctrl+C` in mobile terminal
+3. **serve:** Press `Ctrl+C` in static preview terminal
 
 **Deactivate virtual environment (optional):**
 ```bash
@@ -273,33 +247,23 @@ deactivate
 
 ---
 
-## When Do You Need Ngrok?
+## Reference: ngrok (legacy)
 
-**✅ Start ngrok if you:**
-- Need to test email verification links (they redirect to web app)
-- Need to test family invitation links (they redirect to web app)
-- Testing on mobile device not on same Wi-Fi network
-- Need webhooks from external services
-- Sharing app with others for testing
+The team **does not** rely on ngrok for production (**organizer.kewlkids.ca** uses Cloudflare). You might still use ngrok for a one-off public tunnel to your **local** API; see [STARTUP_PROCEDURE.md — Reference: ngrok](./STARTUP_PROCEDURE.md#reference-ngrok-optional-tunneling).
 
-**❌ Skip ngrok if you:**
-- Only testing locally on same computer
-- Testing on mobile device on same Wi-Fi network (can use local IP)
-- Not testing email/invitation features
-- Just doing basic development
+---
 
 ## Common Issues
 
 | Problem | Quick Fix |
 |--------|-----------|
 | "Port 8900 already in use" | Kill process or use different port |
-| "Can't connect to API" | Check IP address, firewall, same network |
+| "Can't connect to API" | Check IP address, firewall, same network; `EXPO_PUBLIC_API_URL` on device |
 | "Module not found" | Run `npm install` in mobile directory |
 | "Database error" | Check PostgreSQL is running |
-| "Ngrok domain not found" | Check authtoken, restart ngrok |
-| "Email link doesn't work" | Make sure ngrok is running and WEB_APP_URL is set in backend .env |
+| "Stale web build" | Run `npm run build` again before `serve` |
+| "Email link doesn't work" | Point `WEB_APP_URL` at the URL users actually open (e.g. https://organizer.kewlkids.ca) |
 
 ---
 
 **Need more details?** See [STARTUP_PROCEDURE.md](./STARTUP_PROCEDURE.md) for complete documentation.
-

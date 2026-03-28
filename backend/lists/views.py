@@ -81,6 +81,12 @@ class ListSectionViewSet(viewsets.ModelViewSet):
     serializer_class = ListSectionSerializer
     permission_classes = [IsAuthenticated]
 
+    def paginate_queryset(self, queryset):
+        """Return all sections in one response when scoped to a list (small, bounded set)."""
+        if self.request.query_params.get('list'):
+            return None
+        return super().paginate_queryset(queryset)
+
     def get_queryset(self):
         """Return sections for lists the user can access."""
         user = self.request.user
@@ -207,6 +213,12 @@ class ListItemViewSet(viewsets.ModelViewSet):
     serializer_class = ListItemSerializer
     permission_classes = [IsAuthenticated]
 
+    def paginate_queryset(self, queryset):
+        """One round-trip per list: items for a single list are bounded; avoid sequential page fetches."""
+        if self.request.query_params.get('list'):
+            return None
+        return super().paginate_queryset(queryset)
+
     def get_queryset(self):
         """Return items for lists the user can access."""
         user = self.request.user
@@ -220,6 +232,15 @@ class ListItemViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 pass
 
+        queryset = queryset.select_related(
+            'list',
+            'section',
+            'parent',
+            'category',
+            'created_by__user__profile',
+            'assigned_to__user__profile',
+            'completed_by',
+        )
         return queryset
 
     def perform_create(self, serializer):

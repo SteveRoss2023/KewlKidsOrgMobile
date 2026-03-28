@@ -304,6 +304,8 @@ export default function ListDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const listId = params.id ? parseInt(params.id as string, 10) : null;
+  const listIdRef = useRef(listId);
+  listIdRef.current = listId;
   const { width: windowWidth } = useWindowDimensions();
   const { colors, theme } = useTheme();
   const { selectedFamily } = useFamily();
@@ -393,37 +395,35 @@ export default function ListDetailScreen() {
   // Lists that support drag and drop, reordering, and move item features
   const supportsDragAndDrop = isTodoList || isIdeasList || isOtherList;
 
-  const fetchListSections = async (skipLoading = false) => {
-    if (!listId) return;
+  const fetchListSections = async (forListId?: number) => {
+    const targetId = forListId ?? listId;
+    if (!targetId) return;
+    const rid = targetId;
     try {
-      const fetched = await ListService.getListSections(listId);
+      const fetched = await ListService.getListSections(rid);
+      if (listIdRef.current !== rid) return;
       setSections(fetched);
     } catch (err) {
       console.error('Error fetching list sections:', err);
     }
   };
 
-  // Load list and categories when screen comes into focus
+  // Load list, items, and sections in parallel when screen focuses (items no longer wait on list metadata).
   useFocusEffect(
     useCallback(() => {
-      if (listId && selectedFamily) {
-        fetchList();
-        fetchCategories();
-      }
+      if (!listId || !selectedFamily) return;
+      fetchList();
+      fetchListItems(false, listId);
+      fetchListSections(listId);
     }, [listId, selectedFamily])
   );
 
-  // Load items (and sections for checklist) when list changes
+  // Grocery categories are only needed for grocery lists (skip for checklists, todos, etc.).
   useEffect(() => {
-    if (list) {
-      fetchListItems();
-      if (list.list_type === 'checklist') {
-        fetchListSections();
-      } else {
-        setSections([]);
-      }
+    if (list?.list_type === 'grocery' && selectedFamily) {
+      fetchCategories();
     }
-  }, [list]);
+  }, [list?.id, list?.list_type, selectedFamily?.id]);
 
   // Reset title font size when list changes
   useEffect(() => {
@@ -700,38 +700,43 @@ export default function ListDetailScreen() {
 
   const fetchList = async (skipLoading = false) => {
     if (!listId) return;
+    const rid = listId;
 
     try {
       if (!skipLoading) {
         setLoading(true);
       }
-      const fetchedList = await ListService.getList(listId);
+      const fetchedList = await ListService.getList(rid);
+      if (listIdRef.current !== rid) return;
       setList(fetchedList);
     } catch (err) {
       console.error('Error fetching list:', err);
-      if (!skipLoading) {
+      if (!skipLoading && listIdRef.current === rid) {
         router.back();
       }
     } finally {
-      if (!skipLoading) {
+      if (!skipLoading && listIdRef.current === rid) {
         setLoading(false);
       }
     }
   };
 
-  const fetchListItems = async (skipLoading = false) => {
-    if (!list) return;
+  const fetchListItems = async (skipLoading = false, targetListId?: number | null) => {
+    const id = targetListId ?? list?.id;
+    if (!id) return;
+    const rid = id;
 
     try {
       if (!skipLoading) {
         setLoadingItems(true);
       }
-      const items = await ListService.getListItems(list.id);
+      const items = await ListService.getListItems(rid);
+      if (listIdRef.current !== rid) return;
       setListItems(items);
     } catch (err) {
       console.error('Error fetching list items:', err);
     } finally {
-      if (!skipLoading) {
+      if (!skipLoading && listIdRef.current === rid) {
         setLoadingItems(false);
       }
     }
@@ -755,11 +760,13 @@ export default function ListDetailScreen() {
     try {
       const promises: Promise<any>[] = [
         fetchList(true),
-        fetchCategories(),
         ListService.getListItems(listId).then(items => setListItems(items)),
       ];
       if (list?.list_type === 'checklist') {
         promises.push(ListService.getListSections(listId).then(s => setSections(s)));
+      }
+      if (list?.list_type === 'grocery') {
+        promises.push(fetchCategories());
       }
       await Promise.all(promises);
     } catch (err) {

@@ -1,6 +1,6 @@
 # KewlKids Organizer Mobile - Startup Procedure
 
-This document provides step-by-step instructions for starting the development environment, including the Django backend, Expo mobile app, and ngrok tunnel configuration.
+This document covers local development (Django backend + Expo app) and how that relates to **production**, which is served through **Cloudflare** at **[https://organizer.kewlkids.ca](https://organizer.kewlkids.ca)** (API typically **`organizer-api.kewlkids.ca`**). **ngrok** is no longer used for day-to-day work; a [reference section](#reference-ngrok-optional-tunneling) is kept if you ever need tunneling.
 
 ## Table of Contents
 
@@ -8,9 +8,10 @@ This document provides step-by-step instructions for starting the development en
 2. [Port Configuration](#port-configuration)
 3. [Backend Startup](#backend-startup)
 4. [Mobile App Startup](#mobile-app-startup)
-5. [Ngrok Setup (Optional)](#ngrok-setup-optional)
-6. [Environment Variables](#environment-variables)
+5. [Web static build (production preview)](#web-static-build-production-preview)
+6. [Environment Variables](#environment-variables) (includes Cloudflare + `kewlkids.ca`)
 7. [Troubleshooting](#troubleshooting)
+8. [Reference: ngrok (optional tunneling)](#reference-ngrok-optional-tunneling)
 
 ---
 
@@ -21,8 +22,9 @@ Before starting, ensure you have the following installed:
 - **Node.js**: 18+ (LTS recommended)
 - **Python**: 3.12+
 - **PostgreSQL**: 15+ (required for production, optional for development)
-- **Expo CLI**: Latest (`npm install -g expo-cli`)
-- **ngrok**: Latest (optional, for external access) - [Download ngrok](https://ngrok.com/download)
+- **Expo**: Use `npx expo` via project dependencies (global `expo-cli` is optional)
+- **Redis**: Required for WebSockets/chat (see backend section)
+- **ngrok**: Not required for normal dev; see [Reference: ngrok](#reference-ngrok-optional-tunneling) if you need a quick public tunnel
 
 ---
 
@@ -33,12 +35,10 @@ The application uses the following ports:
 | Service | Port | Description |
 |---------|------|-------------|
 | **Django Backend API** | `8900` | Main API server (default) |
-| **Expo Metro Bundler** | `8081` | React Native bundler (default) |
-| **Expo Web** | `19000` | Web development server (alternate) |
-| **Expo Web (Alternate)** | `19006` | Web development server (alternate) |
+| **Expo Metro Bundler** | `8081` | React Native / web dev (default; Expo may show another URL for web) |
 | **PostgreSQL** | `5432` | Database server (default) |
-| **ngrok API Tunnel** | `8900` â†’ Public URL | Tunnels backend API |
-| **ngrok Web Tunnel** | `8081` â†’ Public URL | Tunnels web app (optional) |
+| **Production web (Cloudflare)** | `443` | **https://organizer.kewlkids.ca** (not a local port) |
+| **Production API (Cloudflare)** | `443` | **https://organizer-api.kewlkids.ca** (hostname from tunnel/DNS config) |
 
 ### Finding Your Local IP Address
 
@@ -90,7 +90,9 @@ Create a `.env` file in the `backend/` directory if it doesn't exist:
 # Django Settings
 SECRET_KEY=your-secret-key-here
 DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,10.0.0.25,kewlkidsorganizermobile.ngrok.app,*.ngrok.app,*.ngrok-free.app
+ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,10.0.0.25,organizer.kewlkids.ca,organizer-api.kewlkids.ca
+# Local dev: include your LAN IP (e.g. 10.0.0.25). Production: include Cloudflare hostnames above.
+# Legacy tunneling (reference only): *.ngrok.app
 
 # Database (PostgreSQL)
 DATABASE_NAME=kewlkidsorganizer_mobile
@@ -105,10 +107,11 @@ JWT_REFRESH_TOKEN_LIFETIME=1440
 JWT_ALGORITHM=HS256
 JWT_SECRET_KEY=your-jwt-secret-key
 
-# Web App URL (for email verification redirects)
+# Web app URL (email verification, OAuth redirects, invitations)
+# Local dev:
 WEB_APP_URL=http://localhost:8081
-# Or if using ngrok:
-# WEB_APP_URL=https://kewlkidsorganizermobile-web.ngrok.app
+# Production / Cloudflare:
+# WEB_APP_URL=https://organizer.kewlkids.ca
 ```
 
 **Generate Secret Keys:**
@@ -212,47 +215,49 @@ npm install
 
 ### Step 3: Set Up Environment Variables (Optional)
 
-Create a `.env` file in the `mobile/` directory:
+Copy [`mobile/.env.example`](../mobile/.env.example) to `mobile/.env` and adjust. Typical entries for **production-aligned hostnames** (used when the app is opened on **`*.kewlkids.ca`**):
 
 ```env
-# API URL Configuration
-# For web: uses localhost:8900/api automatically
-# For native: uses your local IP (update in mobile/services/api.ts)
-EXPO_PUBLIC_API_URL=http://10.0.0.25:8900/api
-# Or if using ngrok:
-# EXPO_PUBLIC_API_URL=https://kewlkidsorganizermobile.ngrok.app/api
+EXPO_PUBLIC_CUSTOM_DOMAIN=kewlkids.ca
+EXPO_PUBLIC_WEB_APP_HOST=organizer.kewlkids.ca
+EXPO_PUBLIC_API_HOST=organizer-api.kewlkids.ca
 ```
 
-**Note:** The app automatically detects the API URL based on platform:
-- **Web**: Uses `http://localhost:8900/api`
-- **Native (Mobile)**: Uses your local IP address (default: `http://10.0.0.25:8900/api`)
-- **Ngrok Web**: Automatically detects ngrok domain and uses corresponding API URL
+For **native / Expo Go** on your LAN, set (replace with your machine’s IP):
 
-Update the IP address in `mobile/services/api.ts` (line 43) if your local IP is different.
+```env
+EXPO_PUBLIC_API_URL=http://10.0.0.25:8900/api
+```
+
+**Note:** The app resolves the API URL by context (see [Environment Variables](#environment-variables)):
+- **Web on `localhost`**: `http://localhost:8900/api`
+- **Web on `organizer.kewlkids.ca`**: `https://organizer-api.kewlkids.ca/api` (via `EXPO_PUBLIC_API_HOST`)
+- **Physical device**: `EXPO_PUBLIC_API_URL` or the fallback in [`mobile/services/api.ts`](../mobile/services/api.ts)
 
 ### Step 4: Start Expo Development Server
 
-**Basic Start:**
+**npm scripts (from `mobile/`):**
+
+| Script | Command |
+|--------|---------|
+| `npm start` | `npx expo start` — dev server + QR (press `w` for web) |
+| `npm run web` | `npx expo start --web` — open web directly |
+| `npm run start:clear` | `npx expo start --clear` — clear Metro cache |
+| `npm run build` | `npx expo export --platform web` — static files for hosting (see below) |
+
+**Basic start:**
 ```bash
-npx expo start
+npm start
+# or: npx expo start
 ```
 
-**Start Options:**
+**Other start modes:**
 ```bash
-# Start for web browser
-npx expo start --web
-
-# Start for Android
+npm run web
 npx expo start --android
-
-# Start for iOS
 npx expo start --ios
-
-# Start with tunnel (works across networks, requires Expo account)
-npx expo start --tunnel
-
-# Clear cache and start
-npx expo start --clear
+npx expo start --tunnel   # different network; needs Expo account
+npm run start:clear
 ```
 
 ### Step 5: Connect to Development Server
@@ -283,9 +288,33 @@ npx expo start --clear
 
 ---
 
-## Ngrok Setup (Optional)
+## Web static build (production preview)
 
-Ngrok is useful for:
+The Expo web app is configured for **static export** (`app.json`: `"web.output": "static"`). This produces files you can host behind Cloudflare (e.g. **organizer.kewlkids.ca**) or test locally with a static file server.
+
+**From `mobile/`:**
+
+```bash
+npm run build
+```
+
+This runs `npx expo export --platform web`. Expo prints the output directory (commonly **`dist`** in `mobile/`).
+
+**Preview the build locally** (does not hot-reload; rebuild after code changes):
+
+```bash
+npx serve -s dist -l 8085
+```
+
+Adjust the port if needed. Unlike `npm run web` / `expo start`, **`serve` only serves what is already in `dist`** — run `npm run build` again whenever you want the latest bundle.
+
+---
+
+## Reference: ngrok (optional tunneling)
+
+**Not used for production.** Public access goes through **Cloudflare** and **organizer.kewlkids.ca**. ngrok is documented here only for occasional tunneling (e.g. quick third-party webhook tests).
+
+Ngrok can still be useful for:
 - Testing on mobile devices outside your local network
 - Testing webhooks from external services
 - Sharing the app with others for testing
@@ -324,9 +353,9 @@ python manage.py runserver
 
 **Terminal 2 - Start ngrok for API:**
 ```bash
-ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
-# Or use a random domain:
-# ngrok http 8900
+ngrok http 8900
+# Paid/reserved hostname example:
+# ngrok http 8900 --domain=your-name.ngrok.app
 ```
 
 **Note:** If you have a paid ngrok account with a reserved domain, use the `--domain` flag. Otherwise, ngrok will assign a random domain.
@@ -341,31 +370,32 @@ npx expo start --web
 
 **Terminal 4 - Start ngrok for Web:**
 ```bash
-ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
-# Or use a random domain:
-# ngrok http 8081
+ngrok http 8081
+# Match the port Expo prints for web / Metro
 ```
 
-### Step 5: Update Configuration
+### Step 5: Update Configuration (ngrok example only)
 
-**Backend `.env`:**
+If you temporarily use ngrok, add its hostnames to Django and point `WEB_APP_URL` at the **web** tunnel URL. Production should use **organizer.kewlkids.ca** instead.
+
+**Backend `.env` (illustrative ngrok values):**
 ```env
-ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,10.0.0.25,kewlkidsorganizermobile.ngrok.app,*.ngrok.app,*.ngrok-free.app
-WEB_APP_URL=https://kewlkidsorganizermobile-web.ngrok.app
+ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,10.0.0.25,your-api-tunnel.ngrok-free.app
+WEB_APP_URL=https://your-web-tunnel.ngrok-free.app
 ```
 
-**Mobile `.env` (if using):**
+**Mobile `.env` (native / tunnel testing):**
 ```env
-EXPO_PUBLIC_API_URL=https://kewlkidsorganizermobile.ngrok.app/api
+EXPO_PUBLIC_API_URL=https://your-api-tunnel.ngrok-free.app/api
 ```
 
-**Note:** The mobile app automatically detects ngrok domains when running on web, so manual configuration may not be needed.
+### Step 6: Access via ngrok (example hostnames)
 
-### Step 6: Access via Ngrok
+Replace with whatever domain ngrok assigns (reserved domains if you pay for them):
 
-- **API**: https://kewlkidsorganizermobile.ngrok.app/api/
-- **Web App**: https://kewlkidsorganizermobile-web.ngrok.app
-- **Admin**: https://kewlkidsorganizermobile.ngrok.app/admin/
+- **API**: `https://<your-ngrok-api-host>/api/`
+- **Web app**: `https://<your-ngrok-web-host>/`
+- **Admin**: `https://<your-ngrok-api-host>/admin/`
 
 ---
 
@@ -404,13 +434,15 @@ Copy [`mobile/.env.example`](../mobile/.env.example) to `mobile/.env` and adjust
 - **Runtime override** (`kewlkids_runtime_api_base_url` in session/localStorage): used first for debugging.
 - **`localhost` / `127.0.0.1`**: always `http://localhost:8900/api` (ignores stale `EXPO_PUBLIC_API_URL` pointing at ngrok or prod).
 - **`*.kewlkids.ca`**: `https://<EXPO_PUBLIC_API_HOST>/api` (defaults to `organizer-api.kewlkids.ca`).
-- **Otherwise**: `EXPO_PUBLIC_API_URL` if set, else inferred (ngrok / localhost).
+- **Otherwise**: `EXPO_PUBLIC_API_URL` if set, else inferred (localhost / legacy tunnel hostnames).
 
 **Native / physical device:** set `EXPO_PUBLIC_API_URL` to your PC’s LAN URL, e.g. `http://10.0.0.25:8900/api`, or the fallback IP in [`mobile/services/api.ts`](mobile/services/api.ts) if unset.
 
 ### Cloudflare + `kewlkids.ca` (app-admin)
 
-For public URLs on your domain, use **app-admin** to assign stable subdomains (recommended: web `organizer`, API `organizer-api`). Tunnel wildcard ingress routes by hostname; update **OAuth redirect URIs** in Azure/Google and **`WEB_APP_URL`** / **`EXPO_PUBLIC_*`** if you change labels.
+**Production web app:** [https://organizer.kewlkids.ca](https://organizer.kewlkids.ca)
+
+For public URLs on your domain, use **app-admin** to assign stable subdomains (recommended: web **`organizer`**, API **`organizer-api`**). Cloudflare Tunnel (or your ingress) should route by hostname; update **OAuth redirect URIs** in Azure/Google and **`WEB_APP_URL`** / **`EXPO_PUBLIC_*`** if you change labels.
 
 **Production web icons (`@expo/vector-icons` fonts):** If icons show as empty boxes, open DevTools → Network and confirm `.ttf` / `.woff` requests return fonts (not `index.html`). Fix static hosting so asset paths are not caught by SPA fallback; on Cloudflare, try disabling Rocket Loader / Auto Minify for the site and purging cache.
 
@@ -463,30 +495,20 @@ npx expo start --port 8082
 - Check API URL in console logs
 - Verify backend is accessible: `curl http://YOUR_IP:8900/api/health/`
 - Check CORS settings in Django
-- Verify ngrok tunnel is running (if using)
+- If testing via a public URL, confirm Cloudflare/tunnel and `WEB_APP_URL` match that host
 
 **Problem: QR code not working**
 - Use tunnel mode: `npx expo start --tunnel`
 - Manually enter URL in Expo Go app
 - Check firewall/network settings
 
-### Ngrok Issues
+### Reference: ngrok tunnel issues
 
-**Problem: ngrok domain not working**
-- Verify ngrok is running: Check ngrok dashboard
-- Check ngrok authtoken is configured
-- Verify domain is reserved (if using custom domain)
-- Restart ngrok tunnel
+Only if you are using ngrok (not required for Cloudflare production):
 
-**Problem: API calls fail through ngrok**
-- Verify `ALLOWED_HOSTS` includes ngrok domain
-- Check CORS settings allow ngrok origin
-- Verify ngrok tunnel is pointing to correct port (8900)
-
-**Problem: Web app can't connect to API through ngrok**
-- The app auto-detects ngrok domains on web
-- Verify both tunnels are running (API and Web)
-- Check browser console for API URL being used
+- Verify ngrok is running and authtoken is set (`ngrok config check`).
+- Add the tunnel hostname to `ALLOWED_HOSTS` and match `WEB_APP_URL` to the **web** tunnel.
+- Point the API tunnel at port **8900** and the web tunnel at your dev server port (often **8081** for Metro).
 
 ---
 
@@ -504,7 +526,8 @@ Use this checklist for a quick startup:
 - [ ] Expo development server started
 - [ ] Mobile app connected (web/mobile device)
 - [ ] API connection verified (check console logs)
-- [ ] (Optional) Ngrok tunnels configured and running
+- [ ] (Optional) `npm run build` + static preview if testing production web bundle locally
+- [ ] Production: **organizer.kewlkids.ca** / tunnel healthy (not part of typical local dev)
 
 ---
 
@@ -519,38 +542,38 @@ Use this checklist for a quick startup:
    python manage.py runserver
    ```
 
-2. **Start Mobile App:**
+2. **Start mobile app (dev):**
    ```bash
    cd mobile
-   npx expo start
+   npm start
    ```
 
-3. **For External Testing (Optional):**
-   ```bash
-   # Terminal 1: Backend ngrok
-   ngrok http 8900 --domain=kewlkidsorganizermobile.ngrok.app
+3. **Production web (deploy / preview workflow):**
+   - Build static web: `cd mobile && npm run build`
+   - Deploy the export output (e.g. `dist`) to the host behind **organizer.kewlkids.ca**, or preview with `npx serve -s dist -l 8085`
+   - Public site: **https://organizer.kewlkids.ca**
 
-   # Terminal 2: Web app ngrok
-   ngrok http 8081 --domain=kewlkidsorganizermobile-web.ngrok.app
-   ```
+4. **Optional tunneling (reference):** See [Reference: ngrok](#reference-ngrok-optional-tunneling). Normal dev does not require ngrok.
 
-4. **Make Changes:**
+5. **Make changes:**
    - Backend: Restart Django server if needed
-   - Mobile: Hot reload automatically updates
+   - Mobile (dev): Hot reload via Expo
+   - Static web: Re-run `npm run build` after changes before serving `dist`
 
-5. **Test:**
-   - Web: http://localhost:8081
+6. **Test:**
+   - Web (dev): URL shown in Expo terminal (often http://localhost:8081) or press `w`
    - Mobile: Scan QR code with Expo Go
-   - External: Use ngrok URLs
+   - Production: https://organizer.kewlkids.ca
 
 ---
 
 ## Additional Resources
 
-- [Expo Documentation](https://docs.expo.dev/)
+- [Expo Documentation](https://docs.expo.dev/) — including [static web export](https://docs.expo.dev/guides/publishing-websites/)
 - [Django REST Framework](https://www.django-rest-framework.org/)
-- [ngrok Documentation](https://ngrok.com/docs)
+- [Cloudflare Tunnel documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 - [React Native Documentation](https://reactnative.dev/)
+- [ngrok Documentation](https://ngrok.com/docs) (reference only)
 
 ---
 
@@ -558,12 +581,13 @@ Use this checklist for a quick startup:
 
 - **Port 8900**: Custom Django port to avoid conflicts with other services
 - **0.0.0.0 Binding**: Allows connections from any network interface (needed for mobile testing)
-- **Auto-Detection**: Mobile app automatically detects API URL based on platform and environment
-- **Ngrok Domains**: Update `ALLOWED_HOSTS` and `WEB_APP_URL` when using ngrok
+- **API URL detection**: Web on **localhost** uses local API; web on **\*.kewlkids.ca** uses **organizer-api.kewlkids.ca** (see `mobile/services/api.ts` and `EXPO_PUBLIC_*` vars)
+- **Production**: **organizer.kewlkids.ca** via Cloudflare; keep `WEB_APP_URL` and OAuth redirect URIs aligned
+- **Static web**: `npm run build` then deploy `dist` (or preview with `serve`); not the same as `expo start`
 - **CORS**: Development mode allows all origins; restrict in production
 
 ---
 
-**Last Updated**: 2024
+**Last Updated**: March 2026  
 **Maintained By**: Development Team
 

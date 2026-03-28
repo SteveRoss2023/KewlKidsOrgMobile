@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
+    "build": "npx expo export --platform web",
     "start": "npx expo start",
     "start:clear": "npx expo start --clear",
     "android": "npx expo start --android",
