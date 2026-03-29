@@ -397,6 +397,54 @@ export function findMatchingSections<T extends { title: string }>(
 }
 
 /**
+ * Section titles for voice: same as findMatchingSections, plus fallback when ASR splits
+ * words differently from the stored title (e.g. "spring clean up" vs "Spring Cleanup").
+ */
+export function findMatchingSectionsForVoice<T extends { title: string }>(
+  sections: T[],
+  searchText: string
+): T[] {
+  const primary = findMatchingSections(sections, searchText);
+  if (primary.length > 0) return primary;
+
+  const normalizedSearch = normalizeTextForListItemMatch(searchText).trim();
+  if (!normalizedSearch) return [];
+
+  const compactSearch = normalizedSearch.replace(/\s+/g, '');
+  if (compactSearch.length < 4) return [];
+
+  const searchTokens = normalizedSearch.split(/\s+/).filter(Boolean);
+
+  return sections.filter((s) => {
+    const normalizedTitle = normalizeTextForListItemMatch(s.title).trim();
+    if (!normalizedTitle) return false;
+    const compactTitle = normalizedTitle.replace(/\s+/g, '');
+
+    if (compactTitle === compactSearch) return true;
+
+    if (compactTitle.includes(compactSearch) || compactSearch.includes(compactTitle)) {
+      const shorter = Math.min(compactTitle.length, compactSearch.length);
+      const longer = Math.max(compactTitle.length, compactSearch.length);
+      if (longer > 0 && shorter / longer < 0.45) return false;
+      return true;
+    }
+
+    if (searchTokens.length >= 2) {
+      let idx = 0;
+      for (const tok of searchTokens) {
+        if (tok.length < 2) continue;
+        const found = compactTitle.indexOf(tok, idx);
+        if (found === -1) return false;
+        idx = found + tok.length;
+      }
+      return idx > 0;
+    }
+
+    return false;
+  });
+}
+
+/**
  * Strip "item name", "item", parentheses from spoken delete query ("delete item name (x)" → x).
  */
 export function stripChecklistVoiceItemQueryForSearch(rawName: string): string {
