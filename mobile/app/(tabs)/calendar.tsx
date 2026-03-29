@@ -608,6 +608,14 @@ export default function CalendarScreen() {
       }
       items[date].push(event);
     });
+    for (const d of Object.keys(items)) {
+      items[d].sort((a, b) => {
+        const ta = new Date(a.starts_at).getTime();
+        const tb = new Date(b.starts_at).getTime();
+        if (ta !== tb) return ta - tb;
+        return a.id - b.id;
+      });
+    }
     return items;
   }, [events]);
 
