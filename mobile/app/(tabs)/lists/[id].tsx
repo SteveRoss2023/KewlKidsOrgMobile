@@ -57,8 +57,16 @@ import {
   parseUpdateItem,
   findMatchingItems,
   parseChecklistBareAddItemIntent,
-  parseChecklistBareDeleteIntent,
-  parseChecklistBareUpdateIntent,
+  parseChecklistBareDeleteOnlyIntent,
+  parseChecklistDeleteItemBareIntent,
+  parseChecklistDeleteFollowupChoice,
+  parseChecklistBareUpdateOnlyIntent,
+  parseChecklistUpdateItemBareIntent,
+  parseChecklistUpdateFollowupChoice,
+  parseGuidedVoiceAction,
+  parseGuidedVoiceTarget,
+  parseDeleteSectionCommand,
+  parseUpdateSectionCommand,
   parseAddSectionCommand,
   findMatchingSections,
   isCancelCommand,
@@ -416,6 +424,7 @@ export default function ListDetailScreen() {
   const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
   const lastProcessedTranscriptRef = useRef('');
   const deleteConfirmFromVoicePickRef = useRef(false);
+  const checklistPendingGuidedActionRef = useRef<'add' | 'delete' | 'update' | null>(null);
   const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<ListItem[]>([]);
   const [pendingAction, setPendingAction] = useState<
@@ -428,22 +437,34 @@ export default function ListDetailScreen() {
     | 'pick_section'
     | 'item_name'
     | 'section_title'
+    | 'delete_choose_kind'
+    | 'delete_section_pick'
+    | 'delete_confirm_section'
     | 'delete_section_or_item'
     | 'delete_pick_item'
+    | 'update_choose_kind'
+    | 'update_section_pick'
+    | 'update_new_section_title'
     | 'update_section_or_item'
     | 'update_pick_item'
     | 'update_new_name'
     | 'delete_confirm'
+    | 'guided_action'
+    | 'guided_target'
   >('idle');
   const [pendingSectionsForVoice, setPendingSectionsForVoice] = useState<ListSection[]>([]);
   const [pendingItemsForVoice, setPendingItemsForVoice] = useState<ListItem[]>([]);
   const [pendingChecklistItemName, setPendingChecklistItemName] = useState<string | null>(null);
   const [checklistTargetSectionId, setChecklistTargetSectionId] = useState<number | null>(null);
   const [checklistSectionPickKind, setChecklistSectionPickKind] = useState<
-    'add' | 'delete' | 'update' | null
+    'add' | 'delete' | 'update' | 'delete_section' | 'rename_section' | null
   >(null);
   const [checklistUpdateTargetItemId, setChecklistUpdateTargetItemId] = useState<number | null>(null);
   const [checklistDeleteConfirmItemId, setChecklistDeleteConfirmItemId] = useState<number | null>(null);
+  const [checklistDeleteConfirmSectionId, setChecklistDeleteConfirmSectionId] = useState<number | null>(
+    null
+  );
+  const [checklistVoiceSectionRenameId, setChecklistVoiceSectionRenameId] = useState<number | null>(null);
   const [voiceDeletePickModalOpen, setVoiceDeletePickModalOpen] = useState(false);
   const [voiceDeletePickCandidates, setVoiceDeletePickCandidates] = useState<ListItem[]>([]);
 
@@ -558,6 +579,22 @@ export default function ListDetailScreen() {
     }
   }, [list?.id, isGroceryList, listItems]); // Include listItems to clean up removed categories, but preserve state
 
+  const performDeleteListSection = useCallback(async (sectionId: number): Promise<boolean> => {
+    const previousSections = [...sections];
+    const previousItems = [...listItems];
+    setSections((prev) => prev.filter((s) => s.id !== sectionId));
+    setListItems((prev) => prev.filter((i) => i.section !== sectionId));
+    try {
+      await ListService.deleteListSection(sectionId);
+      return true;
+    } catch (err) {
+      console.error('Error deleting section:', err);
+      setSections(previousSections);
+      setListItems(previousItems);
+      return false;
+    }
+  }, [sections, listItems]);
+
   // Handle voice commands
   useEffect(() => {
     if (!transcript || !isSupported || !list) return;
@@ -577,9 +614,12 @@ export default function ListDetailScreen() {
       setChecklistSectionPickKind(null);
       setChecklistUpdateTargetItemId(null);
       setChecklistDeleteConfirmItemId(null);
+      setChecklistDeleteConfirmSectionId(null);
+      setChecklistVoiceSectionRenameId(null);
       setVoiceDeletePickModalOpen(false);
       setVoiceDeletePickCandidates([]);
       deleteConfirmFromVoicePickRef.current = false;
+      checklistPendingGuidedActionRef.current = null;
     };
 
     const handleVoiceCommand = async () => {
@@ -623,7 +663,7 @@ export default function ListDetailScreen() {
               lastProcessedTranscriptRef.current = '';
               reset();
               speak('What should the new name be?', () => {
-                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
               });
               return;
             }
@@ -651,7 +691,7 @@ export default function ListDetailScreen() {
           speak(
             `Please say which item, 1 through ${pendingMatches.length}. For example, 1, 2, one, or two.`,
             () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             }
           );
           lastProcessedTranscriptRef.current = '';
@@ -690,8 +730,236 @@ export default function ListDetailScreen() {
             reset();
             return;
           }
-          speak('Say yes to delete, or no to cancel.', () => {
-            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+          speak('Say yes to delete this item, or no to cancel.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 600 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_confirm_section') {
+          stop();
+          if (isNegativeResponse(transcript)) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Okay, not deleting the section.');
+            return;
+          }
+          if (isAffirmativeResponse(transcript)) {
+            const secId = checklistDeleteConfirmSectionId;
+            if (secId == null) {
+              clearChecklistVoice();
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            const secTitle = sections.find((s) => s.id === secId)?.title ?? 'Section';
+            const ok = await performDeleteListSection(secId);
+            if (ok) {
+              speak(`Section ${secTitle} was deleted.`);
+            } else {
+              speak('Sorry, I could not delete the section.');
+            }
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          speak('Say yes to delete this section, or no to cancel.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 600 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'guided_action') {
+          stop();
+          const action = parseGuidedVoiceAction(transcript);
+          if (action) {
+            checklistPendingGuidedActionRef.current = action;
+            setChecklistVoicePhase('guided_target');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Would you like to work with a section or an item?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+          speak('Say add, delete, or update.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'guided_target') {
+          stop();
+          const action = checklistPendingGuidedActionRef.current;
+          const target = parseGuidedVoiceTarget(transcript);
+          if (!action) {
+            checklistPendingGuidedActionRef.current = null;
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          if (!target) {
+            speak('Say section or item.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          checklistPendingGuidedActionRef.current = null;
+
+          if (action === 'add' && target === 'section') {
+            setChecklistVoicePhase('section_title');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the section be called?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+
+          if (action === 'add' && target === 'item') {
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak(
+                'This checklist has no sections yet. Say add section to create one first.',
+                () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                }
+              );
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setPendingChecklistItemName(null);
+            setChecklistVoicePhase('add_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item name first.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+
+          if (sections.length === 0) {
+            clearChecklistVoice();
+            speak('This checklist has no sections yet. Add a section first.', () => {
+              lastProcessedTranscriptRef.current = '';
+              reset();
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+
+          if (action === 'delete' && target === 'section') {
+            setChecklistVoicePhase('delete_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          if (action === 'delete' && target === 'item') {
+            setChecklistVoicePhase('delete_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          if (action === 'update' && target === 'section') {
+            setChecklistVoicePhase('update_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          if (action === 'update' && target === 'item') {
+            setChecklistVoicePhase('update_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          clearChecklistVoice();
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_choose_kind') {
+          stop();
+          const delChoice = parseChecklistDeleteFollowupChoice(text);
+          if (delChoice === 'section') {
+            setChecklistVoicePhase('delete_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+          if (delChoice === 'item') {
+            setChecklistVoicePhase('delete_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+          speak('Say delete section or delete item.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_choose_kind') {
+          stop();
+          const upChoice = parseChecklistUpdateFollowupChoice(text);
+          if (upChoice === 'section') {
+            setChecklistVoicePhase('update_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+          if (upChoice === 'item') {
+            setChecklistVoicePhase('update_section_or_item');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name, or the item to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+          speak('Say update section or update item.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
           });
           lastProcessedTranscriptRef.current = '';
           reset();
@@ -708,7 +976,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the item be called?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -719,7 +987,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the item be called?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -736,7 +1004,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(amsg, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -744,7 +1012,7 @@ export default function ListDetailScreen() {
             normalizeText(capitalizeWords(rawTrimmed)) === 'add' ? null : capitalizeWords(rawTrimmed);
           if (!rawTrimmed || !guessedName) {
             speak('Say the section number or name, or the item name first.', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -763,7 +1031,7 @@ export default function ListDetailScreen() {
           lastProcessedTranscriptRef.current = '';
           reset();
           speak(imsg, () => {
-            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
           });
           return;
         }
@@ -776,6 +1044,35 @@ export default function ListDetailScreen() {
             setPendingSectionsForVoice([]);
             const kind = checklistSectionPickKind ?? 'add';
             setChecklistSectionPickKind(null);
+
+            if (kind === 'delete_section') {
+              const nItemsDS = listItems.filter((i) => i.section === section.id).length;
+              setChecklistDeleteConfirmSectionId(section.id);
+              setChecklistVoicePhase('delete_confirm_section');
+              let msgDS = `Found section ${section.title}. `;
+              if (nItemsDS === 0) {
+                msgDS += 'This section is empty. Say yes to delete it, or no to cancel.';
+              } else {
+                msgDS += `This will delete the section and all ${nItemsDS} items. Say yes to delete, or no to cancel.`;
+              }
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(msgDS, () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
+              });
+              return;
+            }
+
+            if (kind === 'rename_section') {
+              setChecklistVoiceSectionRenameId(section.id);
+              setChecklistVoicePhase('update_new_section_title');
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak('What should the new section name be?', () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+              });
+              return;
+            }
 
             if (kind === 'delete') {
               const inDel = listItems
@@ -793,7 +1090,7 @@ export default function ListDetailScreen() {
               }
               setPendingItemsForVoice(inDel);
               setChecklistVoicePhase('delete_pick_item');
-              let dmsg = 'Which item to delete? ';
+              let dmsg = `Found section ${section.title}. Which item to delete? `;
               inDel.forEach((it, i) => {
                 dmsg += `${i + 1}: ${it.name}. `;
               });
@@ -801,7 +1098,7 @@ export default function ListDetailScreen() {
               lastProcessedTranscriptRef.current = '';
               reset();
               speak(dmsg, () => {
-                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
               });
               return;
             }
@@ -822,7 +1119,7 @@ export default function ListDetailScreen() {
               }
               setPendingItemsForVoice(inUpd);
               setChecklistVoicePhase('update_pick_item');
-              let umsg = 'Which item to update? ';
+              let umsg = `Found section ${section.title}. Which item to update? `;
               inUpd.forEach((it, i) => {
                 umsg += `${i + 1}: ${it.name}. `;
               });
@@ -830,7 +1127,7 @@ export default function ListDetailScreen() {
               lastProcessedTranscriptRef.current = '';
               reset();
               speak(umsg, () => {
-                setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
               });
               return;
             }
@@ -862,7 +1159,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the item be called?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -870,9 +1167,74 @@ export default function ListDetailScreen() {
           speak(
             `Please say a number from 1 to ${pendingSectionsForVoice.length}. For example, 1, 2, one, or two.`,
             () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
             }
           );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'delete_section_pick') {
+          stop();
+          const nds = parseVoiceSelectionNumber(transcript, sections.length);
+          if (nds != null) {
+            const sDel = sections[nds - 1];
+            const nItemsS = listItems.filter((i) => i.section === sDel.id).length;
+            setChecklistDeleteConfirmSectionId(sDel.id);
+            setChecklistVoicePhase('delete_confirm_section');
+            let msgS = `Found section ${sDel.title}. `;
+            if (nItemsS === 0) {
+              msgS += 'This section is empty. Say yes to delete it, or no to cancel.';
+            } else {
+              msgS += `This will delete the section and all ${nItemsS} items. Say yes to delete, or no to cancel.`;
+            }
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(msgS, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
+            });
+            return;
+          }
+          const secDelM = findMatchingSections(sections, stripLeadingThe(rawTrimmed));
+          if (secDelM.length === 1) {
+            const s1d = secDelM[0];
+            const nItems1 = listItems.filter((i) => i.section === s1d.id).length;
+            setChecklistDeleteConfirmSectionId(s1d.id);
+            setChecklistVoicePhase('delete_confirm_section');
+            let msg1 = `Found section ${s1d.title}. `;
+            if (nItems1 === 0) {
+              msg1 += 'This section is empty. Say yes to delete it, or no to cancel.';
+            } else {
+              msg1 += `This will delete the section and all ${nItems1} items. Say yes to delete, or no to cancel.`;
+            }
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(msg1, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
+            });
+            return;
+          }
+          if (secDelM.length > 1) {
+            setPendingSectionsForVoice(secDelM);
+            setChecklistSectionPickKind('delete_section');
+            setChecklistVoicePhase('pick_section');
+            let smd = 'Which section? ';
+            secDelM.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              smd += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            smd += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(smd, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+          speak('No matching section. Say the section number or name.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+          });
           lastProcessedTranscriptRef.current = '';
           reset();
           return;
@@ -899,7 +1261,7 @@ export default function ListDetailScreen() {
           speak(
             `Please say which item, 1 through ${pendingItemsForVoice.length}. For example, 1, 2, one, or two.`,
             () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             }
           );
           lastProcessedTranscriptRef.current = '';
@@ -918,16 +1280,62 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the new name be?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
           speak(
             `Please say which item, 1 through ${pendingItemsForVoice.length}. For example, 1, 2, one, or two.`,
             () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             }
           );
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_new_section_title') {
+          stop();
+          if (!rawTrimmed) {
+            speak("I didn't catch that. What should the new section name be?", () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
+            });
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          const newSecTitle = capitalizeWords(rawTrimmed);
+          const renameSid = checklistVoiceSectionRenameId;
+          if (renameSid == null) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          const secMeta = sections.find((s) => s.id === renameSid);
+          if (!secMeta) {
+            clearChecklistVoice();
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            return;
+          }
+          try {
+            const updatedSec = await ListService.updateListSection(renameSid, {
+              title: newSecTitle,
+              section_date: secMeta.section_date,
+            });
+            await fetchListSections();
+            if (updatedSec.calendar_updated) {
+              speak('Section updated. Calendar updated.');
+            } else {
+              speak('Section updated successfully.');
+            }
+          } catch (err) {
+            console.error('Error updating section:', err);
+            speak('Sorry, I could not update the section. Please try again.');
+          }
+          clearChecklistVoice();
           lastProcessedTranscriptRef.current = '';
           reset();
           return;
@@ -937,7 +1345,7 @@ export default function ListDetailScreen() {
           stop();
           if (!rawTrimmed) {
             speak("I didn't catch that. What should the new name be?", () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
             });
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -985,7 +1393,7 @@ export default function ListDetailScreen() {
             }
             setPendingItemsForVoice(inD);
             setChecklistVoicePhase('delete_pick_item');
-            let dm = 'Which item to delete? ';
+            let dm = `Found section ${s.title}. Which item to delete? `;
             inD.forEach((it, i) => {
               dm += `${i + 1}: ${it.name}. `;
             });
@@ -993,7 +1401,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(dm, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1015,7 +1423,7 @@ export default function ListDetailScreen() {
             }
             setPendingItemsForVoice(inD1);
             setChecklistVoicePhase('delete_pick_item');
-            let dm1 = 'Which item to delete? ';
+            let dm1 = `Found section ${s1.title}. Which item to delete? `;
             inD1.forEach((it, i) => {
               dm1 += `${i + 1}: ${it.name}. `;
             });
@@ -1023,7 +1431,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(dm1, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1040,23 +1448,25 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(sm, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
           const itemDM = findMatchingItems(listItems, stripLeadingThe(rawTrimmed), (i) => i.name);
           if (itemDM.length === 1) {
-            try {
-              await ListService.deleteListItem(itemDM[0].id);
-              await fetchListItems();
-              speak(`Deleted ${itemDM[0].name}.`);
-            } catch (err) {
-              console.error('Error deleting item:', err);
-              speak('Sorry, I could not delete the item.');
-            }
-            clearChecklistVoice();
+            const itDel = itemDM[0];
+            const secD = sections.find((s) => s.id === itDel.section);
+            const secLabelD = secD?.title ?? 'an unknown section';
+            setChecklistDeleteConfirmItemId(itDel.id);
+            setChecklistVoicePhase('delete_confirm');
             lastProcessedTranscriptRef.current = '';
             reset();
+            speak(
+              `I found the item ${itDel.name} in section ${secLabelD}. Say yes to delete it, or no to cancel.`,
+              () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
+              }
+            );
             return;
           }
           if (itemDM.length > 1) {
@@ -1071,12 +1481,62 @@ export default function ListDetailScreen() {
               m += `${index + 1}: ${item.name}. `;
             });
             speak(m, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 500);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 500);
             });
             return;
           }
           speak('No matching section or item. Say the section number or name, or the item name to delete.', () => {
-            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+          });
+          lastProcessedTranscriptRef.current = '';
+          reset();
+          return;
+        }
+
+        if (isChecklistList && checklistVoicePhase === 'update_section_pick') {
+          stop();
+          const nus = parseVoiceSelectionNumber(transcript, sections.length);
+          if (nus != null) {
+            const suR = sections[nus - 1];
+            setChecklistVoiceSectionRenameId(suR.id);
+            setChecklistVoicePhase('update_new_section_title');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the new section name be?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+          const secUpM = findMatchingSections(sections, stripLeadingThe(rawTrimmed));
+          if (secUpM.length === 1) {
+            setChecklistVoiceSectionRenameId(secUpM[0].id);
+            setChecklistVoicePhase('update_new_section_title');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('What should the new section name be?', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+          if (secUpM.length > 1) {
+            setPendingSectionsForVoice(secUpM);
+            setChecklistSectionPickKind('rename_section');
+            setChecklistVoicePhase('pick_section');
+            let smu2 = 'Which section? ';
+            secUpM.forEach((s, i) => {
+              const dateLbl = formatSectionDateForVoice(s.section_date);
+              smu2 += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+            });
+            smu2 += 'Say the number.';
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak(smu2, () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+          speak('No matching section. Say the section number or name.', () => {
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
           });
           lastProcessedTranscriptRef.current = '';
           reset();
@@ -1103,7 +1563,7 @@ export default function ListDetailScreen() {
             }
             setPendingItemsForVoice(inU);
             setChecklistVoicePhase('update_pick_item');
-            let um = 'Which item to update? ';
+            let um = `Found section ${su.title}. Which item to update? `;
             inU.forEach((it, i) => {
               um += `${i + 1}: ${it.name}. `;
             });
@@ -1111,7 +1571,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(um, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1133,7 +1593,7 @@ export default function ListDetailScreen() {
             }
             setPendingItemsForVoice(inU1);
             setChecklistVoicePhase('update_pick_item');
-            let um1 = 'Which item to update? ';
+            let um1 = `Found section ${s1u.title}. Which item to update? `;
             inU1.forEach((it, i) => {
               um1 += `${i + 1}: ${it.name}. `;
             });
@@ -1141,7 +1601,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(um1, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1158,7 +1618,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(smu, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1169,7 +1629,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the new name be?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1185,12 +1645,12 @@ export default function ListDetailScreen() {
               m += `${index + 1}: ${item.name}. `;
             });
             speak(m, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 500);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 500);
             });
             return;
           }
           speak('No matching section or item. Say the section number or name, or the item to update.', () => {
-            setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+            setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
           });
           lastProcessedTranscriptRef.current = '';
           reset();
@@ -1201,7 +1661,7 @@ export default function ListDetailScreen() {
           stop();
           if (!rawTrimmed) {
             speak("I didn't catch a name. Try again.", () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
             });
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -1237,7 +1697,7 @@ export default function ListDetailScreen() {
           stop();
           if (!rawTrimmed) {
             speak('What should the section be called?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2000 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 450 }), 400);
             });
             lastProcessedTranscriptRef.current = '';
             reset();
@@ -1322,7 +1782,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('What should the section be called?', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1346,7 +1806,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('Say the section number or name, or the item name first.', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
@@ -1382,12 +1842,100 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak(msg, () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
             });
             return;
           }
 
-          if (parseChecklistBareDeleteIntent(text)) {
+          const delSecCmd = parseDeleteSectionCommand(text);
+          if (delSecCmd) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            if (delSecCmd.query) {
+              const secMatches = findMatchingSections(sections, stripLeadingThe(delSecCmd.query));
+              if (secMatches.length === 0) {
+                speak('No section found with that name. Try again.', () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                });
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                return;
+              }
+              if (secMatches.length === 1) {
+                const sOne = secMatches[0];
+                const nIt = listItems.filter((i) => i.section === sOne.id).length;
+                setChecklistDeleteConfirmSectionId(sOne.id);
+                setChecklistVoicePhase('delete_confirm_section');
+                let msgQ = `Found section ${sOne.title}. `;
+                if (nIt === 0) {
+                  msgQ += 'This section is empty. Say yes to delete it, or no to cancel.';
+                } else {
+                  msgQ += `This will delete the section and all ${nIt} items. Say yes to delete, or no to cancel.`;
+                }
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                speak(msgQ, () => {
+                  setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
+                });
+                return;
+              }
+              setPendingSectionsForVoice(secMatches);
+              setChecklistSectionPickKind('delete_section');
+              setChecklistVoicePhase('pick_section');
+              let smQ = 'Which section? ';
+              secMatches.forEach((s, i) => {
+                const dateLbl = formatSectionDateForVoice(s.section_date);
+                smQ += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+              });
+              smQ += 'Say the number.';
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(smQ, () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+              });
+              return;
+            }
+            setChecklistVoicePhase('delete_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to delete.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          if (parseChecklistBareDeleteOnlyIntent(text)) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setChecklistVoicePhase('delete_choose_kind');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say delete section or delete item.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+
+          if (parseChecklistDeleteItemBareIntent(text)) {
             stop();
             if (sections.length === 0) {
               clearChecklistVoice();
@@ -1403,12 +1951,92 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('Say the section number or name, or the item name to delete.', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
             });
             return;
           }
 
-          if (parseChecklistBareUpdateIntent(text)) {
+          const upSecCmd = parseUpdateSectionCommand(text);
+          if (upSecCmd) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            if (upSecCmd.query) {
+              const upSecMatches = findMatchingSections(sections, stripLeadingThe(upSecCmd.query));
+              if (upSecMatches.length === 0) {
+                speak('No section found with that name. Try again.', () => {
+                  lastProcessedTranscriptRef.current = '';
+                  reset();
+                });
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                return;
+              }
+              if (upSecMatches.length === 1) {
+                setChecklistVoiceSectionRenameId(upSecMatches[0].id);
+                setChecklistVoicePhase('update_new_section_title');
+                lastProcessedTranscriptRef.current = '';
+                reset();
+                speak('What should the new section name be?', () => {
+                  setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+                });
+                return;
+              }
+              setPendingSectionsForVoice(upSecMatches);
+              setChecklistSectionPickKind('rename_section');
+              setChecklistVoicePhase('pick_section');
+              let smUp = 'Which section? ';
+              upSecMatches.forEach((s, i) => {
+                const dateLbl = formatSectionDateForVoice(s.section_date);
+                smUp += `${i + 1}: ${s.title}${dateLbl ? ', ' + dateLbl : ''}. `;
+              });
+              smUp += 'Say the number.';
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              speak(smUp, () => {
+                setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+              });
+              return;
+            }
+            setChecklistVoicePhase('update_section_pick');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say the section number or name to update.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
+            });
+            return;
+          }
+
+          if (parseChecklistBareUpdateOnlyIntent(text)) {
+            stop();
+            if (sections.length === 0) {
+              clearChecklistVoice();
+              speak('This checklist has no sections yet. Add a section first.', () => {
+                lastProcessedTranscriptRef.current = '';
+                reset();
+              });
+              lastProcessedTranscriptRef.current = '';
+              reset();
+              return;
+            }
+            setChecklistVoicePhase('update_choose_kind');
+            lastProcessedTranscriptRef.current = '';
+            reset();
+            speak('Say update section or update item.', () => {
+              setTimeout(() => start({ ignoreTranscriptsForMs: 700 }), 400);
+            });
+            return;
+          }
+
+          if (parseChecklistUpdateItemBareIntent(text)) {
             stop();
             if (sections.length === 0) {
               clearChecklistVoice();
@@ -1424,7 +2052,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             reset();
             speak('Say the section number or name, or the item to update.', () => {
-              setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+              setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
             });
             return;
           }
@@ -1483,9 +2111,9 @@ export default function ListDetailScreen() {
               lastProcessedTranscriptRef.current = '';
               reset();
               speak(
-                `${it.name} was found in section ${secLabel}. Would you like to delete it? Say yes or no.`,
+                `${it.name} was found in section ${secLabel}. Say yes to delete it, or no to cancel.`,
                 () => {
-                  setTimeout(() => start({ ignoreTranscriptsForMs: 2500 }), 400);
+                  setTimeout(() => start({ ignoreTranscriptsForMs: 900 }), 600);
                 }
               );
               return;
@@ -1497,7 +2125,7 @@ export default function ListDetailScreen() {
             speak(
               'Several items matched your delete request. Tap the correct one on the screen to delete it.',
               () => {
-                setTimeout(() => start({ ignoreTranscriptsForMs: 2800 }), 400);
+                setTimeout(() => start({ ignoreTranscriptsForMs: 750 }), 400);
               }
             );
             return;
@@ -1530,7 +2158,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             speak(message, () => {
               setTimeout(() => {
-                start({ ignoreTranscriptsForMs: 2000 });
+                start({ ignoreTranscriptsForMs: 450 });
               }, 500);
             });
             return;
@@ -1575,7 +2203,7 @@ export default function ListDetailScreen() {
             lastProcessedTranscriptRef.current = '';
             speak(message, () => {
               setTimeout(() => {
-                start({ ignoreTranscriptsForMs: 2000 });
+                start({ ignoreTranscriptsForMs: 450 });
               }, 500);
             });
             return;
@@ -1587,7 +2215,7 @@ export default function ListDetailScreen() {
 
         if (isChecklistList) {
           speak(
-            'Try: add, delete, update, add section, add with an item name, delete item name, or update old name to new name.'
+            'Try: add item, add section, delete section, delete item, update section, update item, or update old name to new name.'
           );
         } else {
           speak('Please use one of these commands: add item name, delete item name, or update item name to new name');
@@ -1596,6 +2224,7 @@ export default function ListDetailScreen() {
         reset();
       } catch (error) {
         console.error('Error processing voice command:', error);
+        lastProcessedTranscriptRef.current = '';
         speak('Sorry, there was an error. Please try again.');
         reset();
       }
@@ -1620,6 +2249,9 @@ export default function ListDetailScreen() {
     checklistSectionPickKind,
     checklistUpdateTargetItemId,
     checklistDeleteConfirmItemId,
+    checklistDeleteConfirmSectionId,
+    checklistVoiceSectionRenameId,
+    performDeleteListSection,
   ]);
 
   const handleVoiceClick = () => {
@@ -1637,9 +2269,12 @@ export default function ListDetailScreen() {
       setChecklistSectionPickKind(null);
       setChecklistUpdateTargetItemId(null);
       setChecklistDeleteConfirmItemId(null);
+      setChecklistDeleteConfirmSectionId(null);
+      setChecklistVoiceSectionRenameId(null);
       setVoiceDeletePickModalOpen(false);
       setVoiceDeletePickCandidates([]);
       deleteConfirmFromVoicePickRef.current = false;
+      checklistPendingGuidedActionRef.current = null;
       return;
     }
 
@@ -1653,7 +2288,7 @@ export default function ListDetailScreen() {
     setAwaitingNumberSelection(false);
     setPendingMatches([]);
     setPendingAction(null);
-    setChecklistVoicePhase('idle');
+    setChecklistVoicePhase(isChecklistList ? 'guided_action' : 'idle');
     setPendingSectionsForVoice([]);
     setPendingItemsForVoice([]);
     setPendingChecklistItemName(null);
@@ -1661,9 +2296,12 @@ export default function ListDetailScreen() {
     setChecklistSectionPickKind(null);
     setChecklistUpdateTargetItemId(null);
     setChecklistDeleteConfirmItemId(null);
+    setChecklistDeleteConfirmSectionId(null);
+    setChecklistVoiceSectionRenameId(null);
     setVoiceDeletePickModalOpen(false);
     setVoiceDeletePickCandidates([]);
     deleteConfirmFromVoicePickRef.current = false;
+    checklistPendingGuidedActionRef.current = null;
 
     // Start recognition briefly to capture user gesture (required for permission)
     // Then stop it, speak instruction, and restart after instruction finishes
@@ -1673,11 +2311,11 @@ export default function ListDetailScreen() {
         stop();
         speak(
           isChecklistList
-            ? 'What would you like to do? Add an item, add a section, delete, or update.'
+            ? 'What would you like to do: add, delete, or update?'
             : 'What would you like to do',
           () => {
             setTimeout(() => {
-              start({ ignoreTranscriptsForMs: 2000 });
+              start({ ignoreTranscriptsForMs: 450 });
             }, 100);
           }
         );
@@ -2029,18 +2667,10 @@ export default function ListDetailScreen() {
   const confirmDeleteSection = async () => {
     if (!deleteSectionConfirm.section) return;
     const sectionId = deleteSectionConfirm.section.id;
-    const previousSections = [...sections];
-    const previousItems = [...listItems];
-    setSections((prev) => prev.filter((s) => s.id !== sectionId));
-    setListItems((prev) => prev.filter((i) => i.section !== sectionId));
     setDeleteSectionConfirm({ isOpen: false, section: null });
-    try {
-      await ListService.deleteListSection(sectionId);
-    } catch (err) {
-      console.error('Error deleting section:', err);
-      setSections(previousSections);
-      setListItems(previousItems);
-      alert((err as APIError)?.message || 'Failed to delete section. Try again.');
+    const ok = await performDeleteListSection(sectionId);
+    if (!ok) {
+      alert('Failed to delete section. Try again.');
     }
   };
 
@@ -2921,7 +3551,7 @@ export default function ListDetailScreen() {
             <View style={styles.actionButtonsSecondary}>
               {isSupported && (
                 <TooltipButton
-                  tooltip="Voice commands — view phrases you can say with the mic"
+                  tooltip="Voice commands — mic walks through add/delete/update, then section or item; full phrases also work when idle"
                   onPress={() => setShowVoiceHelpModal(true)}
                   style={[styles.voiceHelpButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   accessibilityHint="Shows list of voice commands you can say"
@@ -3847,25 +4477,24 @@ export default function ListDetailScreen() {
           isChecklistList
             ? [
                 {
-                  label: 'Add item',
+                  label: 'Tap the mic (guided)',
                   items: [
-                    'add — say section number or name, or item name first',
-                    'add [item name] — then pick section',
-                  ],
-                },
-                { label: 'Add section', items: ['add section', 'add section [title]'] },
-                {
-                  label: 'Delete item',
-                  items: [
-                    'delete — say section or item name',
-                    'delete [item name] — confirms with section before deleting',
+                    'You will be asked what you want to do — say add, delete, or update (remove and change also work).',
+                    'Then say section or item (tasks count as items).',
+                    'After that, follow the same prompts as before: pick a section by number or name, say item names, say yes or no to confirm deletes, and so on.',
                   ],
                 },
                 {
-                  label: 'Update item',
+                  label: 'Full phrases when idle',
                   items: [
-                    'update — say section or item, then new name',
-                    'update [old name] to [new name]',
+                    'If you are not already in a voice flow, you can say a full command in one go.',
+                    'Examples: add section or add section [title]; add or add [item name] then pick section; delete section [title] or delete then section/item; update section or update item; delete [item name]; update [old name] to [new name].',
+                  ],
+                },
+                {
+                  label: 'Delete item (details)',
+                  items: [
+                    'delete [item name] — use the full name; one match: say yes to delete or no to cancel; several matches: use the on-screen picker.',
                   ],
                 },
               ]

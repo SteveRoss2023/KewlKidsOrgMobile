@@ -49,6 +49,7 @@ export default function SectionRow({
   onToggleComplete,
   collapsed = false,
   onToggleCollapse,
+  itemCount,
   onIndentAll,
   onOutdentAll,
   onEditSection,
@@ -159,17 +160,27 @@ export default function SectionRow({
         activeOpacity={onToggleCollapse ? 0.6 : 1}
         accessibilityLabel={collapsed ? 'Expand section' : 'Collapse section'}
       >
-        <Text
-          style={[
-            styles.title,
-            { color: headerTextColor },
-            allCompleted && styles.titleCompleted,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {section.title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text
+            style={[
+              styles.title,
+              { color: headerTextColor },
+              allCompleted && styles.titleCompleted,
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {section.title}
+          </Text>
+          {itemCount != null ? (
+            <Text
+              style={[styles.itemCountLabel, { color: headerIconColor }]}
+              accessibilityLabel={`${itemCount} items`}
+            >
+              {' '}({itemCount})
+            </Text>
+          ) : null}
+        </View>
       </TouchableOpacity>
       <View style={styles.dateChipTouch} accessibilityLabel="Section date">
         <FontAwesome name="calendar" size={11} color={calendarIconColor} style={styles.dateChipCalendarIcon} />
@@ -317,9 +328,22 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+    flex: 1,
+  },
   title: {
     fontSize: 16,
     fontWeight: '600',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  itemCountLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    flexShrink: 0,
   },
   dateChipTouch: {
     flexDirection: 'row',

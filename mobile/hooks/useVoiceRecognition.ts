@@ -235,6 +235,10 @@ export function useVoiceRecognition(options: { continuous?: boolean; interimResu
       ignoreTranscriptsUntilRef.current = null;
     }
 
+    // Fresh listen: drop stale final transcript so the same phrase can run a new command
+    // (TTS onDone already finished; long ignore windows were only for brief speaker bleed).
+    setTranscript('');
+
     if (Platform.OS === 'web' && recognitionRef.current) {
       try {
         recognitionRef.current.start();

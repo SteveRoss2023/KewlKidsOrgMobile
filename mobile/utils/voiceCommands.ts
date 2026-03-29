@@ -45,10 +45,19 @@ export function isCancelCommand(text: string): boolean {
     'forget it',
     'forgetit',
   ];
-  return cancelPhrases.some((phrase) => normalized === phrase || normalized.startsWith(phrase + ' '));
+  return cancelPhrases.some((phrase) => {
+    if (normalized === phrase || normalized.startsWith(phrase + ' ')) return true;
+    if (normalized.endsWith(' ' + phrase)) return true;
+    const padded = ` ${normalized} `;
+    return padded.includes(` ${phrase} `);
+  });
 }
 
-/** Yes / go ahead (voice delete confirm). */
+function stripTokenEdges(t: string): string {
+  return t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '');
+}
+
+/** Yes / go ahead (voice delete confirm). Handles accumulated Web Speech text e.g. "fall clean up yes". */
 export function isAffirmativeResponse(text: string): boolean {
   const n = normalizeText(text);
   if (!n) return false;
@@ -64,16 +73,51 @@ export function isAffirmativeResponse(text: string): boolean {
     'go ahead',
     'confirm',
     'right',
+    'correct',
+    'absolutely',
+    'definitely',
   ];
-  return affirm.some((a) => n === a || n.startsWith(a + ' '));
+  if (affirm.some((a) => n === a || n.startsWith(a + ' '))) return true;
+  // ASR often returns filler + yes ("uh huh yes"); match anywhere as whole words.
+  if (
+    /\b(yes|yeah|yep|sure|ok|okay|confirm|right|correct|absolutely|definitely)\b/.test(
+      n
+    )
+  ) {
+    return true;
+  }
+  const tokens = n.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const singleWord = new Set([
+    'yes',
+    'yeah',
+    'yep',
+    'sure',
+    'ok',
+    'okay',
+    'confirm',
+    'right',
+    'correct',
+    'absolutely',
+    'definitely',
+  ]);
+  if (tokens.some((t) => singleWord.has(stripTokenEdges(t)))) return true;
+  const last = stripTokenEdges(tokens[tokens.length - 1]);
+  const first = stripTokenEdges(tokens[0]);
+  return affirm.some((a) => last === a || first === a);
 }
 
-/** No / don't delete (voice delete confirm). */
+/** No / don't delete (voice delete confirm). Handles trailing "no" on accumulated transcript. */
 export function isNegativeResponse(text: string): boolean {
   const n = normalizeText(text);
   if (!n) return false;
   const neg = ['no', 'nope', "don't", 'dont', 'negative'];
-  return neg.some((a) => n === a || n.startsWith(a + ' '));
+  if (neg.some((a) => n === a || n.startsWith(a + ' '))) return true;
+  const tokens = n.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const last = stripTokenEdges(tokens[tokens.length - 1]);
+  const first = stripTokenEdges(tokens[0]);
+  return neg.some((a) => last === a || first === a);
 }
 
 const SPOKEN_ORDINAL: Record<string, number> = {
@@ -153,19 +197,107 @@ export function parseChecklistBareAddItemIntent(text: string): boolean {
 }
 
 /**
- * Bare delete on checklist: then say section or item.
+ * Bare "delete" on checklist → prompt: say delete section or delete item.
  */
-export function parseChecklistBareDeleteIntent(text: string): boolean {
+export function parseChecklistBareDeleteOnlyIntent(text: string): boolean {
   const n = normalizeText(text);
-  return /^(delete|delete\s+item|delete\s+items)$/.test(n);
+  return n === 'delete';
 }
 
 /**
- * Bare update on checklist: then say section or item, then new name.
+ * Start checklist delete-item flow (then section number/name or item name), like bare add item.
+ * Matches: delete item, delete items, delete an item, delete a item
  */
-export function parseChecklistBareUpdateIntent(text: string): boolean {
+export function parseChecklistDeleteItemBareIntent(text: string): boolean {
   const n = normalizeText(text);
-  return /^(update|update\s+item|update\s+items)$/.test(n);
+  return /^(delete\s+item|delete\s+items|delete\s+an\s+item|delete\s+a\s+item)$/.test(n);
+}
+
+/**
+ * After bare delete: user said section vs item (short answers ok).
+ */
+export function parseChecklistDeleteFollowupChoice(text: string): 'section' | 'item' | null {
+  const n = normalizeText(text);
+  if (/^(delete\s+section|section|a\s+section|the\s+section)$/.test(n)) return 'section';
+  if (/^(delete\s+item|item|an\s+item|items|the\s+item)$/.test(n)) return 'item';
+  return null;
+}
+
+/**
+ * Bare "update" on checklist → prompt: say update section or update item.
+ */
+export function parseChecklistBareUpdateOnlyIntent(text: string): boolean {
+  const n = normalizeText(text);
+  return n === 'update';
+}
+
+/**
+ * Start checklist update-item flow (then section or item, then new name).
+ */
+export function parseChecklistUpdateItemBareIntent(text: string): boolean {
+  const n = normalizeText(text);
+  return /^(update\s+item|update\s+items|update\s+an\s+item|update\s+a\s+item)$/.test(n);
+}
+
+/**
+ * After bare update: user said section vs item.
+ */
+export function parseChecklistUpdateFollowupChoice(text: string): 'section' | 'item' | null {
+  const n = normalizeText(text);
+  if (/^(update\s+section|section|a\s+section|the\s+section)$/.test(n)) return 'section';
+  if (/^(update\s+item|item|an\s+item|items|the\s+item)$/.test(n)) return 'item';
+  return null;
+}
+
+/** Mic wizard step 1 (checklist): add, delete/remove, update/change. */
+export function parseGuidedVoiceAction(text: string): 'add' | 'delete' | 'update' | null {
+  const n = normalizeText(text);
+  if (!n) return null;
+  const tokens = n.split(/\s+/).filter(Boolean);
+  for (const t of tokens) {
+    if (t === 'delete' || t === 'remove') return 'delete';
+    if (t === 'update' || t === 'change') return 'update';
+    if (t === 'add') return 'add';
+  }
+  return null;
+}
+
+/** Mic wizard step 2 (checklist): section vs item (after action chosen). */
+export function parseGuidedVoiceTarget(text: string): 'section' | 'item' | null {
+  const n = normalizeText(text);
+  if (!n) return null;
+  if (/^(section|sections|a\s+section|the\s+section)$/.test(n)) return 'section';
+  if (/^(item|items|an\s+item|the\s+item|task|tasks)$/.test(n)) return 'item';
+  const tokens = n.split(/\s+/).filter(Boolean);
+  for (const t of tokens) {
+    if (t === 'section' || t === 'sections') return 'section';
+    if (t === 'item' || t === 'items' || t === 'task' || t === 'tasks') return 'item';
+  }
+  return null;
+}
+
+/**
+ * Parse "delete section" or "delete section [query]" (checklist; call before parseDeleteItem).
+ */
+export function parseDeleteSectionCommand(text: string): { query?: string } | null {
+  const normalized = normalizeText(text);
+  const m = normalized.match(/^delete\s+section(?:\s+(.+))?$/);
+  if (!m) return null;
+  const rest = m[1]?.trim();
+  if (!rest) return {};
+  return { query: rest };
+}
+
+/**
+ * Parse "update section" or "update section [query]" (checklist; call before parseUpdateItem).
+ */
+export function parseUpdateSectionCommand(text: string): { query?: string } | null {
+  const normalized = normalizeText(text);
+  const m = normalized.match(/^update\s+section(?:\s+(.+))?$/);
+  if (!m) return null;
+  const rest = m[1]?.trim();
+  if (!rest) return {};
+  return { query: rest };
 }
 
 /**
