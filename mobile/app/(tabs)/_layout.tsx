@@ -159,6 +159,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          href: null, // Hidden from tab bar — use header avatar (GlobalNavBar) to open Profile
           title: 'Profile',
           tabBarLabel: 'Profile',
           tabBarIcon: ({ color, size }) => (

@@ -277,6 +277,16 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleLogout = async () => {
+    try {
+      await AuthService.logout();
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      router.replace('/(auth)/login');
+    }
+  };
+
   const handleSubmit = async () => {
     setSaving(true);
     setError(null);
@@ -555,6 +565,18 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        <TouchableOpacity
+          style={[
+            styles.logoutButton,
+            { borderColor: colors.border, backgroundColor: colors.surface },
+          ]}
+          onPress={handleLogout}
+          activeOpacity={0.7}
+        >
+          <FontAwesome name="sign-out" size={18} color={colors.error} style={styles.logoutIcon} />
+          <Text style={[styles.logoutLabel, { color: colors.error }]}>Logout</Text>
+        </TouchableOpacity>
+
         {/* Photo Viewer Modal */}
         {showPhotoViewer && getPhotoUrl() && (
           <Modal
@@ -815,6 +837,24 @@ const styles = StyleSheet.create({
   },
   info: {
     gap: 16,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  logoutIcon: {
+    marginRight: 0,
+  },
+  logoutLabel: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   section: {
     padding: 20,

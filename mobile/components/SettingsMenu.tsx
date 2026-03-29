@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import AuthService from '../services/authService';
 import { useTheme } from '../contexts/ThemeContext';
 import oauthService from '../services/oauthService';
 
@@ -58,16 +57,6 @@ const SettingsMenu = () => {
     const handleNavigate = (route: string) => {
       setServicesSubmenuOpen(false);
       router.push(route as any);
-    };
-
-    const handleLogout = async () => {
-      try {
-        await AuthService.logout();
-        router.replace('/(auth)/login');
-      } catch (error) {
-        console.error('Error during logout:', error);
-        router.replace('/(auth)/login');
-      }
     };
 
     const menuItems = [
@@ -197,14 +186,6 @@ const SettingsMenu = () => {
               </View>
             )}
           </View>
-
-          <TouchableOpacity
-            style={[styles.menuItem, styles.logoutItem, { borderTopColor: colors.border }]}
-            onPress={handleLogout}
-          >
-            <FontAwesome name="sign-out" size={16} color={colors.error} style={styles.menuIcon} />
-            <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>Logout</Text>
-          </TouchableOpacity>
         </ScrollView>
       </View>
     );
@@ -271,13 +252,6 @@ const styles = StyleSheet.create({
   },
   disconnectedIndicator: {
     marginLeft: 8,
-  },
-  logoutItem: {
-    borderTopWidth: 1,
-    marginTop: 8,
-  },
-  logoutText: {
-    // Color applied inline
   },
 });
 
