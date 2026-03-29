@@ -161,6 +161,11 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
 
+# Checklist sections → family calendar: stacked slots start at 08:00 in *this* IANA zone.
+# Default America/Edmonton = Canadian Mountain (Alberta, much of NWT/Yukon; observes MDT in summer).
+# Year-round MST/no DST (e.g. Creston BC): use America/Creston via CHECKLIST_CALENDAR_TIME_ZONE in .env.
+CHECKLIST_CALENDAR_TIME_ZONE = os.getenv('CHECKLIST_CALENDAR_TIME_ZONE', 'America/Edmonton')
+
 USE_I18N = True
 
 USE_TZ = True

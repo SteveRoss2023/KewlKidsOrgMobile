@@ -162,7 +162,7 @@ class ChecklistCalendarSyncTests(TestCase):
             Event.objects.filter(family=self.family, list_section__isnull=False).order_by('starts_at')
         )
         self.assertEqual(len(events), 3)
-        tz = ZoneInfo(settings.TIME_ZONE)
+        tz = ZoneInfo(settings.CHECKLIST_CALENDAR_TIME_ZONE)
         for i, ev in enumerate(events):
             local = ev.starts_at.astimezone(tz)
             self.assertEqual(local.hour, 8 + i)

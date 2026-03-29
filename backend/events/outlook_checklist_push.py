@@ -34,7 +34,7 @@ def _refresh_microsoft_token(refresh_token: str) -> dict:
 
 
 def _event_graph_payload(ev: Event) -> dict:
-    tz_name = settings.TIME_ZONE
+    tz_name = settings.CHECKLIST_CALENDAR_TIME_ZONE
     z = ZoneInfo(tz_name)
     start = ev.starts_at.astimezone(z)
     end_at = ev.ends_at or (ev.starts_at + timedelta(hours=1))

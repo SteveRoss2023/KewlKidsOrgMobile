@@ -36,8 +36,12 @@ def build_event_notes(section: ListSection) -> str:
     return '\n'.join(lines)
 
 
+def _checklist_calendar_tz():
+    return ZoneInfo(settings.CHECKLIST_CALENDAR_TIME_ZONE)
+
+
 def _placeholder_slot(section: ListSection) -> tuple[datetime, datetime]:
-    tz = ZoneInfo(settings.TIME_ZONE)
+    tz = _checklist_calendar_tz()
     d = section.section_date
     start = timezone.make_aware(datetime.combine(d, time(8, 0)), tz)
     end = start + timedelta(hours=1)
@@ -45,7 +49,7 @@ def _placeholder_slot(section: ListSection) -> tuple[datetime, datetime]:
 
 
 def reslot_checklist_events_for_date(family, d) -> None:
-    """Stack 1-hour blocks from 08:00 in TIME_ZONE for all checklist-backed events on that calendar day."""
+    """Stack 1-hour blocks from 08:00 in CHECKLIST_CALENDAR_TIME_ZONE for all checklist-backed events on that day."""
     qs = (
         Event.objects.filter(
             family=family,
@@ -62,7 +66,7 @@ def reslot_checklist_events_for_date(family, d) -> None:
             ev.list_section.id,
         )
     )
-    tz = ZoneInfo(settings.TIME_ZONE)
+    tz = _checklist_calendar_tz()
     base = timezone.make_aware(datetime.combine(d, time(8, 0)), tz)
     for i, ev in enumerate(events):
         slot_start = base + timedelta(hours=i)
