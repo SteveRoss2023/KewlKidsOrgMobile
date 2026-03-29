@@ -488,7 +488,9 @@ class ListItemViewSet(viewsets.ModelViewSet):
 
                 after_checklist_list_item_change(instance, request.user, old_section_id=instance.section_id)
                 serializer = self.get_serializer(instance)
-                return Response(serializer.data)
+                payload = dict(serializer.data)
+                payload['calendar_updated'] = True
+                return Response(payload)
 
             # Other list types: save to history and delete item
             recipe_name = None
@@ -520,8 +522,13 @@ class ListItemViewSet(viewsets.ModelViewSet):
             instance.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        # For uncompleting items, use default behavior
-        return super().update(request, *args, **kwargs)
+        # For uncompleting items and other field updates, use default behavior
+        response = super().update(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK and list_obj.list_type == 'checklist':
+            data = getattr(response, 'data', None)
+            if isinstance(data, dict):
+                data['calendar_updated'] = True
+        return response
 
 
 class CompletedListItemViewSet(viewsets.ReadOnlyModelViewSet):

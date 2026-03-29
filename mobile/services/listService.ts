@@ -261,9 +261,15 @@ class ListService {
   /**
    * Update a list item
    */
-  async updateListItem(itemId: number, data: UpdateListItemData): Promise<ListItem> {
+  async updateListItem(
+    itemId: number,
+    data: UpdateListItemData
+  ): Promise<ListItem & { calendar_updated?: boolean }> {
     try {
-      const response = await apiClient.patch<ListItem>(`/list-items/${itemId}/`, data);
+      const response = await apiClient.patch<ListItem & { calendar_updated?: boolean }>(
+        `/list-items/${itemId}/`,
+        data
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);
@@ -285,9 +291,15 @@ class ListService {
    * Toggle item completion status
    * For grocery lists, completing an item will delete it and save to history
    */
-  async toggleItemComplete(itemId: number, completed: boolean): Promise<ListItem | null> {
+  async toggleItemComplete(
+    itemId: number,
+    completed: boolean
+  ): Promise<(ListItem & { calendar_updated?: boolean }) | null> {
     try {
-      const response = await apiClient.patch<ListItem>(`/list-items/${itemId}/`, { completed });
+      const response = await apiClient.patch<ListItem & { calendar_updated?: boolean }>(
+        `/list-items/${itemId}/`,
+        { completed }
+      );
       // For grocery lists, the item is deleted, so response will be 204 No Content
       // Axios returns empty data for 204, so check status or if data is missing
       if (response.status === 204 || !response.data) {

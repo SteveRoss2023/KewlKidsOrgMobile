@@ -354,6 +354,8 @@ export default function ListDetailScreen() {
   const [copyChecklistSaving, setCopyChecklistSaving] = useState(false);
   const [outlookConnected, setOutlookConnected] = useState(false);
   const [outlookPushLoading, setOutlookPushLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -414,6 +416,18 @@ export default function ListDetailScreen() {
   const { isListening, transcript, start, stop, reset, isSupported } = useVoiceRecognition();
   const lastProcessedTranscriptRef = useRef('');
   const deleteConfirmFromVoicePickRef = useRef(false);
+
+  const showToast = useCallback((message: string, durationMs = 2800) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setToastMessage(message);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, durationMs);
+  }, []);
   const checklistPendingGuidedActionRef = useRef<'add' | 'delete' | 'update' | null>(null);
   const [awaitingNumberSelection, setAwaitingNumberSelection] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<ListItem[]>([]);
@@ -527,6 +541,14 @@ export default function ListDetailScreen() {
       Platform.OS === 'web' ? TITLE_FONT_SIZE_REGULAR_WEB : TITLE_FONT_SIZE_REGULAR_NATIVE
     );
   }, [list?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Initialize collapsed categories only when list changes (new list loaded)
   // Preserve accordion state when items are added/removed
@@ -2234,7 +2256,7 @@ export default function ListDetailScreen() {
         section_date,
       });
       if (created.calendar_updated) {
-        alert('Calendar updated');
+        showToast('Calendar updated');
       }
       await fetchListSections();
       setShowAddSection(false);
@@ -2261,7 +2283,7 @@ export default function ListDetailScreen() {
       try {
         const updated = await ListService.updateListSection(s.id, { title, section_date });
         if (updated.calendar_updated) {
-          alert('Calendar updated');
+          showToast('Calendar updated');
         }
       } catch (err) {
         setSections(previousSections);
@@ -2282,7 +2304,7 @@ export default function ListDetailScreen() {
     try {
       const newList = await ListService.copyChecklist(list.id, { name });
       if (newList.calendar_updated) {
-        alert('Calendar events added');
+        showToast('Calendar events added');
       }
       setCopyChecklistModalOpen(false);
       router.push(`/(tabs)/lists/${newList.id}`);
@@ -2464,6 +2486,9 @@ export default function ListDetailScreen() {
           setListItems((prev) =>
             prev.map((p) => (p.id === item.id ? updated : p))
           );
+          if (updated.calendar_updated) {
+            showToast('Calendar updated');
+          }
         }
       } catch (err) {
         console.error('Error toggling item:', err);
@@ -2540,10 +2565,13 @@ export default function ListDetailScreen() {
 
     try {
       setUpdatingItem(true);
-      await ListService.updateListItem(editingItem.id, data);
+      const updated = await ListService.updateListItem(editingItem.id, data);
       // Close the modal immediately to prevent showing stale data
       setEditingItem(null);
       await fetchListItems();
+      if (updated.calendar_updated) {
+        showToast('Calendar updated');
+      }
     } catch (err) {
       console.error('Error updating item:', err);
       const apiError = err as APIError;
@@ -4131,6 +4159,16 @@ export default function ListDetailScreen() {
               ]
         }
       />
+      {toastMessage ? (
+        <View
+          style={[styles.toastBanner, { backgroundColor: colors.primary }]}
+          pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          accessibilityRole="text"
+        >
+          <Text style={styles.toastBannerText}>{toastMessage}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -4669,6 +4707,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  toastBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+    zIndex: 10000,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 2px 8px rgba(0,0,0,0.2)' } as object) : {}),
+  },
+  toastBannerText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 }) as any; // Type assertion to bypass web-specific style type errors
 
