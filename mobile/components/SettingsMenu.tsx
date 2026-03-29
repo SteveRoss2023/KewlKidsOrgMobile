@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AuthService from '../services/authService';
 import { useTheme } from '../contexts/ThemeContext';
 import oauthService from '../services/oauthService';
@@ -20,34 +20,36 @@ const SettingsMenu = () => {
   const [googledriveConnected, setGoogledriveConnected] = useState(false);
   const [outlookConnected, setOutlookConnected] = useState(false);
 
-    useEffect(() => {
+  const checkOAuthConnections = useCallback(async () => {
+    try {
+      // Check all OAuth connections in parallel
+      // Note: Google Photos check removed - it uses Google Drive tokens automatically
+      const [outlookStatus, onedriveStatus, googledriveStatus] = await Promise.all([
+        oauthService.checkConnection('outlook').catch(() => ({ connected: false })),
+        oauthService.checkConnection('onedrive').catch(() => ({ connected: false })),
+        oauthService.checkConnection('googledrive').catch(() => ({ connected: false })),
+        // oauthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
+      ]);
+
+      setOutlookConnected(outlookStatus.connected);
+      setOnedriveConnected(onedriveStatus.connected);
+      setGoogledriveConnected(googledriveStatus.connected);
+      // setGooglephotosConnected(googlephotosStatus.connected);
+    } catch (error) {
+      console.error('Error checking OAuth connections:', error);
+      // On error, assume not connected
+      setOutlookConnected(false);
+      setOnedriveConnected(false);
+      setGoogledriveConnected(false);
+      // setGooglephotosConnected(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
       checkOAuthConnections();
-    }, []);
-
-    const checkOAuthConnections = async () => {
-      try {
-        // Check all OAuth connections in parallel
-        // Note: Google Photos check removed - it uses Google Drive tokens automatically
-        const [outlookStatus, onedriveStatus, googledriveStatus] = await Promise.all([
-          oauthService.checkConnection('outlook').catch(() => ({ connected: false })),
-          oauthService.checkConnection('onedrive').catch(() => ({ connected: false })),
-          oauthService.checkConnection('googledrive').catch(() => ({ connected: false })),
-          // oauthService.checkConnection('googlephotos').catch(() => ({ connected: false })),
-        ]);
-
-        setOutlookConnected(outlookStatus.connected);
-        setOnedriveConnected(onedriveStatus.connected);
-        setGoogledriveConnected(googledriveStatus.connected);
-        // setGooglephotosConnected(googlephotosStatus.connected);
-      } catch (error) {
-        console.error('Error checking OAuth connections:', error);
-        // On error, assume not connected
-        setOutlookConnected(false);
-        setOnedriveConnected(false);
-        setGoogledriveConnected(false);
-        // setGooglephotosConnected(false);
-      }
-    };
+    }, [checkOAuthConnections])
+  );
 
     const handleBack = () => {
       router.back();

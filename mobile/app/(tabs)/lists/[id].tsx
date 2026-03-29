@@ -354,6 +354,18 @@ export default function ListDetailScreen() {
   const [copyChecklistSaving, setCopyChecklistSaving] = useState(false);
   const [outlookConnected, setOutlookConnected] = useState(false);
   const [outlookPushLoading, setOutlookPushLoading] = useState(false);
+  const [outlookSyncModal, setOutlookSyncModal] = useState<{
+    visible: boolean;
+    type: 'success' | 'warning' | 'error' | 'info';
+    title: string;
+    message: string;
+    details?: Array<{ label: string; items: string[] }>;
+  }>({
+    visible: false,
+    type: 'success',
+    title: '',
+    message: '',
+  });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [categories, setCategories] = useState<GroceryCategory[]>([]);
@@ -2213,14 +2225,63 @@ export default function ListDetailScreen() {
     setOutlookPushLoading(true);
     try {
       const r = await ListService.pushChecklistEventsToOutlook(list.id);
+      const summaryItems = [
+        `${r.created} new event${r.created !== 1 ? 's' : ''} created in Outlook`,
+        `${r.updated} existing event${r.updated !== 1 ? 's' : ''} updated in Outlook`,
+      ];
+      if (r.failed > 0) {
+        summaryItems.push(`${r.failed} could not be synced`);
+      }
+
+      if (r.created === 0 && r.updated === 0 && r.failed === 0) {
+        setOutlookSyncModal({
+          visible: true,
+          type: 'info',
+          title: 'Nothing to sync',
+          message:
+            'This checklist has no linked calendar events to send to Outlook yet. Events are created from checklist sections and items that sync to your in-app family calendar—try adding or editing sections, then sync again.',
+          details: undefined,
+        });
+        return;
+      }
+
+      const errorDetailBlocks: Array<{ label: string; items: string[] }> =
+        r.errors?.length > 0
+          ? [
+              {
+                label: 'Details',
+                items: r.errors.slice(0, 8).map((e) => (e.length > 280 ? `${e.slice(0, 280)}…` : e)),
+              },
+            ]
+          : [];
+
       if (r.failed === 0) {
-        alert(`Outlook updated (${r.created} created, ${r.updated} updated).`);
+        setOutlookSyncModal({
+          visible: true,
+          type: 'success',
+          title: 'Outlook sync complete',
+          message: 'Checklist events were sent to your connected Outlook calendar.',
+          details: [{ label: 'Summary', items: summaryItems }],
+        });
       } else {
-        const hint = r.errors?.[0] ? ` ${r.errors[0]}` : '';
-        alert(`Outlook sync finished with ${r.failed} error(s).${hint}`);
+        const partial = r.created + r.updated > 0;
+        setOutlookSyncModal({
+          visible: true,
+          type: partial ? 'warning' : 'error',
+          title: partial ? 'Outlook sync partially complete' : 'Outlook sync had errors',
+          message: partial
+            ? 'Some events synced; others failed. You can fix issues below and tap Sync to Outlook again.'
+            : 'No events were updated. Check the details and try again.',
+          details: [{ label: 'Summary', items: summaryItems }, ...errorDetailBlocks],
+        });
       }
     } catch (err) {
-      alert((err as APIError)?.message || 'Could not sync to Outlook.');
+      setOutlookSyncModal({
+        visible: true,
+        type: 'error',
+        title: 'Could not sync to Outlook',
+        message: (err as APIError)?.message || 'Something went wrong. Check your connection and try again.',
+      });
     } finally {
       setOutlookPushLoading(false);
     }
@@ -4127,6 +4188,21 @@ export default function ListDetailScreen() {
         message={moveItemResultModal.message}
         type={moveItemResultModal.type}
         onClose={() => setMoveItemResultModal({ visible: false, message: '', type: 'success' })}
+        confirmText="OK"
+      />
+      <AlertModal
+        visible={outlookSyncModal.visible}
+        title={outlookSyncModal.title}
+        message={outlookSyncModal.message}
+        type={outlookSyncModal.type}
+        details={outlookSyncModal.details}
+        onClose={() =>
+          setOutlookSyncModal((s) => ({
+            ...s,
+            visible: false,
+            details: undefined,
+          }))
+        }
         confirmText="OK"
       />
       <AlertModal

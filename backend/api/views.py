@@ -1991,11 +1991,17 @@ def OutlookConnectionView(request):
     # Refresh encryption key cache if it exists (keeps it alive)
     get_session_user_key(request.user.id, auto_refresh=True)
 
-    member = Member.objects.filter(user=request.user).first()
-    if not member:
-        return Response({'connected': False})
-
-    sync = CalendarSync.objects.filter(member=member, sync_type='outlook', sync_enabled=True).first()
+    # CalendarSync is per Member (user + family). .first() on memberships picked the wrong family
+    # when a user belongs to multiple families, so status stayed disconnected after a successful connect.
+    sync = (
+        CalendarSync.objects.filter(
+            member__user=request.user,
+            sync_type='outlook',
+            sync_enabled=True,
+        )
+        .order_by('-updated_at')
+        .first()
+    )
     if sync:
         return Response({
             'connected': True,
@@ -2014,19 +2020,6 @@ def OutlookPushChecklistEventsView(request):
     from events.outlook_checklist_push import push_checklist_events_to_outlook
     from lists.models import List as ChecklistList
 
-    member = Member.objects.filter(user=request.user).first()
-    if not member:
-        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    sync_record = CalendarSync.objects.filter(
-        member=member, sync_type='outlook', sync_enabled=True
-    ).first()
-    if not sync_record:
-        return Response(
-            {'error': 'Outlook calendar not connected'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     raw_list_id = request.data.get('list_id')
     raw_family_id = request.data.get('family')
 
@@ -2038,12 +2031,29 @@ def OutlookPushChecklistEventsView(request):
             lid = int(raw_list_id)
         except (TypeError, ValueError):
             return Response({'error': 'Invalid list_id'}, status=status.HTTP_400_BAD_REQUEST)
-        list_obj = get_object_or_404(
-            ChecklistList,
+        # list_type is EncryptedCharField — do not filter list_type in SQL (won't match ciphertext).
+        list_obj = ChecklistList.objects.filter(
             pk=lid,
             family__members__user=request.user,
-            list_type='checklist',
-        )
+        ).first()
+        if not list_obj:
+            return Response(
+                {
+                    'error': 'Checklist not found or access denied.',
+                    'detail': (
+                        f'No list with id={lid} for your account on this server, or you are not a member of its family.'
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if list_obj.list_type != 'checklist':
+            return Response(
+                {
+                    'error': 'Only checklist lists can be synced to Outlook.',
+                    'detail': f'List {lid} is not a checklist.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         family = list_obj.family
         filter_list_id = lid
     elif raw_family_id is not None and str(raw_family_id).strip() != '':
@@ -2055,6 +2065,19 @@ def OutlookPushChecklistEventsView(request):
     else:
         return Response(
             {'error': 'Provide list_id (checklist) or family id'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    member = Member.objects.filter(user=request.user, family=family).first()
+    if not member:
+        return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sync_record = CalendarSync.objects.filter(
+        member=member, sync_type='outlook', sync_enabled=True
+    ).first()
+    if not sync_record:
+        return Response(
+            {'error': 'Outlook calendar not connected'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
