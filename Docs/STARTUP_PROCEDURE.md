@@ -312,7 +312,7 @@ The Expo web app is configured for **static export** (`app.json`: `"web.output":
 npm run build
 ```
 
-This runs `npx expo export --platform web`. Expo prints the output directory (commonly **`dist`** in `mobile/`).
+This runs `scripts/build-web.ps1` (Expo static export + PWA manifest/cache-bust patches). Output directory is **`dist`** in `mobile/`. Full PWA deploy guide: [WEB_PWA_DEPLOY.md](./WEB_PWA_DEPLOY.md).
 
 **Preview the build locally** (does not hot-reload; rebuild after code changes):
 

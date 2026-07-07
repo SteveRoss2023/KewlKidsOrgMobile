@@ -14,7 +14,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#2C3E50"
     },
     "ios": {
       "supportsTablet": true,
@@ -29,7 +29,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#2C3E50"
       },
       "package": "com.kewlkids.organizer",
       "edgeToEdgeEnabled": true,
@@ -44,7 +44,14 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "output": "static"
+      "output": "static",
+      "shortName": "KewlKids",
+      "themeColor": "#2C3E50",
+      "backgroundColor": "#2C3E50",
+      "display": "standalone",
+      "orientation": "portrait",
+      "preferRelatedApplications": false,
+      "description": "KewlKids family organizer"
     },
     "plugins": [
       "expo-router",
