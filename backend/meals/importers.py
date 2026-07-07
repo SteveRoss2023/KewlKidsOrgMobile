@@ -8,12 +8,34 @@ from typing import Dict, List, Optional, Tuple
 import json
 import re
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, unquote
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _unwrap_email_security_wrapper_url(url: str) -> str:
+    """
+    Resolve URLs wrapped by corporate email scanners (e.g. Microsoft Safe Links).
+    Those hosts return an interstitial or scanner page, not the destination HTML, so
+    recipe import sees no ingredients or schema.org data.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.netloc or '').lower()
+        if 'safelinks.protection.outlook.com' in host or 'safelinks.protection.office365.com' in host:
+            qs = parse_qs(parsed.query)
+            inner = (qs.get('url') or [None])[0]
+            if inner:
+                inner = unquote(inner)
+                if inner.startswith(('http://', 'https://')):
+                    logger.info('Unwrapped Outlook Safe Links URL to: %s', inner)
+                    return inner
+    except Exception:
+        pass
+    return url
 
 
 def import_recipe_from_url(url: str) -> Optional[Dict]:
@@ -29,6 +51,8 @@ def import_recipe_from_url(url: str) -> Optional[Dict]:
     """
     import logging
     logger = logging.getLogger(__name__)
+
+    url = _unwrap_email_security_wrapper_url(url.strip())
 
     try:
         # Try using recipe-scrapers first (supports many sites)

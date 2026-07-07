@@ -16,15 +16,25 @@ import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
 import { List, ListItem } from '../../types/lists';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 
+/**
+ * Image header width:height (Yoga `aspectRatio`). ~0.9 matches a typical narrow phone card
+ * (~180×200px image area). Using the same ratio on tablet/desktop keeps `resizeMode="cover"`
+ * framing consistent so edges (e.g. plate) crop the same as on mobile instead of a
+ * very wide, short box that zooms into the center.
+ */
+const RECIPE_CARD_IMAGE_ASPECT_RATIO = 0.9;
+
 interface RecipeCardProps {
   recipe: Recipe;
   shoppingLists: List[];
+  /** Pixel width so grid can show 3–5 columns on tablet/desktop (FlatList numColumns). */
+  cardWidth: number;
   onPress: () => void;
   onAddToList: (recipeId: number, listId: number, recipeTitle?: string) => void;
   onDelete: (recipeId: number, recipeTitle: string) => void;
 }
 
-export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList, onDelete }: RecipeCardProps) {
+export default function RecipeCard({ recipe, shoppingLists, cardWidth, onPress, onAddToList, onDelete }: RecipeCardProps) {
   const { colors } = useTheme();
   const [selectedListId, setSelectedListId] = useState<string>('');
   const [addingToList, setAddingToList] = useState(false);
@@ -81,16 +91,17 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
 
   return (
     <TouchableOpacity
-      style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      style={[styles.card, { width: cardWidth, backgroundColor: colors.surface, borderColor: colors.border }]}
       onPress={onPress}
       activeOpacity={0.7}
     >
       {imageUri && !imageError ? (
-        <Image
-          source={{ uri: imageUri }}
-          style={styles.image}
-          resizeMode="cover"
-          onError={(error) => {
+        <View style={[styles.imageFrame, { backgroundColor: colors.border }]}>
+          <Image
+            source={{ uri: imageUri }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode="cover"
+            onError={(error) => {
             const errorMessage = error.nativeEvent?.error || 'Unknown error';
             console.log('Image failed to load:', imageUri);
             console.log('Error details:', errorMessage);
@@ -103,7 +114,8 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
               setImageError(false);
             }
           }}
-        />
+          />
+        </View>
       ) : (
         <View style={[styles.imagePlaceholder, { backgroundColor: colors.border }]}>
           <FontAwesome name="image" size={32} color={colors.textSecondary} />
@@ -221,7 +233,6 @@ export default function RecipeCard({ recipe, shoppingLists, onPress, onAddToList
 
 const styles = StyleSheet.create({
   card: {
-    width: '47%',
     margin: 6,
     borderRadius: 12,
     borderWidth: 1,
@@ -229,13 +240,14 @@ const styles = StyleSheet.create({
     // Allow dropdown to render outside card on mobile
     zIndex: 1,
   },
-  image: {
+  imageFrame: {
     width: '100%',
-    height: 200,
+    aspectRatio: RECIPE_CARD_IMAGE_ASPECT_RATIO,
+    overflow: 'hidden',
   },
   imagePlaceholder: {
     width: '100%',
-    height: 200,
+    aspectRatio: RECIPE_CARD_IMAGE_ASPECT_RATIO,
     justifyContent: 'center',
     alignItems: 'center',
   },

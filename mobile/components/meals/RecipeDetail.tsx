@@ -9,6 +9,7 @@ import {
   Image,
   Linking,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -35,6 +36,9 @@ export default function RecipeDetail({
   onDelete,
 }: RecipeDetailProps) {
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  /** Wide screens: give hero image more vertical space so `contain` shows the full photo clearly. */
+  const heroImageHeight = Math.min(520, Math.max(200, Math.round(windowWidth * 0.42)));
   const [selectedListId, setSelectedListId] = useState<string>('');
   const [addingToList, setAddingToList] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -87,23 +91,32 @@ export default function RecipeDetail({
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
           {imageUri && !imageError ? (
-            <Image 
-              source={{ uri: imageUri }} 
-              style={styles.image} 
-              resizeMode="cover"
-              onError={(error) => {
-                const errorMessage = error.nativeEvent?.error || 'Unknown error';
-                console.log('Image failed to load in detail view:', imageUri);
-                console.log('Error details:', errorMessage);
-                setImageError(true);
-              }}
-              onLoadStart={() => {
-                // Reset error state when starting to load a new image
-                if (imageError) {
-                  setImageError(false);
-                }
-              }}
-            />
+            <View
+              style={[
+                styles.imageFrame,
+                {
+                  backgroundColor: colors.border,
+                  height: heroImageHeight,
+                },
+              ]}
+            >
+              <Image
+                source={{ uri: imageUri }}
+                style={StyleSheet.absoluteFillObject}
+                resizeMode="contain"
+                onError={(error) => {
+                  const errorMessage = error.nativeEvent?.error || 'Unknown error';
+                  console.log('Image failed to load in detail view:', imageUri);
+                  console.log('Error details:', errorMessage);
+                  setImageError(true);
+                }}
+                onLoadStart={() => {
+                  if (imageError) {
+                    setImageError(false);
+                  }
+                }}
+              />
+            </View>
           ) : null}
 
           <View style={styles.section}>
@@ -268,11 +281,11 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
-  image: {
+  imageFrame: {
     width: '100%',
-    height: 200,
     borderRadius: 12,
     marginBottom: 16,
+    overflow: 'hidden',
   },
   section: {
     marginBottom: 24,

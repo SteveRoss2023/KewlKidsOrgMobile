@@ -23,6 +23,19 @@ import MealsService, {
 } from '../../services/mealsService';
 import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
 
+/** RN Web: Alert.alert is often hidden behind a full-screen Modal — use a blocking browser dialog. */
+function notifyAlert(title: string, message?: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n\n${message}` : title);
+    return;
+  }
+  if (message !== undefined) {
+    Alert.alert(title, message);
+  } else {
+    Alert.alert(title);
+  }
+}
+
 let ImagePicker: any = null;
 if (Platform.OS !== 'web') {
   try {
@@ -36,7 +49,8 @@ if (Platform.OS !== 'web') {
 interface RecipeFormProps {
   selectedFamily: { id: number; name: string };
   onClose: () => void;
-  onSuccess: () => void;
+  /** Called with the saved recipe so the parent can update the list (esp. when refetch is slow or fails). */
+  onSuccess: (savedRecipe?: Recipe) => void | Promise<void>;
   recipe?: Recipe | null;
 }
 
@@ -86,13 +100,13 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
 
   const handleChooseFromLibrary = async () => {
     if (!ImagePicker) {
-      Alert.alert('Not available', 'Image picker is not available on this platform.');
+      notifyAlert('Not available', 'Image picker is not available on this platform.');
       return;
     }
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Permission to access photos is required to add a recipe image.');
+        notifyAlert('Permission needed', 'Permission to access photos is required to add a recipe image.');
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -112,19 +126,19 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
       }
     } catch (err: any) {
       console.error('Error picking image:', err);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+      notifyAlert('Error', 'Failed to pick image. Please try again.');
     }
   };
 
   const handleTakePhoto = async () => {
     if (!ImagePicker) {
-      Alert.alert('Not available', 'Camera is not available on this platform.');
+      notifyAlert('Not available', 'Camera is not available on this platform.');
       return;
     }
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Permission to access camera is required to take a photo.');
+        notifyAlert('Permission needed', 'Permission to access camera is required to take a photo.');
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -143,7 +157,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
       }
     } catch (err: any) {
       console.error('Error taking photo:', err);
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
+      notifyAlert('Error', 'Failed to take photo. Please try again.');
     }
   };
 
@@ -169,7 +183,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
       }
     } catch (err: any) {
       console.error('Error picking image:', err);
-      Alert.alert('Error', 'Failed to select image. Please try again.');
+      notifyAlert('Error', 'Failed to select image. Please try again.');
     }
   };
 
@@ -179,18 +193,21 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
 
   const handleSubmit = async () => {
     if (!title.trim()) {
+      notifyAlert('Missing title', 'Please enter a recipe name.');
       return;
     }
 
     const filteredIngredients = ingredients.filter(i => i.trim());
     const filteredInstructions = instructions.filter(i => i.trim());
 
-    if (filteredIngredients.length === 0 || filteredInstructions.length === 0) {
+    if (filteredIngredients.length === 0) {
+      notifyAlert('Missing ingredients', 'Add at least one ingredient.');
       return;
     }
 
     setCreating(true);
     try {
+      let saved: Recipe;
       if (isEdit && recipe) {
         const data: UpdateRecipeData = {
           title: title.trim(),
@@ -211,7 +228,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
           // User set an image URL; clear stored file so this URL is used as the recipe image
           data.clear_image = true;
         }
-        await MealsService.updateRecipe(recipe.id, data);
+        saved = await MealsService.updateRecipe(recipe.id, data);
       } else {
         const data: CreateRecipeData = {
           family: selectedFamily.id,
@@ -226,13 +243,13 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
           notes: notes.trim() || undefined,
           image: pickedImage || undefined,
         };
-        await MealsService.createRecipe(data);
+        saved = await MealsService.createRecipe(data);
       }
-      await onSuccess();
+      await onSuccess(saved);
       onClose();
     } catch (err: any) {
       console.error('Error saving recipe:', err);
-      Alert.alert('Error', err?.message || 'Failed to save recipe. Please try again.');
+      notifyAlert('Error', err?.message || 'Failed to save recipe. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -315,7 +332,9 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
             </Text>
             {displayImageUri ? (
               <View style={styles.imageSection}>
-                <Image source={{ uri: displayImageUri }} style={styles.thumbnail} resizeMode="cover" />
+                <View style={[styles.thumbnailFrame, { backgroundColor: colors.border }]}>
+                  <Image source={{ uri: displayImageUri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                </View>
                 <View style={styles.imageActions}>
                   {ImagePicker ? (
                     <>
@@ -434,7 +453,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
 
           <View style={styles.field}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.label, { color: colors.text }]}>Instructions *</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Instructions (optional)</Text>
               <TouchableOpacity onPress={addInstruction} style={styles.addButton}>
                 <FontAwesome name="plus" size={14} color={colors.primary} />
                 <Text style={[styles.addButtonText, { color: colors.primary }]}>Add</Text>
@@ -573,11 +592,12 @@ const styles = StyleSheet.create({
   imageSection: {
     marginTop: 4,
   },
-  thumbnail: {
+  thumbnailFrame: {
     width: '100%',
     height: 180,
     borderRadius: 12,
     marginBottom: 12,
+    overflow: 'hidden',
   },
   imageActions: {
     flexDirection: 'row',

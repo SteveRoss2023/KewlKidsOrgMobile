@@ -54,6 +54,20 @@ export default function MealsScreen() {
     }
   }, [selectedFamily]);
 
+  /** Merge server-returned recipe so the UI updates even if Alert/Modal hid errors or refetch lags. */
+  const refreshRecipesAfterSave = useCallback(
+    async (savedRecipe?: Recipe) => {
+      if (savedRecipe) {
+        setRecipes((prev) => {
+          const without = prev.filter((r) => r.id !== savedRecipe.id);
+          return [savedRecipe, ...without];
+        });
+      }
+      await fetchRecipes();
+    },
+    [fetchRecipes]
+  );
+
   const fetchMealPlans = useCallback(async () => {
     if (!selectedFamily) return;
 
@@ -141,7 +155,7 @@ export default function MealsScreen() {
           recipes={recipes}
           loading={loading}
           selectedFamily={selectedFamily}
-          onRefresh={fetchRecipes}
+          onRefresh={refreshRecipesAfterSave}
         />
       )}
 

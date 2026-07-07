@@ -10,6 +10,7 @@ import {
   Image,
   Modal,
   FlatList,
+  useWindowDimensions,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -23,15 +24,30 @@ import ImportRecipeForm from './ImportRecipeForm';
 import AlertModal from '../AlertModal';
 import ConfirmModal from '../ConfirmModal';
 
+/** More columns on wide screens so recipe cards stay compact (avoid two huge cards per row). */
+function getRecipeGridColumnCount(width: number): number {
+  if (width < 640) return 2;
+  if (width < 960) return 3;
+  if (width < 1280) return 4;
+  return 5;
+}
+
 interface RecipesTabProps {
   recipes: Recipe[];
   loading: boolean;
   selectedFamily: { id: number; name: string };
-  onRefresh: () => void;
+  /** Pass optional recipe from save/import to merge into the list before refetch. */
+  onRefresh: (savedRecipe?: Recipe) => void | Promise<void>;
 }
 
 export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh }: RecipesTabProps) {
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const numColumns = getRecipeGridColumnCount(windowWidth);
+  const gridHorizontalPad = 16;
+  const cardMargin = 6;
+  const innerWidth = Math.max(0, windowWidth - gridHorizontalPad);
+  const cardWidth = Math.max(140, Math.floor(innerWidth / numColumns - 2 * cardMargin));
   const [searchTerm, setSearchTerm] = useState('');
   const [shoppingLists, setShoppingLists] = useState<List[]>([]);
   const [showRecipeForm, setShowRecipeForm] = useState(false);
@@ -233,14 +249,16 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         </View>
       ) : (
         <FlatList
+          key={`recipe-grid-${numColumns}`}
           data={filteredRecipes}
           keyExtractor={(item) => item.id.toString()}
-          numColumns={2}
+          numColumns={numColumns}
           contentContainerStyle={styles.grid}
           columnWrapperStyle={styles.row}
           renderItem={({ item }) => (
             <RecipeCard
               recipe={item}
+              cardWidth={cardWidth}
               shoppingLists={shoppingLists}
               onPress={() => setSelectedRecipe(item)}
               onAddToList={handleAddToList}

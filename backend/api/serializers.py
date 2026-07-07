@@ -9,6 +9,17 @@ from chat.models import ChatRoom, Message
 User = get_user_model()
 
 
+def _display_name_or_email_for_user(user):
+    """User.profile is optional (OneToOne); avoid hasattr()/access patterns that raise DoesNotExist."""
+    if user is None:
+        return None
+    try:
+        profile = user.profile
+    except UserProfile.DoesNotExist:
+        return user.email
+    return profile.display_name or user.email
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """User profile serializer for viewing and editing profile."""
     email = serializers.EmailField(source='user.email', read_only=True)
@@ -153,9 +164,9 @@ class RecipeSerializer(serializers.ModelSerializer):
     clear_image = serializers.BooleanField(required=False, write_only=True, default=False)
 
     def get_created_by_username(self, obj):
-        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
-            return obj.created_by.user.profile.display_name or obj.created_by.user.email
-        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+        if not obj.created_by or not obj.created_by.user:
+            return None
+        return _display_name_or_email_for_user(obj.created_by.user)
 
     def get_image_url(self, obj):
         """Return the image URL - prefer stored image, fall back to original URL."""
@@ -209,6 +220,7 @@ class RecipeSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create recipe with encrypted JSON fields."""
+        validated_data.pop('clear_image', None)
         ingredients = validated_data.pop('ingredients', [])
         instructions = validated_data.pop('instructions', [])
         recipe = Recipe.objects.create(**validated_data)
@@ -245,9 +257,9 @@ class MealPlanSerializer(serializers.ModelSerializer):
     meals = serializers.JSONField(required=False, allow_null=True)
 
     def get_created_by_username(self, obj):
-        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
-            return obj.created_by.user.profile.display_name or obj.created_by.user.email
-        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+        if not obj.created_by or not obj.created_by.user:
+            return None
+        return _display_name_or_email_for_user(obj.created_by.user)
 
     class Meta:
         model = MealPlan
@@ -284,9 +296,9 @@ class EventSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
 
     def get_created_by_username(self, obj):
-        if obj.created_by and obj.created_by.user and hasattr(obj.created_by.user, 'profile') and obj.created_by.user.profile:
-            return obj.created_by.user.profile.display_name or obj.created_by.user.email
-        return obj.created_by.user.email if obj.created_by and obj.created_by.user else None
+        if not obj.created_by or not obj.created_by.user:
+            return None
+        return _display_name_or_email_for_user(obj.created_by.user)
 
     list_section = serializers.PrimaryKeyRelatedField(read_only=True, allow_null=True)
 

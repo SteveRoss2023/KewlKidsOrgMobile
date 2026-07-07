@@ -16,11 +16,32 @@ export default function TabsLayout() {
     checkAuthentication();
   }, []);
 
+  // Stale FamilyContext can still be auth_required right after login (pre-token bootstrap).
+  // Only send to login when there is no token; if tokens exist, refresh families instead.
   useEffect(() => {
-    if (bootstrapState === 'auth_required') {
-      router.replace('/(auth)/login');
-    }
-  }, [bootstrapState, router]);
+    if (bootstrapState !== 'auth_required') return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      const ok = await AuthService.isAuthenticated();
+      if (cancelled) return;
+      if (!ok) {
+        router.replace('/(auth)/login');
+        return;
+      }
+      try {
+        await refreshFamilies();
+      } catch (error) {
+        console.error('Error refreshing families after auth_required (tabs layout):', error);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapState, router, refreshFamilies]);
 
   // Refresh families when tabs come into focus (e.g., after login or returning from another screen)
   useFocusEffect(
