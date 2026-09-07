@@ -280,15 +280,39 @@ else:
 # Channels Configuration (for WebSockets)
 ASGI_APPLICATION = 'config.asgi.application'
 
-# Redis configuration for Channels
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [(os.getenv('REDIS_HOST', 'localhost'), int(os.getenv('REDIS_PORT', '6379')))],
+# Chat / OAuth cache: False = no Redis (single-user / one Django process).
+# True = Redis required for multi-process / multi-user production.
+USE_REDIS = os.getenv('USE_REDIS', 'False').lower() == 'true'
+
+if USE_REDIS:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [(os.getenv('REDIS_HOST', 'localhost'), int(os.getenv('REDIS_PORT', '6379')))],
+            },
         },
-    },
-}
+    }
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            # Use DB 1 for cache (DB 0 is often used by Channels)
+            'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        }
+    }
+else:
+    # In-memory: fine for one Daphne/runserver process; not for multiple workers.
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'oauth-cache',
+        }
+    }
 
 # Encryption Settings (for encrypted_model_fields)
 # Generate a key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -310,36 +334,6 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'coyotecreekphase3@gmail.com')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'qmkdlrdfljvlqojd')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
-
-# For development without Redis, use in-memory channel layer:
-# NOTE: In-memory layer only works with a single server instance and doesn't persist across restarts
-# Uncomment below and comment out the Redis configuration above if Redis is not available:
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels.layers.InMemoryChannelLayer',
-#     },
-# }
-
-# Cache Configuration (for OAuth state management and encryption keys)
-# Use Redis if available so session keys and encrypted OAuth tokens
-# survive server restarts and work across multiple processes.
-USE_REDIS = os.getenv('USE_REDIS', 'True').lower() == 'true'
-
-if USE_REDIS:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            # Use DB 1 for cache (DB 0 is often used by Channels)
-            'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
-        }
-    }
-else:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'oauth-cache',
-        }
-    }
 
 # OAuth Settings
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')

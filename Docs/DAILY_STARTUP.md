@@ -19,37 +19,13 @@ Quick reference for starting the app each day (after login or reboot).
 
 ## Quick Start
 
-**Typical local dev:** Steps 1–4 (Redis → backend → Expo → open web or device).
+**Typical local dev:** Steps 1–3 (backend → Expo → open web or device). Chat works without Redis when `USE_REDIS=False` (default).
 
 **Static web preview:** After changing the web app, run `npm run build` in `mobile/`, then serve `dist` (e.g. `npx serve -s dist -l 8085`). This is **not** hot reload; use `npm start` / `npm run web` for day-to-day UI work.
 
 ---
 
-### 1. Start Redis (Required for WebSockets)
-
-**Windows:**
-```powershell
-# If Redis is installed
-redis-server
-# Or if using WSL:
-wsl redis-server
-```
-
-**Mac (Homebrew):**
-```bash
-brew services start redis
-```
-
-**Linux:**
-```bash
-sudo systemctl start redis
-```
-
-**✅ Verify:** Run `redis-cli ping` - should return `PONG`
-
-**Note:** If Redis is not available, the server will still start but WebSockets won't work properly.
-
-### 2. Start Backend Server
+### 1. Start Backend Server
 
 **Windows:**
 ```powershell
@@ -67,11 +43,11 @@ python manage.py runserver
 
 **✅ Verify:** Open http://localhost:8900/api/ in browser - should see API response
 
-**Note:** With `daphne` in `INSTALLED_APPS`, `runserver` automatically uses Daphne for WebSocket support. Redis must be running for chat features.
+**Note:** With `daphne` in `INSTALLED_APPS`, `runserver` automatically uses Daphne for WebSocket support. Chat works with in-memory channels when `USE_REDIS=False` (default). Set `USE_REDIS=True` and start Redis only when you need multi-process / multi-user scaling.
 
 ---
 
-### 3. Start Mobile App (Expo dev)
+### 2. Start Mobile App (Expo dev)
 
 **Open a new terminal/command prompt:**
 
@@ -86,7 +62,7 @@ npm start
 
 ---
 
-### 4. Connect to App
+### 3. Connect to App
 
 **For Web Browser:**
 - Press `w` in the Expo terminal, or
@@ -100,7 +76,7 @@ npm start
 
 ---
 
-### 5. (Optional) Static web build — production-like bundle
+### 4. (Optional) Static web build — production-like bundle
 
 Use when you want to test the **exported** site (same workflow as deploying to **organizer.kewlkids.ca**), not the live dev server:
 
@@ -114,7 +90,7 @@ Rebuild with `npm run build` whenever code changes; `serve` only shows the last 
 
 ---
 
-### 6. Verify Everything Works
+### 5. Verify Everything Works
 
 - ✅ Backend: http://localhost:8900/api/ responds
 - ✅ Mobile app loads in browser or Expo Go
@@ -166,10 +142,8 @@ python manage.py migrate
 ## Daily Startup Checklist
 
 ```
-[ ] Terminal 1: Redis running (redis-cli ping → PONG)
-[ ] Terminal 2: Backend started (port 8900)
-[ ] Backend accessible at http://localhost:8900/api/
-[ ] Terminal 3: Mobile app started (npm start in mobile/)
+[ ] Terminal 1: Backend running (http://localhost:8900/api/)
+[ ] Terminal 2: Mobile app started (npm start in mobile/)
 [ ] App connected (web browser or Expo Go)
 [ ] Can log in successfully
 [ ] (Optional) npm run build + serve dist — only if testing static export

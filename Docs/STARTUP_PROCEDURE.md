@@ -37,7 +37,7 @@ Before starting, ensure you have the following installed:
 - **Python**: 3.12+
 - **PostgreSQL**: 15+ (required for production, optional for development)
 - **Expo**: Use `npx expo` via project dependencies (global `expo-cli` is optional)
-- **Redis**: Required for WebSockets/chat (see backend section)
+- **Redis**: Optional. Default `USE_REDIS=False` uses in-memory chat/cache (single process). Set `USE_REDIS=True` for multi-user / production (see [WEBSOCKET_SETUP.md](./WEBSOCKET_SETUP.md))
 - **ngrok**: Not required for normal dev; see [Reference: ngrok](#reference-ngrok-optional-tunneling) if you need a quick public tunnel
 
 ---
@@ -149,7 +149,11 @@ python manage.py migrate
 python manage.py createsuperuser
 ```
 
-### Step 5.5: Start Redis (Required for WebSockets)
+### Step 5.5: Redis (optional — only if `USE_REDIS=True`)
+
+By default (`USE_REDIS=False` in `.env`), chat uses an in-memory channel layer. **No Redis or Docker needed.**
+
+When you scale to multiple workers / users, set `USE_REDIS=True` and start Redis:
 
 **Windows:**
 ```powershell
@@ -179,8 +183,6 @@ redis-cli ping
 # Should return: PONG
 ```
 
-**Note:** If Redis is not available, Channels will fall back to in-memory channel layer (not recommended for production, but works for development).
-
 ### Step 6: Start Django Server
 
 **Option A: Using the Custom Runserver Command (Recommended)**
@@ -200,7 +202,7 @@ python manage.py runserver
 python manage.py runserver 0.0.0.0:8900
 ```
 
-**Note:** With `daphne` in `INSTALLED_APPS` and `ASGI_APPLICATION` configured, `runserver` automatically uses Daphne for WebSocket support. Redis must be running for chat features to work.
+**Note:** With `daphne` in `INSTALLED_APPS` and `ASGI_APPLICATION` configured, `runserver` automatically uses Daphne for WebSocket support. Chat works without Redis when `USE_REDIS=False`.
 
 ### Step 7: Verify Backend is Running
 
