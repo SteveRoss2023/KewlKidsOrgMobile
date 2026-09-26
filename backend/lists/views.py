@@ -1,11 +1,17 @@
 """
 Views for lists.
 """
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Max, F
@@ -17,6 +23,7 @@ from datetime import datetime, timedelta, date
 from django.db import transaction
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class ListViewSet(viewsets.ModelViewSet):
@@ -153,6 +160,59 @@ class ListViewSet(viewsets.ModelViewSet):
         payload = dict(serializer.data)
         payload['calendar_updated'] = True
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='email')
+    def email(self, request, pk=None):
+        """Email the full checklist (completed + incomplete) as professional HTML."""
+        list_obj = self.get_object()
+        if list_obj.list_type != 'checklist':
+            return Response(
+                {'detail': 'Only checklist lists can be emailed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Ensure caller is a family member
+        get_object_or_404(Member, user=request.user, family=list_obj.family)
+
+        raw_email = request.data.get('email')
+        to_email = (raw_email or '').strip() if raw_email is not None else ''
+        if not to_email:
+            to_email = (request.user.email or '').strip()
+        if not to_email:
+            return Response(
+                {'detail': 'Email address is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_email(to_email)
+        except DjangoValidationError:
+            return Response(
+                {'detail': 'Enter a valid email address.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .checklist_email import build_checklist_email
+
+        subject, text_message, html_message = build_checklist_email(
+            list_obj,
+            sent_by_email=request.user.email or None,
+        )
+        try:
+            email_msg = EmailMultiAlternatives(
+                subject=subject,
+                body=text_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[to_email],
+            )
+            email_msg.attach_alternative(html_message, 'text/html')
+            email_msg.send(fail_silently=False)
+        except Exception as e:
+            logger.exception('Failed to send checklist email for list %s: %s', list_obj.id, e)
+            return Response(
+                {'detail': 'Failed to send email. Please try again later.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({'detail': 'Email sent.', 'email': to_email}, status=status.HTTP_200_OK)
 
 
 def _item_depth(item):

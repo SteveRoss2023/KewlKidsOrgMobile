@@ -42,12 +42,14 @@ import SectionRow from '../../../components/lists/SectionRow';
 import SectionFormModal from '../../../components/lists/SectionFormModal';
 import AddSectionForm from '../../../components/lists/AddSectionForm';
 import CopyChecklistModal from '../../../components/lists/CopyChecklistModal';
+import EmailChecklistModal from '../../../components/lists/EmailChecklistModal';
 import CategoryGroup from '../../../components/lists/CategoryGroup';
 import AddItemForm from '../../../components/lists/AddItemForm';
 import AlertModal from '../../../components/AlertModal';
 import ConfirmModal from '../../../components/ConfirmModal';
 import DraggableListItem from '../../../components/lists/DraggableListItem';
 import { APIError } from '../../../services/api';
+import profileService from '../../../services/profileService';
 import apiClient from '../../../services/api';
 import { useVoiceRecognition } from '../../../hooks/useVoiceRecognition';
 import { speak } from '../../../utils/voiceFeedback';
@@ -352,6 +354,9 @@ export default function ListDetailScreen() {
   const [sectionFormSaving, setSectionFormSaving] = useState(false);
   const [copyChecklistModalOpen, setCopyChecklistModalOpen] = useState(false);
   const [copyChecklistSaving, setCopyChecklistSaving] = useState(false);
+  const [emailChecklistModalOpen, setEmailChecklistModalOpen] = useState(false);
+  const [emailChecklistSaving, setEmailChecklistSaving] = useState(false);
+  const [emailChecklistDefaultTo, setEmailChecklistDefaultTo] = useState('');
   const [outlookConnected, setOutlookConnected] = useState(false);
   const [outlookPushLoading, setOutlookPushLoading] = useState(false);
   const [outlookSyncModal, setOutlookSyncModal] = useState<{
@@ -2377,6 +2382,37 @@ export default function ListDetailScreen() {
     }
   };
 
+  const openEmailChecklistModal = async () => {
+    setShowAddSection(false);
+    setShowAddItem(false);
+    setEditSection(null);
+    setCopyChecklistModalOpen(false);
+    setEmailChecklistModalOpen(true);
+    try {
+      const profile = await profileService.getProfile();
+      if (profile?.email) {
+        setEmailChecklistDefaultTo(profile.email);
+      }
+    } catch (err) {
+      console.warn('Could not load profile email for checklist export:', err);
+    }
+  };
+
+  const confirmEmailChecklist = async (email: string) => {
+    if (!list || list.list_type !== 'checklist') return;
+    setEmailChecklistSaving(true);
+    try {
+      const result = await ListService.emailChecklist(list.id, email);
+      setEmailChecklistModalOpen(false);
+      showToast(`Email sent to ${result.email}`);
+    } catch (err) {
+      console.error('Error emailing checklist:', err);
+      alert((err as APIError)?.message || 'Failed to send email. Try again.');
+    } finally {
+      setEmailChecklistSaving(false);
+    }
+  };
+
   const [deleteSectionConfirm, setDeleteSectionConfirm] = useState<{
     isOpen: boolean;
     section: ListSection | null;
@@ -3203,19 +3239,20 @@ export default function ListDetailScreen() {
       <View style={[styles.actionsBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={styles.actionsBarTop}>
           <View style={styles.actionButtonsPrimary}>
-            {isSupported && !showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && (
+            {isSupported && !showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && !emailChecklistModalOpen && (
               <VoiceButton
                 onPress={handleVoiceClick}
                 isListening={isListening}
-                disabled={adding || updatingItem || copyChecklistSaving}
+                disabled={adding || updatingItem || copyChecklistSaving || emailChecklistSaving}
               />
             )}
-            {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen ? (
+            {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && !emailChecklistModalOpen ? (
               <>
                 {isChecklistList && (
                   <TouchableOpacity
                     onPress={() => {
                       setCopyChecklistModalOpen(true);
+                      setEmailChecklistModalOpen(false);
                       setShowAddSection(false);
                       setShowAddItem(false);
                       setEditSection(null);
@@ -3228,6 +3265,22 @@ export default function ListDetailScreen() {
                     <Text style={styles.addButtonText}>
                       {Platform.OS === 'web' ? 'Copy list' : 'Copy'}
                     </Text>
+                  </TouchableOpacity>
+                )}
+                {isChecklistList && (
+                  <TouchableOpacity
+                    onPress={openEmailChecklistModal}
+                    disabled={emailChecklistSaving}
+                    style={[styles.addButton, { backgroundColor: colors.primary }]}
+                    accessibilityLabel="Email checklist"
+                    accessibilityHint="Emails the full checklist with completed and incomplete items"
+                  >
+                    {emailChecklistSaving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <FontAwesome name="envelope" size={16} color="#fff" />
+                    )}
+                    <Text style={styles.addButtonText}>Email</Text>
                   </TouchableOpacity>
                 )}
                 {isChecklistList && (
@@ -3271,7 +3324,7 @@ export default function ListDetailScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-          {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && (
+          {!showAddItem && !showAddSection && !editingItem && !copyChecklistModalOpen && !emailChecklistModalOpen && (
             <View style={styles.actionButtonsSecondary}>
               {isSupported && (
                 <TooltipButton
@@ -4016,6 +4069,18 @@ export default function ListDetailScreen() {
             if (!copyChecklistSaving) setCopyChecklistModalOpen(false);
           }}
           onConfirm={confirmCopyChecklist}
+        />
+      )}
+      {isChecklistList && list && (
+        <EmailChecklistModal
+          visible={emailChecklistModalOpen}
+          listName={list.name}
+          defaultEmail={emailChecklistDefaultTo}
+          saving={emailChecklistSaving}
+          onCancel={() => {
+            if (!emailChecklistSaving) setEmailChecklistModalOpen(false);
+          }}
+          onConfirm={confirmEmailChecklist}
         />
       )}
       {isChecklistList && (

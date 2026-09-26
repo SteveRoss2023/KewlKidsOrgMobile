@@ -114,6 +114,24 @@ class ListService {
   }
 
   /**
+   * Email the full checklist (completed + incomplete) as HTML to the given address.
+   */
+  async emailChecklist(
+    listId: number,
+    email: string
+  ): Promise<{ detail: string; email: string }> {
+    try {
+      const response = await apiClient.post<{ detail: string; email: string }>(
+        `/lists/${listId}/email/`,
+        { email }
+      );
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
    * Get sections for a checklist list
    */
   async getListSections(listId: number): Promise<ListSection[]> {
