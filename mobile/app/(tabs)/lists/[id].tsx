@@ -3269,22 +3269,6 @@ export default function ListDetailScreen() {
                 )}
                 {isChecklistList && (
                   <TouchableOpacity
-                    onPress={openEmailChecklistModal}
-                    disabled={emailChecklistSaving}
-                    style={[styles.addButton, { backgroundColor: colors.primary }]}
-                    accessibilityLabel="Email checklist"
-                    accessibilityHint="Emails the full checklist with completed and incomplete items"
-                  >
-                    {emailChecklistSaving ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <FontAwesome name="envelope" size={16} color="#fff" />
-                    )}
-                    <Text style={styles.addButtonText}>Email</Text>
-                  </TouchableOpacity>
-                )}
-                {isChecklistList && (
-                  <TouchableOpacity
                     onPress={() => {
                       setShowAddSection(true);
                       setShowAddItem(false);
@@ -3345,6 +3329,24 @@ export default function ListDetailScreen() {
                 <FontAwesome name="history" size={16} color={colors.primary} />
                 <Text style={[styles.historyButtonText, { color: colors.textSecondary }]}>History</Text>
               </TouchableOpacity>
+              {isChecklistList && (
+                <TouchableOpacity
+                  onPress={openEmailChecklistModal}
+                  disabled={emailChecklistSaving}
+                  style={[styles.historyButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  accessibilityLabel="Email checklist"
+                  accessibilityHint="Emails the full checklist with completed and incomplete items"
+                >
+                  {emailChecklistSaving ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <FontAwesome name="envelope" size={16} color={colors.primary} />
+                  )}
+                  <Text style={[styles.historyButtonText, { color: colors.textSecondary }]} numberOfLines={1}>
+                    Email
+                  </Text>
+                </TouchableOpacity>
+              )}
               {isChecklistList && (
                 <TouchableOpacity
                   onPress={handlePushChecklistToOutlook}
@@ -4456,6 +4458,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexWrap: 'wrap',
   },
   actionButtonsSecondary: {
     flexDirection: 'row',
