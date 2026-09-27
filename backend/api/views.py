@@ -2012,6 +2012,31 @@ def OutlookConnectionView(request):
     return Response({'connected': False})
 
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def OutlookDisconnectView(request):
+    """Disconnect Outlook calendar (disable all enabled Outlook syncs for this user)."""
+    from encryption.utils import get_session_user_key
+
+    get_session_user_key(request.user.id, auto_refresh=True)
+
+    syncs = CalendarSync.objects.filter(
+        member__user=request.user,
+        sync_type='outlook',
+        sync_enabled=True,
+    )
+    count = syncs.count()
+    if count == 0:
+        return Response({'error': 'Outlook not connected'}, status=status.HTTP_404_NOT_FOUND)
+
+    syncs.update(sync_enabled=False)
+    return Response({
+        'success': True,
+        'message': 'Outlook calendar disconnected successfully',
+        'disconnected_count': count,
+    })
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def OutlookPushChecklistEventsView(request):

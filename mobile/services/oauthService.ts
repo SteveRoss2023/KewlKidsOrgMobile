@@ -197,9 +197,8 @@ class OAuthService {
       let endpoint = '';
       switch (service) {
         case 'outlook':
-          // Outlook doesn't have a disconnect endpoint in the current implementation
-          // You may need to add one or handle it differently
-          throw new Error('Outlook disconnect not implemented');
+          endpoint = '/calendar/outlook/disconnect/';
+          break;
         case 'onedrive':
           endpoint = '/onedrive/disconnect/';
           break;

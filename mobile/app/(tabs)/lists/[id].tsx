@@ -2281,11 +2281,19 @@ export default function ListDetailScreen() {
         });
       }
     } catch (err) {
+      const apiErr = err as APIError;
+      const raw = (apiErr?.message || '').toLowerCase();
+      const sessionExpired =
+        raw.includes('session expired') ||
+        raw.includes('log in again') ||
+        !!(apiErr?.data as { requires_refresh?: boolean } | undefined)?.requires_refresh;
       setOutlookSyncModal({
         visible: true,
         type: 'error',
         title: 'Could not sync to Outlook',
-        message: (err as APIError)?.message || 'Something went wrong. Check your connection and try again.',
+        message: sessionExpired
+          ? 'Your Outlook encryption session expired (you can still use lists). Log out and log back in, then try Sync to Outlook again.'
+          : apiErr?.message || 'Something went wrong. Check your connection and try again.',
       });
     } finally {
       setOutlookPushLoading(false);

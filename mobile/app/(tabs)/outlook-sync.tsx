@@ -179,8 +179,12 @@ export default function OutlookSyncScreen() {
           onPress: async () => {
             try {
               setLoading(true);
-              // TODO: Implement disconnect endpoint for Outlook
-              setError('Disconnect not yet implemented for Outlook');
+              setError('');
+              setSuccess('');
+              await oauthService.disconnect('outlook');
+              setSuccess('Outlook calendar disconnected successfully');
+              setConnectionStatus({ connected: false });
+              setTimeout(() => setSuccess(''), 3000);
             } catch (err: any) {
               const parsedError = parseError(err);
               setErrorModal({
@@ -206,9 +210,13 @@ export default function OutlookSyncScreen() {
 
   const handleReconnect = async () => {
     setErrorModal(prev => ({ ...prev, visible: false }));
-    // Outlook doesn't have a disconnect endpoint, so just try to reconnect
     try {
       setConnecting(true);
+      try {
+        await oauthService.disconnect('outlook');
+      } catch {
+        // Continue reconnect even if already disconnected
+      }
       await handleConnect();
     } catch (err: any) {
       const parsedError = parseError(err);

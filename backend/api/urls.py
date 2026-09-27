@@ -31,6 +31,7 @@ urlpatterns = [
     path('calendar/outlook/oauth/initiate/', views.OutlookOAuthInitiateView, name='outlook-oauth-initiate'),
     path('calendar/outlook/oauth/callback/', views.OutlookOAuthCallbackView, name='outlook-oauth-callback'),
     path('calendar/outlook/connection/', views.OutlookConnectionView, name='outlook-connection'),
+    path('calendar/outlook/disconnect/', views.OutlookDisconnectView, name='outlook-disconnect'),
     path(
         'calendar/outlook/push-checklist-events/',
         views.OutlookPushChecklistEventsView,
