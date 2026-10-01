@@ -13,7 +13,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { ExpenseCategory, CreateExpenseCategoryData, UpdateExpenseCategoryData } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
 import ColorPicker from '../ColorPicker';
-import IconPicker from '../IconPicker';
+import ExpenseCategoryIconPicker, { normalizeExpenseIcon } from './ExpenseCategoryIconPicker';
 
 interface CategoryFormProps {
   visible: boolean;
@@ -47,7 +47,7 @@ export default function CategoryForm({
     if (category) {
       setName(category.name);
       setDescription(category.description || '');
-      setIcon(category.icon || '');
+      setIcon(normalizeExpenseIcon(category.icon));
       setColor(category.color);
     } else {
       setName('');
@@ -55,7 +55,7 @@ export default function CategoryForm({
       setIcon('');
       setColor('#3b82f6');
     }
-  }, [category]);
+  }, [category, visible]);
 
   const handleSubmit = () => {
     // Validate required fields
@@ -124,10 +124,11 @@ export default function CategoryForm({
 
             <View style={styles.formGroup}>
               <Text style={[styles.label, { color: colors.text }]}>Icon</Text>
-              <IconPicker
-                selectedIcon={icon}
-                onIconSelect={setIcon}
-                colors={colors}
+              <ExpenseCategoryIconPicker
+                value={icon}
+                onChange={setIcon}
+                accentColor={color}
+                disabled={loading}
               />
             </View>
 

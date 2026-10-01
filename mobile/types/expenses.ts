@@ -43,10 +43,48 @@ export interface Expense {
   tags: number[];
   tag_names: string[];
   receipt_url: string | null;
+  receipt_id?: number | null;
   is_recurring: boolean;
   recurring_expense: number | null;
+  line_items?: ExpenseLineItem[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ExpenseLineItem {
+  id?: number;
+  expense?: number;
+  name: string;
+  quantity: number | null;
+  unit_price: number | null;
+  line_total: number | null;
+  order: number;
+}
+
+export interface ReceiptParseResult {
+  merchant: string | null;
+  expense_date: string | null;
+  total: number | null;
+  line_items?: Array<{
+    name: string;
+    quantity?: number | null;
+    unit_price?: number | null;
+    line_total?: number | null;
+    order?: number;
+  }>;
+  raw_text: string;
+  found: {
+    merchant: boolean;
+    expense_date: boolean;
+    total: boolean;
+    total_labeled: boolean;
+    line_items?: boolean;
+    line_item_count?: number;
+  };
+  confidence: 'high' | 'medium' | 'low';
+  ocr_available: boolean;
+  engine?: 'gemini' | 'tesseract' | string;
+  error?: string;
 }
 
 export interface Budget {
@@ -114,6 +152,13 @@ export interface CreateExpenseData {
   tags?: number[];
   is_recurring?: boolean;
   recurring_expense?: number | null;
+  line_items_input?: Array<{
+    name: string;
+    quantity?: number | null;
+    unit_price?: number | null;
+    line_total?: number | null;
+    order?: number;
+  }>;
 }
 
 export interface UpdateExpenseData {
@@ -124,6 +169,13 @@ export interface UpdateExpenseData {
   expense_date?: string;
   payment_method?: PaymentMethod;
   tags?: number[];
+  line_items_input?: Array<{
+    name: string;
+    quantity?: number | null;
+    unit_price?: number | null;
+    line_total?: number | null;
+    order?: number;
+  }>;
 }
 
 export interface CreateExpenseCategoryData {

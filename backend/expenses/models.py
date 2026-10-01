@@ -150,9 +150,7 @@ class Receipt(models.Model):
         return f"Receipt for {self.expense.description if self.expense else 'Unattached'}"
 
     def delete(self, *args, **kwargs):
-        """Override delete to also delete the file."""
-        if self.file:
-            self.file.delete(save=False)
+        """Delete DB row; file is removed by pre_delete signal (also covers CASCADE)."""
         super().delete(*args, **kwargs)
 
 
@@ -192,3 +190,24 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"{self.description} - ${self.amount} - {self.expense_date}"
+
+
+class ExpenseLineItem(models.Model):
+    """Manual (or future OCR) line item on an expense."""
+    expense = models.ForeignKey(Expense, on_delete=models.CASCADE, related_name='line_items')
+    name = EncryptedCharField(max_length=200)
+    quantity = EncryptedCharField(max_length=20, blank=True, null=True)
+    unit_price = EncryptedCharField(max_length=20, blank=True, null=True)
+    line_total = EncryptedCharField(max_length=20, blank=True, null=True)
+    order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'id']
+        indexes = [
+            models.Index(fields=['expense', 'order']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.expense_id})"

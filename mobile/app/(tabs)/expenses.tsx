@@ -18,11 +18,13 @@ import expenseService from '../../services/expenseService';
 import { Expense, ExpenseCategory, Budget, RecurringExpense, ExpenseTag, PaymentMethod, CreateExpenseData, CreateExpenseCategoryData, CreateBudgetData, UpdateBudgetData, CreateRecurringExpenseData, UpdateRecurringExpenseData, CreateExpenseTagData, UpdateExpenseTagData } from '../../types/expenses';
 import AlertModal from '../../components/AlertModal';
 import ExpenseForm from '../../components/expenses/ExpenseForm';
+import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
 import CategoryForm from '../../components/expenses/CategoryForm';
 import BudgetForm from '../../components/expenses/BudgetForm';
 import RecurringExpenseForm from '../../components/expenses/RecurringExpenseForm';
 import TagForm from '../../components/expenses/TagForm';
 import ExpenseCard from '../../components/expenses/ExpenseCard';
+import RecurringExpenseRow, { formatOccurrenceDate } from '../../components/expenses/RecurringExpenseRow';
 import BudgetCard from '../../components/expenses/BudgetCard';
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
 
@@ -93,6 +95,7 @@ export default function ExpensesScreen() {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [tags, setTags] = useState<ExpenseTag[]>([]);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [showReceiptWizard, setShowReceiptWizard] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [showBudgetForm, setShowBudgetForm] = useState(false);
   const [showRecurringForm, setShowRecurringForm] = useState(false);
@@ -103,6 +106,7 @@ export default function ExpensesScreen() {
   const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null);
   const [editingTag, setEditingTag] = useState<ExpenseTag | null>(null);
   const [creating, setCreating] = useState(false);
+  const [expensePendingDelete, setExpensePendingDelete] = useState<Expense | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState<number | null>(null);
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<PaymentMethod | null>(null);
@@ -112,9 +116,41 @@ export default function ExpensesScreen() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [showFilters, setShowFilters] = useState(false);
   const [showCombinedView, setShowCombinedView] = useState(false);
-  const [groupBy, setGroupBy] = useState<'none' | 'day' | 'week' | 'month' | 'year'>('none');
+  const [groupBy, setGroupBy] = useState<'none' | 'day' | 'week' | 'month' | 'year'>('month');
+  const [recurringGroupBy, setRecurringGroupBy] = useState<'none' | 'day' | 'week' | 'month' | 'year'>('month');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [expandedRecurringGroups, setExpandedRecurringGroups] = useState<Set<string>>(new Set());
+
+  const currentGroupKey = useCallback((mode: 'day' | 'week' | 'month' | 'year') => {
+    const now = new Date();
+    if (mode === 'day') {
+      return now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+    if (mode === 'week') {
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay());
+      return `Week of ${weekStart.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })}`;
+    }
+    if (mode === 'month') {
+      return now.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+    }
+    return now.toLocaleDateString('en-US', { year: 'numeric' });
+  }, []);
+
+  // Keep the current period expanded when opening / switching group mode
+  useEffect(() => {
+    if (groupBy === 'none') return;
+    setExpandedGroups(new Set([currentGroupKey(groupBy)]));
+  }, [groupBy, selectedFamily?.id, currentGroupKey]);
+
+  useEffect(() => {
+    if (recurringGroupBy === 'none') return;
+    setExpandedRecurringGroups(new Set([currentGroupKey(recurringGroupBy)]));
+  }, [recurringGroupBy, selectedFamily?.id, currentGroupKey]);
 
   // Load data when family changes or screen comes into focus
   useFocusEffect(
@@ -163,15 +199,26 @@ export default function ExpensesScreen() {
     }
   };
 
+  const openExpenseEditor = async (expense: Expense) => {
+    setShowExpenseForm(true);
+    setEditingExpense(expense);
+    try {
+      const full = await expenseService.getExpense(expense.id);
+      setEditingExpense(full);
+    } catch {
+      // List payload is enough to edit; line items may be missing until refresh
+    }
+  };
+
   const handleCreateExpense = async (data: CreateExpenseData) => {
     if (!selectedFamily) return;
 
     setCreating(true);
     try {
       const newExpense = await expenseService.createExpense(data);
-      // Keep form open if user might want to upload receipt
-      // User can close manually or we can add a "Done" button
-      setEditingExpense(newExpense);
+      // Reload so line_items / receipt_url are present for edit
+      const full = await expenseService.getExpense(newExpense.id);
+      setEditingExpense(full);
       await fetchData();
     } catch (err: any) {
       setError(err.message || 'Failed to create expense');
@@ -201,10 +248,16 @@ export default function ExpensesScreen() {
 
     try {
       await expenseService.deleteExpense(expenseId);
+      setExpensePendingDelete(null);
       await fetchData();
     } catch (err: any) {
+      setExpensePendingDelete(null);
       setError(err.message || 'Failed to delete expense');
     }
+  };
+
+  const requestDeleteExpense = (expense: Expense) => {
+    setExpensePendingDelete(expense);
   };
 
   const handleCreateCategory = async (data: CreateExpenseCategoryData) => {
@@ -541,13 +594,25 @@ export default function ExpensesScreen() {
     };
 
     const groupedExpenses = groupExpenses(filteredExpenses);
+    const parseGroupSortKey = (key: string): number => {
+      if (groupBy === 'week') {
+        return new Date(key.replace('Week of ', '')).getTime();
+      }
+      if (groupBy === 'month') {
+        // "September 2026" — append day 1 for stable parse
+        return new Date(`${key} 1`).getTime();
+      }
+      if (groupBy === 'year') {
+        return new Date(`${key}-01-01`).getTime();
+      }
+      // day: "September 29, 2026"
+      return new Date(key).getTime();
+    };
     const sortedGroupKeys = Object.keys(groupedExpenses).sort((a, b) => {
       if (groupBy === 'none') return 0;
-      // Sort groups by date (newest first)
       try {
-        const dateA = new Date(a.includes('Week of') ? a.replace('Week of ', '') : a);
-        const dateB = new Date(b.includes('Week of') ? b.replace('Week of ', '') : b);
-        return dateB.getTime() - dateA.getTime();
+        const comparison = parseGroupSortKey(a) - parseGroupSortKey(b);
+        return sortOrder === 'asc' ? comparison : -comparison;
       } catch {
         return 0;
       }
@@ -707,30 +772,68 @@ export default function ExpensesScreen() {
           </View>
         )}
 
-        {/* Expand/Collapse All Button */}
-        {groupBy !== 'none' && filteredExpenses.length > 0 && (
-          <View style={[styles.expandCollapseContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-            <TouchableOpacity
-              style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+        {/* Toolbar: scan/add + expand/collapse */}
+        <View
+          style={[
+            styles.listToolbar,
+            { backgroundColor: colors.surface, borderBottomColor: colors.border },
+          ]}
+        >
+          <View style={styles.listToolbarActions}>
+            <TooltipButton
+              tooltip="Scan receipt"
+              style={[
+                styles.toolbarIconBtn,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+              onPress={() => setShowReceiptWizard(true)}
+            >
+              <FontAwesome name="camera" size={16} color={colors.primary} />
+            </TooltipButton>
+            <TooltipButton
+              tooltip="Add expense"
+              style={[styles.toolbarIconBtn, styles.toolbarIconBtnPrimary, { backgroundColor: colors.primary }]}
               onPress={() => {
-                if (sortedGroupKeys.every(key => expandedGroups.has(key))) {
-                  setExpandedGroups(new Set());
-                } else {
-                  setExpandedGroups(new Set(sortedGroupKeys));
-                }
+                setEditingExpense(null);
+                setShowExpenseForm(true);
               }}
             >
-              <FontAwesome
-                name={sortedGroupKeys.every(key => expandedGroups.has(key)) ? 'compress' : 'expand'}
-                size={12}
-                color={colors.text}
-              />
-              <Text style={[styles.expandCollapseText, { color: colors.text }]}>
-                {sortedGroupKeys.every(key => expandedGroups.has(key)) ? 'Collapse All' : 'Expand All'}
-              </Text>
-            </TouchableOpacity>
+              <FontAwesome name="plus" size={16} color="#fff" />
+            </TooltipButton>
           </View>
-        )}
+          <View style={styles.listToolbarLeft}>
+            {groupBy !== 'none' && filteredExpenses.length > 0 ? (
+              <TouchableOpacity
+                style={[
+                  styles.expandCollapseButton,
+                  { backgroundColor: colors.background, borderColor: colors.border },
+                ]}
+                onPress={() => {
+                  if (sortedGroupKeys.every((key) => expandedGroups.has(key))) {
+                    setExpandedGroups(new Set());
+                  } else {
+                    setExpandedGroups(new Set(sortedGroupKeys));
+                  }
+                }}
+              >
+                <FontAwesome
+                  name={
+                    sortedGroupKeys.every((key) => expandedGroups.has(key))
+                      ? 'compress'
+                      : 'expand'
+                  }
+                  size={12}
+                  color={colors.text}
+                />
+                <Text style={[styles.expandCollapseText, { color: colors.text }]}>
+                  {sortedGroupKeys.every((key) => expandedGroups.has(key))
+                    ? 'Collapse All'
+                    : 'Expand All'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
 
         {/* Expenses List */}
         <ScrollView style={styles.expensesList}>
@@ -753,7 +856,7 @@ export default function ExpensesScreen() {
               return (
                 <View key={groupKey} style={styles.groupContainer}>
                   <TouchableOpacity
-                    style={[styles.groupHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}
+                    style={[styles.groupHeader, { backgroundColor: colors.background, borderBottomColor: colors.borderStrong }]}
                     onPress={() => {
                       const newExpanded = new Set(expandedGroups);
                       if (isExpanded) {
@@ -789,11 +892,8 @@ export default function ExpensesScreen() {
                         <ExpenseCard
                           key={expense.id}
                           expense={expense}
-                          onEdit={() => {
-                            setEditingExpense(expense);
-                            setShowExpenseForm(true);
-                          }}
-                          onDelete={() => handleDeleteExpense(expense.id)}
+                          onPress={() => void openExpenseEditor(expense)}
+                          onDelete={() => requestDeleteExpense(expense)}
                         />
                       ))}
                     </View>
@@ -821,49 +921,16 @@ export default function ExpensesScreen() {
                   if (!isUpcoming) return null;
 
                   return (
-                    <TouchableOpacity
+                    <RecurringExpenseRow
                       key={`recurring-${recurring.id}`}
-                      style={[styles.combinedCard, { backgroundColor: colors.card, borderLeftColor: colors.primary, borderLeftWidth: 4 }]}
+                      recurring={recurring}
+                      dateLabel={formatOccurrenceDate(nextDate)}
+                      badge={{ label: 'Upcoming', color: colors.primary }}
                       onPress={() => {
                         setEditingRecurring(recurring);
                         setShowRecurringForm(true);
                       }}
-                    >
-                      <View style={styles.combinedCardHeader}>
-                        <View style={styles.combinedCardInfo}>
-                          <Text style={[styles.combinedCardDescription, { color: colors.text }]}>
-                            {recurring.description}
-                          </Text>
-                          <View style={[styles.recurringBadge, { backgroundColor: colors.primary }]}>
-                            <FontAwesome name="repeat" size={10} color="#fff" />
-                            <Text style={styles.recurringBadgeText}>Upcoming</Text>
-                          </View>
-                        </View>
-                        <Text style={[styles.combinedCardAmount, { color: colors.primary }]}>
-                          ${recurring.amount.toFixed(2)}
-                        </Text>
-                      </View>
-                      <View style={styles.combinedCardDetails}>
-                        <View style={styles.combinedDetailRow}>
-                          <FontAwesome name="folder-o" size={14} color={colors.textSecondary} />
-                          <Text style={[styles.combinedDetailText, { color: colors.textSecondary }]}>
-                            {recurring.category_name}
-                          </Text>
-                        </View>
-                        <View style={styles.combinedDetailRow}>
-                          <FontAwesome name="calendar" size={14} color={colors.textSecondary} />
-                          <Text style={[styles.combinedDetailText, { color: colors.textSecondary }]}>
-                            Due: {nextDate.toLocaleDateString()}
-                          </Text>
-                        </View>
-                        <View style={styles.combinedDetailRow}>
-                          <FontAwesome name="repeat" size={14} color={colors.textSecondary} />
-                          <Text style={[styles.combinedDetailText, { color: colors.textSecondary }]}>
-                            {recurring.frequency.charAt(0).toUpperCase() + recurring.frequency.slice(1)}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
+                    />
                   );
                 })}
 
@@ -877,11 +944,8 @@ export default function ExpensesScreen() {
                 <ExpenseCard
                   key={expense.id}
                   expense={expense}
-                  onEdit={() => {
-                    setEditingExpense(expense);
-                    setShowExpenseForm(true);
-                  }}
-                  onDelete={() => handleDeleteExpense(expense.id)}
+                  onPress={() => void openExpenseEditor(expense)}
+                  onDelete={() => requestDeleteExpense(expense)}
                 />
               ))}
             </>
@@ -890,11 +954,8 @@ export default function ExpensesScreen() {
               <ExpenseCard
                 key={expense.id}
                 expense={expense}
-                onEdit={() => {
-                  setEditingExpense(expense);
-                  setShowExpenseForm(true);
-                }}
-                onDelete={() => handleDeleteExpense(expense.id)}
+                onPress={() => void openExpenseEditor(expense)}
+                onDelete={() => requestDeleteExpense(expense)}
               />
             ))
           )}
@@ -1097,7 +1158,7 @@ export default function ExpensesScreen() {
 
     // Group recurring expenses with occurrence date tracking
     const groupRecurringExpenses = (recurringList: RecurringExpense[]) => {
-      if (groupBy === 'none') {
+      if (recurringGroupBy === 'none') {
         return { 'All Recurring': recurringList.map(r => ({ recurring: r, occurrenceDate: null })) };
       }
 
@@ -1152,13 +1213,13 @@ export default function ExpensesScreen() {
         occurrences.forEach((occurrenceDate) => {
           let groupKey: string;
 
-          if (groupBy === 'day') {
+          if (recurringGroupBy === 'day') {
             groupKey = occurrenceDate.toLocaleDateString('en-US', {
               year: 'numeric',
               month: 'long',
               day: 'numeric',
             });
-          } else if (groupBy === 'week') {
+          } else if (recurringGroupBy === 'week') {
             // Get the start of the week (Sunday)
             const weekStart = new Date(occurrenceDate);
             weekStart.setDate(occurrenceDate.getDate() - occurrenceDate.getDay());
@@ -1167,12 +1228,12 @@ export default function ExpensesScreen() {
               day: 'numeric',
               year: 'numeric',
             })}`;
-          } else if (groupBy === 'month') {
+          } else if (recurringGroupBy === 'month') {
             groupKey = occurrenceDate.toLocaleDateString('en-US', {
               year: 'numeric',
               month: 'long',
             });
-          } else if (groupBy === 'year') {
+          } else if (recurringGroupBy === 'year') {
             groupKey = occurrenceDate.toLocaleDateString('en-US', {
               year: 'numeric',
             });
@@ -1197,7 +1258,7 @@ export default function ExpensesScreen() {
 
     const groupedRecurring = groupRecurringExpenses(recurringExpenses);
     const sortedRecurringGroupKeys = Object.keys(groupedRecurring).sort((a, b) => {
-      if (groupBy === 'none') return 0;
+      if (recurringGroupBy === 'none') return 0;
       try {
         const dateA = new Date(a.includes('Week of') ? a.replace('Week of ', '') : a);
         const dateB = new Date(b.includes('Week of') ? b.replace('Week of ', '') : b);
@@ -1215,22 +1276,29 @@ export default function ExpensesScreen() {
       const occurrence = new Date(occurrenceDate.getFullYear(), occurrenceDate.getMonth(), occurrenceDate.getDate());
 
       // Compare based on grouping type
-      if (groupBy === 'day') {
+      if (recurringGroupBy === 'day') {
         return start.getTime() === occurrence.getTime();
-      } else if (groupBy === 'week') {
+      } else if (recurringGroupBy === 'week') {
         // Check if both dates are in the same week
         const startWeek = new Date(start);
         startWeek.setDate(start.getDate() - start.getDay());
         const occurrenceWeek = new Date(occurrence);
         occurrenceWeek.setDate(occurrence.getDate() - occurrence.getDay());
         return startWeek.getTime() === occurrenceWeek.getTime();
-      } else if (groupBy === 'month') {
+      } else if (recurringGroupBy === 'month') {
         return start.getFullYear() === occurrence.getFullYear() && start.getMonth() === occurrence.getMonth();
-      } else if (groupBy === 'year') {
+      } else if (recurringGroupBy === 'year') {
         return start.getFullYear() === occurrence.getFullYear();
       }
       return true;
     };
+
+    const sortedTemplates = [...recurringExpenses].sort((a, b) => {
+      const dateA = new Date(a.next_due_date).getTime();
+      const dateB = new Date(b.next_due_date).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      return a.description.localeCompare(b.description);
+    });
 
     return (
       <ScrollView style={styles.content}>
@@ -1251,9 +1319,9 @@ export default function ExpensesScreen() {
         <View style={[styles.groupByContainer, { backgroundColor: colors.card }]}>
           <Text style={[styles.groupByLabel, { color: colors.text }]}>Group By:</Text>
           <ThemeAwarePicker
-            selectedValue={groupBy}
+            selectedValue={recurringGroupBy}
             onValueChange={(value) => {
-              setGroupBy(value as 'none' | 'day' | 'week' | 'month' | 'year');
+              setRecurringGroupBy(value as 'none' | 'day' | 'week' | 'month' | 'year');
               // Reset expanded groups when changing group by
               setExpandedRecurringGroups(new Set());
             }}
@@ -1268,7 +1336,7 @@ export default function ExpensesScreen() {
         </View>
 
         {/* Expand/Collapse All Button */}
-        {groupBy !== 'none' && recurringExpenses.length > 0 && (
+        {recurringGroupBy !== 'none' && recurringExpenses.length > 0 && (
           <View style={[styles.expandCollapseContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
             <TouchableOpacity
               style={[styles.expandCollapseButton, { backgroundColor: colors.background, borderColor: colors.border }]}
@@ -1292,7 +1360,7 @@ export default function ExpensesScreen() {
           </View>
         )}
 
-        {groupBy !== 'none' ? (
+        {recurringGroupBy !== 'none' ? (
           // Grouped view with accordions
           sortedRecurringGroupKeys.map((groupKey) => {
             const groupRecurringList = groupedRecurring[groupKey];
@@ -1338,84 +1406,21 @@ export default function ExpensesScreen() {
                       const { recurring, occurrenceDate } = item;
                       const isTemplate = isTemplateOccurrence(recurring, occurrenceDate);
                       return (
-                        <TouchableOpacity
+                        <RecurringExpenseRow
                           key={`${recurring.id}-${occurrenceDate?.getTime() || index}`}
-                          style={[styles.recurringCard, { backgroundColor: colors.card }]}
+                          recurring={recurring}
+                          dateLabel={occurrenceDate ? formatOccurrenceDate(occurrenceDate) : undefined}
+                          badge={
+                            isTemplate
+                              ? { label: 'Template', color: '#8b5cf6' }
+                              : { label: 'Generated', color: '#10b981' }
+                          }
                           onPress={() => {
                             setEditingRecurring(recurring);
                             setShowRecurringForm(true);
                           }}
-                        >
-                          <View style={styles.recurringHeader}>
-                            <View style={styles.recurringInfo}>
-                              <View style={styles.recurringDescriptionContainer}>
-                                <Text style={[styles.recurringDescription, { color: colors.text }]}>
-                                  {recurring.description}
-                                </Text>
-                                {isTemplate ? (
-                                  <View style={[styles.templateBadge, { backgroundColor: '#8b5cf6' }]}>
-                                    <FontAwesome name="file-text-o" size={10} color="#fff" />
-                                    <Text style={styles.templateBadgeText}>Template</Text>
-                                  </View>
-                                ) : (
-                                  <View style={[styles.templateBadge, { backgroundColor: '#10b981' }]}>
-                                    <FontAwesome name="magic" size={10} color="#fff" />
-                                    <Text style={styles.templateBadgeText}>Generated</Text>
-                                  </View>
-                                )}
-                              </View>
-                              <Text style={[styles.recurringAmount, { color: colors.primary }]}>
-                                ${recurring.amount.toFixed(2)}
-                              </Text>
-                            </View>
-                            <View style={[styles.recurringStatus, { backgroundColor: recurring.is_active ? '#10b981' : '#6b7280' }]}>
-                              <Text style={styles.recurringStatusText}>
-                                {recurring.is_active ? 'Active' : 'Inactive'}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={styles.recurringDetails}>
-                            <View style={styles.recurringDetailRow}>
-                              <FontAwesome name="folder-o" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                                {recurring.category_name}
-                              </Text>
-                            </View>
-                            <View style={styles.recurringDetailRow}>
-                              <FontAwesome name="repeat" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                                {recurring.frequency.charAt(0).toUpperCase() + recurring.frequency.slice(1)}
-                              </Text>
-                            </View>
-                            <View style={styles.recurringDetailRow}>
-                              <FontAwesome name="calendar" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                                {occurrenceDate ? occurrenceDate.toLocaleDateString() : `Next: ${new Date(recurring.next_due_date).toLocaleDateString()}`}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={styles.recurringActions}>
-                            <TouchableOpacity
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                setEditingRecurring(recurring);
-                                setShowRecurringForm(true);
-                              }}
-                              style={styles.recurringActionButton}
-                            >
-                              <FontAwesome name="pencil" size={18} color={colors.textSecondary} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                handleDeleteRecurringExpense(recurring.id);
-                              }}
-                              style={styles.recurringActionButton}
-                            >
-                              <FontAwesome name="trash" size={18} color="#ef4444" />
-                            </TouchableOpacity>
-                          </View>
-                        </TouchableOpacity>
+                          onDelete={() => handleDeleteRecurringExpense(recurring.id)}
+                        />
                       );
                     })}
                   </View>
@@ -1424,80 +1429,18 @@ export default function ExpensesScreen() {
             );
           })
         ) : (
-          // Non-grouped view - show only the template (start month)
-          recurringExpenses.map((recurring) => {
+          // Non-grouped view - one row per template, sorted by next due date
+          sortedTemplates.map((recurring) => {
             return (
-              <TouchableOpacity
+              <RecurringExpenseRow
                 key={recurring.id}
-                style={[styles.recurringCard, { backgroundColor: colors.card }]}
+                recurring={recurring}
                 onPress={() => {
                   setEditingRecurring(recurring);
                   setShowRecurringForm(true);
                 }}
-              >
-                <View style={styles.recurringHeader}>
-                  <View style={styles.recurringInfo}>
-                    <View style={styles.recurringDescriptionContainer}>
-                      <Text style={[styles.recurringDescription, { color: colors.text }]}>
-                        {recurring.description}
-                      </Text>
-                      <View style={[styles.templateBadge, { backgroundColor: '#8b5cf6' }]}>
-                        <FontAwesome name="file-text-o" size={10} color="#fff" />
-                        <Text style={styles.templateBadgeText}>Template</Text>
-                      </View>
-                    </View>
-                    <Text style={[styles.recurringAmount, { color: colors.primary }]}>
-                      ${recurring.amount.toFixed(2)}
-                    </Text>
-                  </View>
-                  <View style={[styles.recurringStatus, { backgroundColor: recurring.is_active ? '#10b981' : '#6b7280' }]}>
-                    <Text style={styles.recurringStatusText}>
-                      {recurring.is_active ? 'Active' : 'Inactive'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.recurringDetails}>
-                  <View style={styles.recurringDetailRow}>
-                    <FontAwesome name="folder-o" size={14} color={colors.textSecondary} />
-                    <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                      {recurring.category_name}
-                    </Text>
-                  </View>
-                  <View style={styles.recurringDetailRow}>
-                    <FontAwesome name="repeat" size={14} color={colors.textSecondary} />
-                    <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                      {recurring.frequency.charAt(0).toUpperCase() + recurring.frequency.slice(1)}
-                    </Text>
-                  </View>
-                  <View style={styles.recurringDetailRow}>
-                    <FontAwesome name="calendar" size={14} color={colors.textSecondary} />
-                    <Text style={[styles.recurringDetailText, { color: colors.textSecondary }]}>
-                      Next: {new Date(recurring.next_due_date).toLocaleDateString()}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.recurringActions}>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      setEditingRecurring(recurring);
-                      setShowRecurringForm(true);
-                    }}
-                    style={styles.recurringActionButton}
-                  >
-                    <FontAwesome name="pencil" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleDeleteRecurringExpense(recurring.id);
-                    }}
-                    style={styles.recurringActionButton}
-                  >
-                    <FontAwesome name="trash" size={18} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
+                onDelete={() => handleDeleteRecurringExpense(recurring.id)}
+              />
             );
           })
         )}
@@ -1671,15 +1614,19 @@ export default function ExpensesScreen() {
       </View>
       {renderContent()}
 
-      {/* Floating Action Button */}
-      {selectedFamily && (activeTab === 'expenses' || activeTab === 'categories' || activeTab === 'budgets' || activeTab === 'recurring') && (
-        <TouchableOpacity
+      {/* Floating Action Button (non-expenses tabs) */}
+      {selectedFamily && (activeTab === 'categories' || activeTab === 'budgets' || activeTab === 'recurring') && (
+        <TooltipButton
+          tooltip={
+            activeTab === 'categories'
+              ? 'Add category'
+              : activeTab === 'budgets'
+                ? 'Add budget'
+                : 'Add recurring expense'
+          }
           style={[styles.fab, { backgroundColor: colors.primary }]}
           onPress={() => {
-            if (activeTab === 'expenses') {
-              setEditingExpense(null);
-              setShowExpenseForm(true);
-            } else if (activeTab === 'categories') {
+            if (activeTab === 'categories') {
               setEditingCategory(null);
               setShowCategoryForm(true);
             } else if (activeTab === 'budgets') {
@@ -1692,7 +1639,7 @@ export default function ExpensesScreen() {
           }}
         >
           <FontAwesome name="plus" size={24} color="#fff" />
-        </TouchableOpacity>
+        </TooltipButton>
       )}
 
       {/* Expense Form */}
@@ -1710,6 +1657,18 @@ export default function ExpensesScreen() {
             setEditingExpense(null);
           }}
           loading={creating}
+        />
+      )}
+
+      {selectedFamily && (
+        <ReceiptScanWizard
+          visible={showReceiptWizard}
+          familyId={selectedFamily.id}
+          categories={categories}
+          onClose={() => setShowReceiptWizard(false)}
+          onSaved={() => {
+            void fetchData();
+          }}
         />
       )}
 
@@ -1774,6 +1733,26 @@ export default function ExpensesScreen() {
           loading={creating}
         />
       )}
+
+      <AlertModal
+        visible={!!expensePendingDelete}
+        title="Delete expense?"
+        message={
+          expensePendingDelete
+            ? `Delete “${expensePendingDelete.description}” ($${expensePendingDelete.amount.toFixed(2)})? This cannot be undone.`
+            : ''
+        }
+        type="warning"
+        showCancel
+        cancelText="Cancel"
+        confirmText="Delete"
+        onClose={() => setExpensePendingDelete(null)}
+        onConfirm={() => {
+          if (expensePendingDelete) {
+            void handleDeleteExpense(expensePendingDelete.id);
+          }
+        }}
+      />
 
       <AlertModal
         visible={!!error}
@@ -1965,83 +1944,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  recurringCard: {
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  recurringHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  recurringInfo: {
-    flex: 1,
-  },
-  recurringDescriptionContainer: {
-    flex: 1,
-    marginBottom: 4,
-  },
-  recurringDescription: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  templateBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-    gap: 4,
-  },
-  templateBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  recurringAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  recurringStatus: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  recurringStatusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  recurringDetails: {
-    marginTop: 8,
-  },
-  recurringDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  recurringDetailText: {
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  recurringActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 12,
-    gap: 8,
-  },
-  recurringActionButton: {
-    padding: 8,
-  },
   fab: {
     position: 'absolute',
     right: 16,
@@ -2056,6 +1958,56 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  listToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    gap: 8,
+    minHeight: 44,
+  },
+  listToolbarLeft: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  listToolbarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  toolbarIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolbarIconBtnPrimary: {
+    borderWidth: 0,
+  },
+  expandCollapseContainer: {
+    padding: 8,
+    borderBottomWidth: 1,
+  },
+  expandCollapseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 4,
+    alignSelf: 'flex-start',
+  },
+  expandCollapseText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   deleteButton: {
     padding: 8,
@@ -2219,62 +2171,6 @@ const styles = StyleSheet.create({
   expensesList: {
     flex: 1,
   },
-  combinedCard: {
-    borderRadius: 8,
-    marginBottom: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  combinedCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  combinedCardInfo: {
-    flex: 1,
-    marginRight: 8,
-  },
-  combinedCardDescription: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  combinedCardAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  combinedCardDetails: {
-    marginTop: 8,
-  },
-  combinedDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  combinedDetailText: {
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  recurringBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 4,
-    alignSelf: 'flex-start',
-    gap: 4,
-  },
-  recurringBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
   groupContainer: {
     marginBottom: 16,
   },
@@ -2282,9 +2178,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 2,
-    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    marginBottom: 0,
   },
   groupHeaderContent: {
     flexDirection: 'row',
@@ -2325,25 +2222,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     minWidth: 80,
-  },
-  expandCollapseContainer: {
-    padding: 8,
-    borderBottomWidth: 1,
-  },
-  expandCollapseButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    borderWidth: 1,
-    gap: 4,
-    alignSelf: 'flex-start',
-  },
-  expandCollapseText: {
-    fontSize: 12,
-    fontWeight: '600',
   },
   generatedExpensesContainer: {
     marginLeft: 16,

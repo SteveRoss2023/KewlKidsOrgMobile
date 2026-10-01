@@ -6,7 +6,7 @@ from .models import ExpenseCategory
 
 # Default expense categories to create for each family
 DEFAULT_CATEGORIES = [
-    {'name': 'Food & Dining', 'description': 'Restaurants, groceries, and food delivery', 'icon': 'utensils', 'color': '#f97316', 'order': 1},
+    {'name': 'Food & Dining', 'description': 'Restaurants, groceries, and food delivery', 'icon': 'cutlery', 'color': '#f97316', 'order': 1},
     {'name': 'Transportation', 'description': 'Gas, public transit, parking, rideshare', 'icon': 'car', 'color': '#3b82f6', 'order': 2},
     {'name': 'Utilities', 'description': 'Electricity, water, gas, internet, phone', 'icon': 'bolt', 'color': '#eab308', 'order': 3},
     {'name': 'Shopping', 'description': 'General shopping and retail purchases', 'icon': 'shopping-bag', 'color': '#8b5cf6', 'order': 4},
@@ -16,7 +16,7 @@ DEFAULT_CATEGORIES = [
     {'name': 'Home & Garden', 'description': 'Home improvement, furniture, maintenance', 'icon': 'home', 'color': '#10b981', 'order': 8},
     {'name': 'Personal Care', 'description': 'Haircuts, cosmetics, personal items', 'icon': 'user', 'color': '#f59e0b', 'order': 9},
     {'name': 'Travel', 'description': 'Hotels, flights, vacation expenses', 'icon': 'plane', 'color': '#6366f1', 'order': 10},
-    {'name': 'Bills & Fees', 'description': 'Bank fees, service charges, subscriptions', 'icon': 'file-invoice-dollar', 'color': '#64748b', 'order': 11},
+    {'name': 'Bills & Fees', 'description': 'Bank fees, service charges, subscriptions', 'icon': 'file-text-o', 'color': '#64748b', 'order': 11},
     {'name': 'Gifts & Donations', 'description': 'Gifts, charity, donations', 'icon': 'gift', 'color': '#f43f5e', 'order': 12},
     {'name': 'Other', 'description': 'Miscellaneous expenses', 'icon': 'ellipsis-h', 'color': '#94a3b8', 'order': 13},
 ]

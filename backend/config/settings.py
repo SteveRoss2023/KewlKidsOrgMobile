@@ -76,7 +76,7 @@ INSTALLED_APPS = [
     'documents',
     'events',
     'chat',
-    'expenses',
+    'expenses.apps.ExpensesConfig',
 
     'django.contrib.staticfiles',
 
@@ -402,6 +402,10 @@ else:
 # Session key lifetime: 24 hours (86400 seconds) to match JWT refresh token lifetime
 # This ensures the session key persists across JWT refreshes and auto-refreshes on access
 OAUTH_SESSION_KEY_LIFETIME = int(os.getenv('OAUTH_SESSION_KEY_LIFETIME', '86400'))  # 24 hours default
+
+# Gemini vision for receipt OCR (optional; falls back to Tesseract)
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-flash-lite-latest').strip() or 'gemini-flash-lite-latest'
 
 # Logging Configuration - Reduce verbosity
 LOGGING = {

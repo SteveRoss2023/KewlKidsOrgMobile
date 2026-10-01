@@ -160,7 +160,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Return expenses for families the user belongs to."""
         user = self.request.user
-        queryset = Expense.objects.filter(family__members__user=user)
+        queryset = Expense.objects.filter(family__members__user=user).prefetch_related('tags', 'line_items')
 
         # Filter by family if provided
         family_id = self.request.query_params.get('family')
@@ -947,7 +947,69 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         family_id = self.request.data.get('family')
         family = get_object_or_404(Family, id=family_id, members__user=self.request.user)
         member = get_object_or_404(Member, user=self.request.user, family=family)
-        serializer.save(uploaded_by=member, family=family)
+        uploaded = self.request.FILES.get('file')
+        extra = {'uploaded_by': member, 'family': family}
+        if uploaded is not None:
+            extra['file_size'] = getattr(uploaded, 'size', 0) or 0
+            if not serializer.validated_data.get('mime_type'):
+                extra['mime_type'] = getattr(uploaded, 'content_type', None) or 'application/octet-stream'
+        expense_id = self.request.data.get('expense')
+        if expense_id:
+            expense = get_object_or_404(
+                Expense,
+                id=expense_id,
+                family=family,
+            )
+            extra['expense'] = expense
+        serializer.save(**extra)
+
+    @action(detail=True, methods=['post'], url_path='parse')
+    def parse(self, request, pk=None):
+        """Run free Tesseract OCR on this receipt; return merchant/date/total/line-item suggestions."""
+        receipt = self.get_object()
+        if not receipt.file:
+            return Response({'error': 'Receipt file not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .receipt_ocr import parse_receipt_file
+
+        try:
+            path = receipt.file.path
+            result = parse_receipt_file(path)
+            return Response(result, status=status.HTTP_200_OK)
+        except RuntimeError as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'ocr_available': False,
+                    'merchant': None,
+                    'expense_date': None,
+                    'total': None,
+                    'line_items': [],
+                    'raw_text': '',
+                    'found': {
+                        'merchant': False,
+                        'expense_date': False,
+                        'total': False,
+                        'total_labeled': False,
+                        'line_items': False,
+                        'line_item_count': 0,
+                    },
+                    'confidence': 'low',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception('Receipt OCR failed: %s', e)
+            return Response(
+                {
+                    'error': 'Failed to parse receipt. You can enter details manually.',
+                    'line_items': [],
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):

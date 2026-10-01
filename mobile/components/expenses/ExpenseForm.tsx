@@ -19,6 +19,17 @@ import { useTheme } from '../../contexts/ThemeContext';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 import ThemeAwareDatePicker from '../ThemeAwareDatePicker';
 import expenseService from '../../services/expenseService';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
+import {
+  formatMoneyDisplay,
+  onMoneyChange,
+  parseMoneyDisplay,
+} from '../../utils/moneyInput';
+import LineItemsEditor, {
+  DraftLineItem,
+  draftLinesFromExpenseItems,
+  toLineItemsInput,
+} from './LineItemsEditor';
 
 interface ExpenseFormProps {
   visible: boolean;
@@ -63,6 +74,7 @@ export default function ExpenseForm({
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [lines, setLines] = useState<DraftLineItem[]>([]);
 
   useEffect(() => {
     if (!visible) {
@@ -75,40 +87,48 @@ export default function ExpenseForm({
       setNotes('');
       setSelectedTags([]);
       setReceipt(null);
+      setLines([]);
       return;
     }
 
     if (expense) {
       setDescription(expense.description);
-      setAmount(expense.amount.toString());
+      setAmount(formatMoneyDisplay(expense.amount));
       setCategoryId(expense.category);
       setPaymentMethod(expense.payment_method);
       setExpenseDate(expense.expense_date);
       setNotes(expense.notes || '');
       setSelectedTags(expense.tags || []);
-      // If expense has receipt_url, create a receipt object for display
+      setLines(draftLinesFromExpenseItems(expense.line_items));
       if (expense.receipt_url) {
         setReceipt({
-          id: 0,
+          id: expense.receipt_id || 0,
           expense: expense.id,
-          file_name: 'Receipt',
-          file_url: expense.receipt_url,
-          uploaded_at: '',
-        } as Receipt);
+          family: expense.family,
+          file: '',
+          receipt_url: expense.receipt_url,
+          file_size: 0,
+          mime_type: null,
+          uploaded_by: null,
+          uploaded_by_username: null,
+          created_at: '',
+          updated_at: '',
+        });
       } else {
         setReceipt(null);
       }
     } else {
       setDescription('');
       setAmount('');
-      setCategoryId(categories.length > 0 ? categories[0].id : null);
+      setCategoryId(null);
       setPaymentMethod('credit_card');
       setExpenseDate(new Date().toISOString().split('T')[0]);
       setNotes('');
       setSelectedTags([]);
       setReceipt(null);
+      setLines([]);
     }
-  }, [expense, categories, visible]);
+  }, [visible, expense]);
 
   const handlePickReceipt = async () => {
     try {
@@ -206,15 +226,33 @@ export default function ExpenseForm({
 
   const uploadReceiptFile = async (fileUri: string, fileName: string, mimeType: string) => {
     if (!expense?.id) {
-      // If expense doesn't exist yet, we need to create it first
-      Alert.alert('Info', 'Please save the expense first, then upload the receipt.');
+      Alert.alert('Info', 'Please save the expense first, then upload the receipt — or use Scan receipt to create both together.');
       return;
     }
 
     setUploadingReceipt(true);
     try {
-      const uploadedReceipt = await expenseService.uploadReceipt(expense.id, fileUri, fileName, mimeType);
+      const uploadedReceipt = await expenseService.uploadReceipt({
+        familyId,
+        fileUri,
+        fileName,
+        mimeType,
+        expenseId: expense.id,
+      });
       setReceipt(uploadedReceipt);
+
+      // Prefill line items from OCR when the editor is empty
+      try {
+        const parsed = await expenseService.parseReceipt(uploadedReceipt.id);
+        if (parsed?.line_items?.length) {
+          setLines((prev) =>
+            prev.length === 0 ? draftLinesFromExpenseItems(parsed.line_items) : prev
+          );
+        }
+      } catch {
+        // OCR optional on attach
+      }
+
       Alert.alert('Success', 'Receipt uploaded successfully');
     } catch (err: any) {
       console.error('Error uploading receipt:', err);
@@ -225,14 +263,16 @@ export default function ExpenseForm({
   };
 
   const handleViewReceipt = async () => {
-    if (!receipt?.file_url) return;
+    const raw = receipt?.receipt_url || (receipt as any)?.file_url;
+    const url = resolveMediaUrl(raw);
+    if (!url) return;
 
     try {
       if (Platform.OS === 'web') {
-        window.open(receipt.file_url, '_blank');
+        window.open(url, '_blank');
       } else {
         const { Linking } = require('react-native');
-        await Linking.openURL(receipt.file_url);
+        await Linking.openURL(url);
       }
     } catch (err: any) {
       console.error('Error viewing receipt:', err);
@@ -285,8 +325,8 @@ export default function ExpenseForm({
       return;
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
+    const amountNum = parseMoneyDisplay(amount);
+    if (amountNum == null || amountNum <= 0) {
       Alert.alert('Validation Error', 'Please enter a valid amount greater than 0');
       return;
     }
@@ -300,6 +340,7 @@ export default function ExpenseForm({
         expense_date: expenseDate,
         notes: notes.trim() || undefined,
         tags: selectedTags.length > 0 ? selectedTags : undefined,
+        line_items_input: toLineItemsInput(lines),
       });
     } else {
       onSubmit({
@@ -311,9 +352,8 @@ export default function ExpenseForm({
         expense_date: expenseDate,
         notes: notes.trim() || undefined,
         tags: selectedTags.length > 0 ? selectedTags : undefined,
+        line_items_input: toLineItemsInput(lines),
       });
-      // If onExpenseCreated callback is provided, it will be called after expense is created
-      // This allows the parent to handle receipt upload after expense creation
     }
   };
 
@@ -332,7 +372,11 @@ export default function ExpenseForm({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.form}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={styles.formGroup}>
               <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
               <TextInput
@@ -350,10 +394,10 @@ export default function ExpenseForm({
               <TextInput
                 style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
                 value={amount}
-                onChangeText={setAmount}
-                placeholder="0.00"
+                onChangeText={(t) => setAmount(onMoneyChange(t))}
+                placeholder="$0.00"
                 placeholderTextColor={colors.textSecondary}
-                keyboardType="decimal-pad"
+                keyboardType="number-pad"
                 editable={!loading}
               />
             </View>
@@ -434,6 +478,62 @@ export default function ExpenseForm({
                   </Text>
                 )}
               </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Receipt</Text>
+              {receipt?.receipt_url || (receipt as any)?.file_url ? (
+                <View style={[styles.receiptContainer, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                  <View style={styles.receiptInfo}>
+                    <FontAwesome name="file-image-o" size={18} color={colors.primary} />
+                    <Text style={[styles.receiptName, { color: colors.text }]} numberOfLines={1}>
+                      Receipt attached
+                    </Text>
+                  </View>
+                  <View style={styles.receiptActions}>
+                    <TouchableOpacity
+                      style={styles.receiptActionButton}
+                      onPress={handleViewReceipt}
+                      disabled={loading || uploadingReceipt}
+                    >
+                      <Text style={[styles.receiptActionText, { color: colors.primary }]}>View</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.receiptActionButton}
+                      onPress={handleDeleteReceipt}
+                      disabled={loading || uploadingReceipt || !receipt?.id}
+                    >
+                      <Text style={[styles.receiptActionText, { color: colors.error || '#ef4444' }]}>
+                        {uploadingReceipt ? '…' : 'Remove'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.uploadButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                  onPress={handlePickReceipt}
+                  disabled={loading || uploadingReceipt || !expense?.id}
+                >
+                  <FontAwesome name="camera" size={16} color={colors.primary} />
+                  <Text style={[styles.uploadButtonText, { color: colors.text }]}>
+                    {uploadingReceipt
+                      ? 'Uploading…'
+                      : expense?.id
+                        ? 'Add receipt photo'
+                        : 'Save expense first to attach a receipt'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.formGroup}>
+              <LineItemsEditor
+                lines={lines}
+                onChange={setLines}
+                disabled={loading}
+                hint="Optional. Add products from the receipt (name, qty, price)."
+              />
             </View>
 
             <View style={styles.formGroup}>

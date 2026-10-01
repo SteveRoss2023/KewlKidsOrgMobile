@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import apiClient, { handleAPIError } from './api';
 import {
   ExpenseCategory,
@@ -6,6 +7,7 @@ import {
   Budget,
   RecurringExpense,
   Receipt,
+  ReceiptParseResult,
   CreateExpenseData,
   UpdateExpenseData,
   CreateExpenseCategoryData,
@@ -22,6 +24,48 @@ import {
   BudgetAlert,
 } from '../types/expenses';
 
+/** Follow DRF `next` links until all pages are loaded. */
+async function fetchAllPages<T>(
+  initialPath: string,
+  params?: Record<string, any>
+): Promise<T[]> {
+  const response = await apiClient.get(initialPath, { params });
+  if (Array.isArray(response.data)) {
+    return response.data;
+  }
+  if (!response.data || !Array.isArray(response.data.results)) {
+    return [];
+  }
+
+  let items: T[] = [...response.data.results];
+  let nextUrl: string | null = response.data.next || null;
+
+  while (nextUrl) {
+    let path = nextUrl;
+    if (nextUrl.startsWith('http://') || nextUrl.startsWith('https://')) {
+      const url = new URL(nextUrl);
+      path = url.pathname + url.search;
+      if (path.startsWith('/api')) {
+        path = path.substring(4);
+      }
+    } else if (nextUrl.startsWith('/api')) {
+      path = nextUrl.substring(4);
+    } else if (!nextUrl.startsWith('/')) {
+      path = '/' + nextUrl;
+    }
+
+    const nextResponse = await apiClient.get(path);
+    if (nextResponse.data && Array.isArray(nextResponse.data.results)) {
+      items = items.concat(nextResponse.data.results);
+      nextUrl = nextResponse.data.next || null;
+    } else {
+      break;
+    }
+  }
+
+  return items;
+}
+
 /**
  * Expense Service
  */
@@ -31,16 +75,9 @@ class ExpenseService {
    */
   async getCategories(familyId: number): Promise<ExpenseCategory[]> {
     try {
-      const response = await apiClient.get('/expense-categories/', {
-        params: { family: familyId },
+      return await fetchAllPages<ExpenseCategory>('/expense-categories/', {
+        family: familyId,
       });
-      if (response.data && Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      return [];
     } catch (error) {
       console.error('Error fetching expense categories:', error);
       throw handleAPIError(error as any);
@@ -117,14 +154,7 @@ class ExpenseService {
         if (filters.payment_method) params.payment_method = filters.payment_method;
       }
 
-      const response = await apiClient.get('/expenses/', { params });
-      if (response.data && Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      return [];
+      return await fetchAllPages<Expense>('/expenses/', params);
     } catch (error) {
       console.error('Error fetching expenses:', error);
       throw handleAPIError(error as any);
@@ -255,14 +285,7 @@ class ExpenseService {
       const params: any = { family: familyId };
       if (isActive !== undefined) params.is_active = isActive.toString();
 
-      const response = await apiClient.get('/budgets/', { params });
-      if (response.data && Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      return [];
+      return await fetchAllPages<Budget>('/budgets/', params);
     } catch (error) {
       console.error('Error fetching budgets:', error);
       throw handleAPIError(error as any);
@@ -326,14 +349,7 @@ class ExpenseService {
       const params: any = { family: familyId };
       if (isActive !== undefined) params.is_active = isActive.toString();
 
-      const response = await apiClient.get('/recurring-expenses/', { params });
-      if (response.data && Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      return [];
+      return await fetchAllPages<RecurringExpense>('/recurring-expenses/', params);
     } catch (error) {
       console.error('Error fetching recurring expenses:', error);
       throw handleAPIError(error as any);
@@ -395,16 +411,9 @@ class ExpenseService {
    */
   async getTags(familyId: number): Promise<ExpenseTag[]> {
     try {
-      const response = await apiClient.get('/expense-tags/', {
-        params: { family: familyId },
+      return await fetchAllPages<ExpenseTag>('/expense-tags/', {
+        family: familyId,
       });
-      if (response.data && Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-      return [];
     } catch (error) {
       console.error('Error fetching expense tags:', error);
       throw handleAPIError(error as any);
@@ -447,24 +456,67 @@ class ExpenseService {
   }
 
   /**
-   * Upload a receipt for an expense
+   * Upload a receipt (optionally linked to an expense). Family is required.
    */
-  async uploadReceipt(expenseId: number, fileUri: string, fileName: string, mimeType: string): Promise<Receipt> {
+  async uploadReceipt(params: {
+    familyId: number;
+    fileUri: string;
+    fileName: string;
+    mimeType: string;
+    expenseId?: number | null;
+  }): Promise<Receipt> {
     try {
       const formData = new FormData();
-      // Note: In React Native, we need to handle file uploads differently
-      // This is a placeholder - actual implementation depends on the file picker library used
-      formData.append('file', {
-        uri: fileUri,
-        type: mimeType,
-        name: fileName,
-      } as any);
-      formData.append('expense', expenseId.toString());
+      if (Platform.OS === 'web') {
+        const res = await fetch(params.fileUri);
+        const blob = await res.blob();
+        formData.append('file', blob, params.fileName);
+      } else {
+        formData.append('file', {
+          uri: params.fileUri,
+          type: params.mimeType,
+          name: params.fileName,
+        } as any);
+      }
+      formData.append('family', params.familyId.toString());
+      if (params.expenseId) {
+        formData.append('expense', params.expenseId.toString());
+      }
 
       const response = await apiClient.post<Receipt>('/receipts/', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+      });
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Run free Tesseract OCR parse on an uploaded receipt.
+   */
+  async parseReceipt(receiptId: number): Promise<ReceiptParseResult> {
+    try {
+      const response = await apiClient.post<ReceiptParseResult>(`/receipts/${receiptId}/parse/`);
+      return response.data;
+    } catch (error: any) {
+      // 503 still returns structured OCR failure payload
+      if (error?.response?.data && typeof error.response.data === 'object') {
+        return error.response.data as ReceiptParseResult;
+      }
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Attach an existing receipt to an expense.
+   */
+  async attachReceiptToExpense(receiptId: number, expenseId: number): Promise<Receipt> {
+    try {
+      const response = await apiClient.patch<Receipt>(`/receipts/${receiptId}/`, {
+        expense: expenseId,
       });
       return response.data;
     } catch (error) {

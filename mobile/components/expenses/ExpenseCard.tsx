@@ -1,234 +1,329 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  Image,
+  Linking,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { Expense } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 interface ExpenseCardProps {
   expense: Expense;
   onPress?: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
 }
 
-export default function ExpenseCard({ expense, onPress, onEdit, onDelete }: ExpenseCardProps) {
+export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardProps) {
   const { colors } = useTheme();
+  const [receiptVisible, setReceiptVisible] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
 
-  // Format date without timezone conversion
-  // expense.expense_date comes as "YYYY-MM-DD" from the API
+  const receiptUrl = resolveMediaUrl(expense.receipt_url);
+  const isGenerated = !!(expense.is_recurring && expense.recurring_expense);
+
   const formatDate = (dateString: string): string => {
     try {
-      // Parse the date string directly to avoid timezone conversion
       const [year, month, day] = dateString.split('-').map(Number);
-      const date = new Date(year, month - 1, day); // month is 0-indexed
-      return date.toLocaleDateString();
+      const date = new Date(year, month - 1, day);
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
     } catch {
-      // Fallback to original method if parsing fails
       return new Date(dateString).toLocaleDateString();
     }
   };
 
-  const getPaymentMethodIcon = (method: string) => {
-    switch (method) {
-      case 'credit_card':
-        return 'credit-card';
-      case 'debit_card':
-        return 'credit-card';
-      case 'cash':
-        return 'money';
-      case 'bank_transfer':
-        return 'bank';
-      case 'e_transfer':
-        return 'bank';
-      case 'check':
-        return 'file-text-o';
-      default:
-        return 'credit-card';
+  const openReceipt = () => {
+    if (!receiptUrl) return;
+    setImageLoading(true);
+    setReceiptVisible(true);
+  };
+
+  useEffect(() => {
+    if (!receiptVisible || !receiptUrl) return;
+    setImageLoading(true);
+    const t = setTimeout(() => setImageLoading(false), 1500);
+    return () => clearTimeout(t);
+  }, [receiptVisible, receiptUrl]);
+
+  const openReceiptExternally = async () => {
+    if (!receiptUrl) return;
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(receiptUrl, '_blank');
+      } else {
+        await Linking.openURL(receiptUrl);
+      }
+    } catch {
+      // ignore
     }
   };
 
+  const metaParts = [
+    formatDate(expense.expense_date),
+    expense.category_name || null,
+  ].filter(Boolean);
+
   return (
-    <TouchableOpacity
-      style={[styles.card, { backgroundColor: colors.card }]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={styles.cardContent}>
-        <View style={styles.cardInfo}>
-          <View style={styles.cardHeader}>
-            <View style={styles.descriptionContainer}>
-              <Text style={[styles.description, { color: colors.text }]} numberOfLines={2}>
-                {expense.description}
-              </Text>
-              <View style={styles.badgesContainer}>
-                {expense.is_recurring && expense.recurring_expense && (
-                  <View style={[styles.badge, { backgroundColor: '#10b981' }]}>
-                    <FontAwesome name="magic" size={10} color="#fff" />
-                    <Text style={styles.badgeText}>Generated</Text>
-                  </View>
-                )}
-                {!expense.is_recurring || !expense.recurring_expense ? (
-                  <View style={[styles.badge, { backgroundColor: '#6366f1' }]}>
-                    <FontAwesome name="edit" size={10} color="#fff" />
-                    <Text style={styles.badgeText}>Original</Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
+    <>
+      <TouchableOpacity
+        style={[styles.row, { borderBottomColor: colors.border }]}
+        onPress={onPress}
+        activeOpacity={0.65}
+        accessibilityRole="button"
+        accessibilityLabel={`${expense.description}, $${expense.amount.toFixed(2)}`}
+      >
+        <View style={styles.main}>
+          <View style={styles.topLine}>
+            <Text style={[styles.description, { color: colors.text }]} numberOfLines={1}>
+              {expense.description}
+            </Text>
             <Text style={[styles.amount, { color: colors.primary }]}>
               ${expense.amount.toFixed(2)}
             </Text>
           </View>
-          <View style={styles.cardDetails}>
-            <View style={styles.detailRow}>
-              <FontAwesome name="folder-o" size={14} color={colors.textSecondary} />
-              <Text style={[styles.detailText, { color: colors.textSecondary }]}>
-                {expense.category_name}
-              </Text>
-            </View>
-            <View style={styles.detailRow}>
-              <FontAwesome
-                name={getPaymentMethodIcon(expense.payment_method) as any}
-                size={14}
-                color={colors.textSecondary}
-              />
-              <Text style={[styles.detailText, { color: colors.textSecondary }]}>
-                {formatDate(expense.expense_date)}
-              </Text>
-            </View>
-          </View>
-          {expense.tag_names && expense.tag_names.length > 0 && (
-            <View style={styles.tagsContainer}>
-              {expense.tag_names.map((tag, index) => (
-                <View key={index} style={[styles.tag, { backgroundColor: colors.border }]}>
-                  <Text style={[styles.tagText, { color: colors.textSecondary }]}>{tag}</Text>
+
+          <View style={styles.bottomLine}>
+            <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
+              {metaParts.join(' · ')}
+            </Text>
+            <View style={styles.chips}>
+              {isGenerated && (
+                <View style={[styles.chip, { backgroundColor: '#10b98122' }]}>
+                  <FontAwesome name="refresh" size={9} color="#10b981" />
+                  <Text style={[styles.chipText, { color: '#10b981' }]}>Recurring</Text>
                 </View>
-              ))}
+              )}
+              {!!receiptUrl && (
+                <TouchableOpacity
+                  style={[styles.chip, styles.receiptChip]}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    openReceipt();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="View receipt"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <FontAwesome name="file-image-o" size={9} color="#fff" />
+                  <Text style={styles.receiptChipText}>Receipt</Text>
+                </TouchableOpacity>
+              )}
             </View>
-          )}
-        </View>
-        {(onEdit || onDelete) && (
-          <View style={styles.actions}>
-            {onEdit && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  onEdit();
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <FontAwesome name="pencil" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-            )}
-            {onDelete && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <FontAwesome name="trash" size={18} color="#ef4444" />
-              </TouchableOpacity>
-            )}
           </View>
+        </View>
+
+        {onDelete && (
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onDelete();
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+            accessibilityLabel="Delete expense"
+          >
+            <FontAwesome name="trash-o" size={16} color={colors.error || '#ef4444'} />
+          </TouchableOpacity>
         )}
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+
+      <Modal
+        visible={receiptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReceiptVisible(false)}
+      >
+        <View style={styles.receiptOverlay}>
+          <View style={[styles.receiptSheet, { backgroundColor: colors.surface }]}>
+            <View style={[styles.receiptHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.receiptTitle, { color: colors.text }]} numberOfLines={1}>
+                Receipt — {expense.description}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setReceiptVisible(false)}
+                accessibilityLabel="Close receipt"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <FontAwesome name="times" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.receiptBody}>
+              {imageLoading && (
+                <ActivityIndicator
+                  size="large"
+                  color={colors.primary}
+                  style={styles.receiptSpinner}
+                />
+              )}
+              {receiptUrl ? (
+                <Image
+                  source={{ uri: receiptUrl }}
+                  style={[styles.receiptImage, imageLoading && styles.receiptImageLoading]}
+                  resizeMode="contain"
+                  onLoad={() => setImageLoading(false)}
+                  onLoadEnd={() => setImageLoading(false)}
+                  onError={() => setImageLoading(false)}
+                />
+              ) : null}
+            </View>
+            <View style={[styles.receiptFooter, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.receiptFooterBtn, { borderColor: colors.border }]}
+                onPress={() => setReceiptVisible(false)}
+              >
+                <Text style={{ color: colors.text, fontWeight: '600' }}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.receiptFooterBtn, { backgroundColor: colors.primary }]}
+                onPress={() => void openReceiptExternally()}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Open full size</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderRadius: 8,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    padding: 16,
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  descriptionContainer: {
-    flex: 1,
-    marginRight: 8,
-  },
-  description: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  badgesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 4,
-    gap: 4,
-  },
-  badge: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 56,
   },
-  badgeText: {
+  main: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  topLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  description: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  amount: {
+    fontSize: 15,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  bottomLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 18,
+  },
+  meta: {
+    flexShrink: 1,
+    fontSize: 12,
+  },
+  chips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 'auto',
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  chipText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  receiptChip: {
+    backgroundColor: '#0ea5e9',
+  },
+  receiptChipText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
   },
-  amount: {
-    fontSize: 18,
+  deleteBtn: {
+    paddingLeft: 10,
+    paddingVertical: 8,
+  },
+  receiptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  receiptSheet: {
+    borderRadius: 12,
+    maxHeight: '90%',
+    overflow: 'hidden',
+  },
+  receiptHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  receiptTitle: {
+    flex: 1,
+    fontSize: 16,
     fontWeight: '700',
   },
-  cardDetails: {
-    marginTop: 8,
-  },
-  detailRow: {
-    flexDirection: 'row',
+  receiptBody: {
+    minHeight: 280,
+    maxHeight: Platform.OS === 'web' ? 520 : 420,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+    backgroundColor: '#111827',
   },
-  detailText: {
-    fontSize: 14,
-    marginLeft: 8,
+  receiptSpinner: {
+    position: 'absolute',
+    zIndex: 1,
   },
-  tagsContainer: {
+  receiptImage: {
+    width: '100%',
+    height: '100%',
+    minHeight: 280,
+  },
+  receiptImageLoading: {
+    opacity: 0.35,
+  },
+  receiptFooter: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
   },
-  tag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  tagText: {
-    fontSize: 12,
-  },
-  actions: {
-    flexDirection: 'row',
+  receiptFooterBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 8,
     alignItems: 'center',
-    marginLeft: 8,
-  },
-  actionButton: {
-    padding: 8,
-    marginLeft: 4,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
 });
