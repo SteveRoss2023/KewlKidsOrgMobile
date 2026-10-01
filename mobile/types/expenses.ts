@@ -281,8 +281,45 @@ export interface ExpenseByPeriod {
 export interface BudgetAlert {
   budget_id: number;
   category_name: string | null;
-  status: 'exceeded' | 'warning';
+  status: 'exceeded' | 'warning' | 'on_budget';
   percentage: number;
   spent: number;
   limit: number;
+}
+
+export interface GenerateExpenseItem {
+  recurring_id: number;
+  description: string;
+  category_name: string | null;
+  amount: number;
+  expense_date: string;
+  frequency: string;
+  action: 'created' | 'would_create' | 'skipped';
+  reason?: string;
+  expense_id?: number;
+}
+
+export interface GenerateExpensesByRecurring {
+  recurring_id: number;
+  description: string;
+  category_name: string | null;
+  frequency: string;
+  generation_start: string;
+  generation_end: string;
+  generated_count: number;
+  skipped_count: number;
+  created: GenerateExpenseItem[];
+  skipped: GenerateExpenseItem[];
+}
+
+export interface GenerateExpensesResult {
+  dry_run: boolean;
+  message: string;
+  generated_count: number;
+  skipped_count: number;
+  recurring_count: number;
+  created: GenerateExpenseItem[];
+  skipped: GenerateExpenseItem[];
+  by_recurring: GenerateExpensesByRecurring[];
+  errors?: string[];
 }

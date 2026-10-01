@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { RecurringExpense } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
+import { formatCurrency } from '../../utils/moneyInput';
 
 interface RecurringExpenseRowProps {
   recurring: RecurringExpense;
@@ -57,7 +58,7 @@ export default function RecurringExpenseRow({
       onPress={onPress}
       activeOpacity={0.65}
       accessibilityRole="button"
-      accessibilityLabel={`${recurring.description}, $${recurring.amount.toFixed(2)}, ${frequency}`}
+      accessibilityLabel={`${recurring.description}, ${formatCurrency(recurring.amount)}, ${frequency}`}
     >
       <View style={styles.main}>
         <View style={styles.topLine}>
@@ -65,7 +66,7 @@ export default function RecurringExpenseRow({
             {recurring.description}
           </Text>
           <Text style={[styles.amount, { color: colors.primary }]}>
-            ${recurring.amount.toFixed(2)}
+            {formatCurrency(recurring.amount)}
           </Text>
         </View>
 

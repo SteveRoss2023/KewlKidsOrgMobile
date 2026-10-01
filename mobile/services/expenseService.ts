@@ -22,6 +22,7 @@ import {
   ExpenseByCategory,
   ExpenseByPeriod,
   BudgetAlert,
+  GenerateExpensesResult,
 } from '../types/expenses';
 
 /** Follow DRF `next` links until all pages are loaded. */
@@ -392,13 +393,17 @@ class ExpenseService {
   }
 
   /**
-   * Generate expenses from recurring expense templates
+   * Generate expenses from recurring expense templates.
+   * Pass dryRun=true to preview without creating anything.
    */
-  async generateExpenses(familyId: number): Promise<{ message: string; generated_count: number; errors?: string[] }> {
+  async generateExpenses(
+    familyId: number,
+    options?: { dryRun?: boolean }
+  ): Promise<GenerateExpensesResult> {
     try {
-      const response = await apiClient.post<{ message: string; generated_count: number; errors?: string[] }>(
+      const response = await apiClient.post<GenerateExpensesResult>(
         '/recurring-expenses/generate_expenses/',
-        { family: familyId }
+        { family: familyId, dry_run: !!options?.dryRun }
       );
       return response.data;
     } catch (error) {

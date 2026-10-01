@@ -278,7 +278,6 @@ class BudgetSerializer(serializers.ModelSerializer):
         """Calculate total spent for this budget period."""
         from django.utils import timezone
         from datetime import timedelta
-        from decimal import Decimal
 
         # Determine date range based on period
         today = timezone.now().date()
@@ -308,7 +307,10 @@ class BudgetSerializer(serializers.ModelSerializer):
 
         total = Decimal('0.00')
         for expense in expenses:
-            total += expense.amount
+            try:
+                total += Decimal(str(expense.amount or '0'))
+            except (ValueError, InvalidOperation, TypeError):
+                continue
 
         return float(total)
 

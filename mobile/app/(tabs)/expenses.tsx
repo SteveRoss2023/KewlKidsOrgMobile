@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Platform,
+  Modal,
+  Switch,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -15,7 +17,7 @@ import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import expenseService from '../../services/expenseService';
-import { Expense, ExpenseCategory, Budget, RecurringExpense, ExpenseTag, PaymentMethod, CreateExpenseData, CreateExpenseCategoryData, CreateBudgetData, UpdateBudgetData, CreateRecurringExpenseData, UpdateRecurringExpenseData, CreateExpenseTagData, UpdateExpenseTagData } from '../../types/expenses';
+import { Expense, ExpenseCategory, Budget, RecurringExpense, ExpenseTag, PaymentMethod, CreateExpenseData, UpdateExpenseData, CreateExpenseCategoryData, CreateBudgetData, UpdateBudgetData, CreateRecurringExpenseData, UpdateRecurringExpenseData, CreateExpenseTagData, UpdateExpenseTagData, GenerateExpensesResult } from '../../types/expenses';
 import AlertModal from '../../components/AlertModal';
 import ExpenseForm from '../../components/expenses/ExpenseForm';
 import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
@@ -27,8 +29,68 @@ import ExpenseCard from '../../components/expenses/ExpenseCard';
 import RecurringExpenseRow, { formatOccurrenceDate } from '../../components/expenses/RecurringExpenseRow';
 import BudgetCard from '../../components/expenses/BudgetCard';
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
+import { formatCurrency } from '../../utils/moneyInput';
 
 type ActiveTab = 'expenses' | 'categories' | 'budgets' | 'recurring' | 'reports';
+type GroupMode = 'none' | 'day' | 'week' | 'month' | 'year';
+type PeriodMode = Exclude<GroupMode, 'none'>;
+
+function startOfPeriod(date: Date, mode: PeriodMode): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (mode === 'day') return d;
+  if (mode === 'week') {
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  }
+  if (mode === 'month') return new Date(d.getFullYear(), d.getMonth(), 1);
+  return new Date(d.getFullYear(), 0, 1);
+}
+
+function shiftPeriod(date: Date, mode: PeriodMode, delta: number): Date {
+  const d = startOfPeriod(date, mode);
+  if (mode === 'day') d.setDate(d.getDate() + delta);
+  else if (mode === 'week') d.setDate(d.getDate() + delta * 7);
+  else if (mode === 'month') d.setMonth(d.getMonth() + delta);
+  else d.setFullYear(d.getFullYear() + delta);
+  return d;
+}
+
+function formatPeriodLabel(date: Date, mode: PeriodMode, short = false): string {
+  const d = startOfPeriod(date, mode);
+  if (mode === 'day') {
+    return d.toLocaleDateString('en-US', short
+      ? { month: 'short', day: 'numeric' }
+      : { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+  if (mode === 'week') {
+    if (short) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    return `Week of ${d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })}`;
+  }
+  if (mode === 'month') {
+    return d.toLocaleDateString('en-US', short
+      ? { month: 'short', year: '2-digit' }
+      : { year: 'numeric', month: 'long' });
+  }
+  return d.toLocaleDateString('en-US', { year: 'numeric' });
+}
+
+function parseExpenseDate(dateString: string): Date {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function expenseInPeriod(expenseDate: string, viewDate: Date, mode: PeriodMode): boolean {
+  const date = parseExpenseDate(expenseDate);
+  const start = startOfPeriod(viewDate, mode);
+  const end = shiftPeriod(start, mode, 1);
+  return date >= start && date < end;
+}
 
 function TooltipButton({
   children,
@@ -101,6 +163,8 @@ export default function ExpensesScreen() {
   const [showRecurringForm, setShowRecurringForm] = useState(false);
   const [showTagForm, setShowTagForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const editingExpenseRef = useRef<Expense | null>(null);
+  const [expenseFormSessionKey, setExpenseFormSessionKey] = useState('new');
   const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null);
@@ -116,41 +180,32 @@ export default function ExpensesScreen() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [showFilters, setShowFilters] = useState(false);
   const [showCombinedView, setShowCombinedView] = useState(false);
-  const [groupBy, setGroupBy] = useState<'none' | 'day' | 'week' | 'month' | 'year'>('month');
-  const [recurringGroupBy, setRecurringGroupBy] = useState<'none' | 'day' | 'week' | 'month' | 'year'>('month');
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<GroupMode>('month');
+  const [recurringGroupBy, setRecurringGroupBy] = useState<GroupMode>('month');
+  const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
+  const [periodExpanded, setPeriodExpanded] = useState(true);
   const [expandedRecurringGroups, setExpandedRecurringGroups] = useState<Set<string>>(new Set());
+  const [generateDryRun, setGenerateDryRun] = useState(true);
+  const [generateResult, setGenerateResult] = useState<GenerateExpensesResult | null>(null);
 
-  const currentGroupKey = useCallback((mode: 'day' | 'week' | 'month' | 'year') => {
-    const now = new Date();
-    if (mode === 'day') {
-      return now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    }
-    if (mode === 'week') {
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay());
-      return `Week of ${weekStart.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })}`;
-    }
-    if (mode === 'month') {
-      return now.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    }
-    return now.toLocaleDateString('en-US', { year: 'numeric' });
+  const currentGroupKey = useCallback((mode: PeriodMode) => {
+    return formatPeriodLabel(new Date(), mode, false);
   }, []);
-
-  // Keep the current period expanded when opening / switching group mode
-  useEffect(() => {
-    if (groupBy === 'none') return;
-    setExpandedGroups(new Set([currentGroupKey(groupBy)]));
-  }, [groupBy, selectedFamily?.id, currentGroupKey]);
 
   useEffect(() => {
     if (recurringGroupBy === 'none') return;
     setExpandedRecurringGroups(new Set([currentGroupKey(recurringGroupBy)]));
   }, [recurringGroupBy, selectedFamily?.id, currentGroupKey]);
+
+  useEffect(() => {
+    if (groupBy === 'none') return;
+    setViewDate(startOfPeriod(new Date(), groupBy));
+    setPeriodExpanded(true);
+  }, [groupBy, selectedFamily?.id]);
+
+  useEffect(() => {
+    setPeriodExpanded(false);
+  }, [viewDate]);
 
   // Load data when family changes or screen comes into focus
   useFocusEffect(
@@ -199,48 +254,84 @@ export default function ExpensesScreen() {
     }
   };
 
-  const openExpenseEditor = async (expense: Expense) => {
+  const openNewExpenseForm = () => {
+    editingExpenseRef.current = null;
+    setEditingExpense(null);
+    setExpenseFormSessionKey(`new-${Date.now()}`);
     setShowExpenseForm(true);
+  };
+
+  const openExpenseEditor = async (expense: Expense) => {
+    setExpenseFormSessionKey(`edit-${expense.id}`);
+    setShowExpenseForm(true);
+    editingExpenseRef.current = expense;
     setEditingExpense(expense);
     try {
       const full = await expenseService.getExpense(expense.id);
+      editingExpenseRef.current = full;
       setEditingExpense(full);
     } catch {
       // List payload is enough to edit; line items may be missing until refresh
     }
   };
 
-  const handleCreateExpense = async (data: CreateExpenseData) => {
+  const closeExpenseForm = () => {
+    setShowExpenseForm(false);
+    editingExpenseRef.current = null;
+    setEditingExpense(null);
+  };
+
+  const handleCreateExpense = async (
+    data: CreateExpenseData,
+    options?: { stayOpen?: boolean }
+  ): Promise<Expense | void> => {
     if (!selectedFamily) return;
 
     setCreating(true);
     try {
-      const newExpense = await expenseService.createExpense(data);
-      // Reload so line_items / receipt_url are present for edit
-      const full = await expenseService.getExpense(newExpense.id);
-      setEditingExpense(full);
+      const created = await expenseService.createExpense(data);
+      const full = await expenseService.getExpense(created.id);
       await fetchData();
+      if (options?.stayOpen) {
+        editingExpenseRef.current = full;
+        setEditingExpense(full);
+        return full;
+      }
+      closeExpenseForm();
     } catch (err: any) {
       setError(err.message || 'Failed to create expense');
+      throw err;
     } finally {
       setCreating(false);
     }
   };
 
   const handleUpdateExpense = async (data: any) => {
-    if (!editingExpense) return;
+    const current = editingExpenseRef.current;
+    if (!current) return;
 
     setCreating(true);
     try {
-      await expenseService.updateExpense(editingExpense.id, data);
-      setShowExpenseForm(false);
-      setEditingExpense(null);
+      await expenseService.updateExpense(current.id, data);
+      closeExpenseForm();
       await fetchData();
     } catch (err: any) {
       setError(err.message || 'Failed to update expense');
+      throw err;
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleExpenseFormSubmit = async (
+    data: CreateExpenseData | UpdateExpenseData,
+    options?: { stayOpen?: boolean }
+  ): Promise<Expense | void> => {
+    if (editingExpenseRef.current) {
+      await handleUpdateExpense(data);
+      return;
+    }
+    return handleCreateExpense(data as CreateExpenseData, options);
   };
 
   const handleDeleteExpense = async (expenseId: number) => {
@@ -394,14 +485,13 @@ export default function ExpensesScreen() {
 
     setCreating(true);
     try {
-      const result = await expenseService.generateExpenses(selectedFamily.id);
-      console.log('Generate expenses result:', result);
-      const message = result.generated_count > 0
-        ? `Generated ${result.generated_count} expenses from recurring templates`
-        : `No new expenses generated. ${result.errors ? result.errors.join('; ') : 'All expenses may already exist.'}`;
-      setError(message);
-      // Refresh all data to show newly generated expenses
-      await fetchData();
+      const result = await expenseService.generateExpenses(selectedFamily.id, {
+        dryRun: generateDryRun,
+      });
+      setGenerateResult(result);
+      if (!generateDryRun) {
+        await fetchData();
+      }
     } catch (err: any) {
       console.error('Error generating expenses:', err);
       setError(err.message || 'Failed to generate expenses');
@@ -537,148 +627,109 @@ export default function ExpensesScreen() {
       return sortOrder === 'asc' ? comparison : -comparison;
     });
 
-    // Group expenses
-    const groupExpenses = (expenses: Expense[]) => {
-      if (groupBy === 'none') {
-        return { 'All Expenses': expenses };
-      }
+    const hasActiveFilters = !!(
+      filterCategory || filterPaymentMethod || filterTag || filterRecurring !== null
+    );
 
-      const grouped: Record<string, Expense[]> = {};
+    const periodMode: PeriodMode | null = groupBy === 'none' ? null : groupBy;
+    const periodExpenses = periodMode
+      ? filteredExpenses.filter((exp) => expenseInPeriod(exp.expense_date, viewDate, periodMode))
+      : filteredExpenses;
+    const periodTotal = periodExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const todayPeriod = periodMode ? startOfPeriod(new Date(), periodMode) : null;
+    const tabDates = periodMode
+      ? [shiftPeriod(viewDate, periodMode, -1), startOfPeriod(viewDate, periodMode), shiftPeriod(viewDate, periodMode, 1)]
+      : [];
 
-      // Parse date without timezone conversion to avoid day shifts
-      // expense.expense_date comes as "YYYY-MM-DD" from the API
-      const parseDate = (dateString: string): Date => {
-        const [year, month, day] = dateString.split('-').map(Number);
-        return new Date(year, month - 1, day); // month is 0-indexed
-      };
-
-      expenses.forEach((expense) => {
-        const date = parseDate(expense.expense_date);
-        let groupKey: string;
-
-        if (groupBy === 'day') {
-          groupKey = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          });
-        } else if (groupBy === 'week') {
-          // Get the start of the week (Sunday)
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - date.getDay());
-          groupKey = `Week of ${weekStart.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          })}`;
-        } else if (groupBy === 'month') {
-          groupKey = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-          });
-        } else if (groupBy === 'year') {
-          groupKey = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-          });
-        } else {
-          groupKey = 'All Expenses';
-        }
-
-        if (!grouped[groupKey]) {
-          grouped[groupKey] = [];
-        }
-        grouped[groupKey].push(expense);
-      });
-
-      return grouped;
-    };
-
-    const groupedExpenses = groupExpenses(filteredExpenses);
-    const parseGroupSortKey = (key: string): number => {
-      if (groupBy === 'week') {
-        return new Date(key.replace('Week of ', '')).getTime();
-      }
-      if (groupBy === 'month') {
-        // "September 2026" — append day 1 for stable parse
-        return new Date(`${key} 1`).getTime();
-      }
-      if (groupBy === 'year') {
-        return new Date(`${key}-01-01`).getTime();
-      }
-      // day: "September 29, 2026"
-      return new Date(key).getTime();
-    };
-    const sortedGroupKeys = Object.keys(groupedExpenses).sort((a, b) => {
-      if (groupBy === 'none') return 0;
-      try {
-        const comparison = parseGroupSortKey(a) - parseGroupSortKey(b);
-        return sortOrder === 'asc' ? comparison : -comparison;
-      } catch {
-        return 0;
-      }
-    });
+    const groupOptions: { label: string; value: GroupMode }[] = [
+      { label: 'Day', value: 'day' },
+      { label: 'Week', value: 'week' },
+      { label: 'Month', value: 'month' },
+      { label: 'Year', value: 'year' },
+      { label: 'All', value: 'none' },
+    ];
 
     return (
       <View style={styles.content}>
-        {/* Search and Filter Bar */}
-        <View style={[styles.searchFilterBar, { backgroundColor: colors.card }]}>
+        {/* Compact search + actions */}
+        <View style={[styles.compactBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <View style={[styles.searchInputContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <FontAwesome name="search" size={16} color={colors.textSecondary} style={styles.searchIcon} />
+            <FontAwesome name="search" size={13} color={colors.textSecondary} style={styles.searchIcon} />
             <TextInput
               style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Search expenses..."
+              placeholder="Search..."
               placeholderTextColor={colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-                <FontAwesome name="times" size={14} color={colors.textSecondary} />
+                <FontAwesome name="times" size={12} color={colors.textSecondary} />
               </TouchableOpacity>
             )}
           </View>
           <TooltipButton
-            tooltip="Combined View"
-            style={[styles.viewToggleButton, { backgroundColor: showCombinedView ? colors.primary : colors.border }]}
-            onPress={() => setShowCombinedView(!showCombinedView)}
-          >
-            <FontAwesome name="list" size={16} color={showCombinedView ? '#fff' : colors.text} />
-          </TooltipButton>
-          <TooltipButton
             tooltip="Filters"
-            style={[styles.filterButton, { backgroundColor: showFilters ? colors.primary : colors.border }]}
+            style={[
+              styles.compactIconBtn,
+              {
+                backgroundColor: showFilters || hasActiveFilters ? colors.primary : colors.background,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => setShowFilters(!showFilters)}
           >
-            <FontAwesome name="filter" size={16} color={showFilters ? '#fff' : colors.text} />
+            <FontAwesome
+              name="filter"
+              size={13}
+              color={showFilters || hasActiveFilters ? '#fff' : colors.text}
+            />
+          </TooltipButton>
+          <TooltipButton
+            tooltip="Scan receipt"
+            style={[styles.compactIconBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
+            onPress={() => setShowReceiptWizard(true)}
+          >
+            <FontAwesome name="camera" size={13} color={colors.primary} />
+          </TooltipButton>
+          <TooltipButton
+            tooltip="Add expense"
+            style={[styles.compactIconBtn, styles.compactIconBtnPrimary, { backgroundColor: colors.primary }]}
+            onPress={openNewExpenseForm}
+          >
+            <FontAwesome name="plus" size={13} color="#fff" />
           </TooltipButton>
         </View>
 
-        {/* Group By Selector - Always Visible */}
-        <View style={[styles.groupByContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-          <Text style={[styles.groupByLabel, { color: colors.text }]}>Group By:</Text>
-          <ThemeAwarePicker
-            selectedValue={groupBy}
-            onValueChange={(value) => {
-              setGroupBy(value as 'none' | 'day' | 'week' | 'month' | 'year');
-              // Reset expanded groups when changing group by
-              setExpandedGroups(new Set());
-              setExpandedRecurringGroups(new Set());
-            }}
-            options={[
-              { label: 'None', value: 'none' },
-              { label: 'Day', value: 'day' },
-              { label: 'Week', value: 'week' },
-              { label: 'Month', value: 'month' },
-              { label: 'Year', value: 'year' },
-            ]}
-          />
+        {/* Compact group-by chips */}
+        <View style={[styles.groupChipRow, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          {groupOptions.map((opt) => {
+            const active = groupBy === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                style={[
+                  styles.groupChip,
+                  {
+                    backgroundColor: active ? colors.primary : colors.background,
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setGroupBy(opt.value)}
+              >
+                <Text style={[styles.groupChipText, { color: active ? '#fff' : colors.text }]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Filter Panel */}
         {showFilters && (
           <View style={[styles.filterPanel, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
             <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Category:</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Category</Text>
               <ThemeAwarePicker
                 selectedValue={filterCategory?.toString() || ''}
                 onValueChange={(value) => setFilterCategory(value ? parseInt(value) : null)}
@@ -689,7 +740,7 @@ export default function ExpensesScreen() {
               />
             </View>
             <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Payment Method:</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Payment</Text>
               <ThemeAwarePicker
                 selectedValue={filterPaymentMethod || ''}
                 onValueChange={(value) => setFilterPaymentMethod(value || null)}
@@ -706,7 +757,7 @@ export default function ExpensesScreen() {
               />
             </View>
             <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Tag:</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Tag</Text>
               <ThemeAwarePicker
                 selectedValue={filterTag?.toString() || ''}
                 onValueChange={(value) => setFilterTag(value ? parseInt(value) : null)}
@@ -717,7 +768,7 @@ export default function ExpensesScreen() {
               />
             </View>
             <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Recurring:</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Recurring</Text>
               <ThemeAwarePicker
                 selectedValue={filterRecurring === null ? '' : filterRecurring ? 'true' : 'false'}
                 onValueChange={(value) => {
@@ -735,7 +786,7 @@ export default function ExpensesScreen() {
               />
             </View>
             <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Sort By:</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Sort</Text>
               <ThemeAwarePicker
                 selectedValue={sortBy}
                 onValueChange={(value) => setSortBy(value as 'date' | 'amount' | 'category')}
@@ -751,9 +802,26 @@ export default function ExpensesScreen() {
               >
                 <FontAwesome
                   name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
-                  size={14}
+                  size={12}
                   color={colors.text}
                 />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Combined</Text>
+              <TouchableOpacity
+                style={[
+                  styles.groupChip,
+                  {
+                    backgroundColor: showCombinedView ? colors.primary : colors.background,
+                    borderColor: showCombinedView ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setShowCombinedView(!showCombinedView)}
+              >
+                <Text style={[styles.groupChipText, { color: showCombinedView ? '#fff' : colors.text }]}>
+                  {showCombinedView ? 'On' : 'Off'}
+                </Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -765,6 +833,7 @@ export default function ExpensesScreen() {
                 setFilterRecurring(null);
                 setSortBy('date');
                 setSortOrder('desc');
+                setShowCombinedView(false);
               }}
             >
               <Text style={[styles.clearFiltersText, { color: colors.text }]}>Clear Filters</Text>
@@ -772,138 +841,115 @@ export default function ExpensesScreen() {
           </View>
         )}
 
-        {/* Toolbar: scan/add + expand/collapse */}
-        <View
-          style={[
-            styles.listToolbar,
-            { backgroundColor: colors.surface, borderBottomColor: colors.border },
-          ]}
-        >
-          <View style={styles.listToolbarActions}>
-            <TooltipButton
-              tooltip="Scan receipt"
-              style={[
-                styles.toolbarIconBtn,
-                { backgroundColor: colors.background, borderColor: colors.border },
-              ]}
-              onPress={() => setShowReceiptWizard(true)}
+        {/* Prev / current / next period tabs */}
+        {periodMode && (
+          <View style={[styles.periodNav, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              style={styles.periodNavArrow}
+              onPress={() => setViewDate((d) => shiftPeriod(d, periodMode, -1))}
+              accessibilityLabel="Previous period"
             >
-              <FontAwesome name="camera" size={16} color={colors.primary} />
-            </TooltipButton>
-            <TooltipButton
-              tooltip="Add expense"
-              style={[styles.toolbarIconBtn, styles.toolbarIconBtnPrimary, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                setEditingExpense(null);
-                setShowExpenseForm(true);
-              }}
+              <FontAwesome name="chevron-left" size={14} color={colors.text} />
+            </TouchableOpacity>
+            <View style={styles.periodTabs}>
+              {tabDates.map((tabDate, index) => {
+                const selected = startOfPeriod(tabDate, periodMode).getTime() === startOfPeriod(viewDate, periodMode).getTime();
+                const isNow = todayPeriod && tabDate.getTime() === todayPeriod.getTime();
+                return (
+                  <TouchableOpacity
+                    key={`${tabDate.toISOString()}-${index}`}
+                    style={[
+                      styles.periodTab,
+                      {
+                        backgroundColor: selected ? colors.primary : colors.card,
+                        borderColor: isNow && !selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => setViewDate(startOfPeriod(tabDate, periodMode))}
+                  >
+                    <Text
+                      style={[styles.periodTabText, { color: selected ? '#fff' : colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {formatPeriodLabel(tabDate, periodMode, true)}
+                    </Text>
+                    {isNow && (
+                      <Text style={[styles.periodTabNow, { color: selected ? '#fff' : colors.primary }]}>
+                        Now
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity
+              style={styles.periodNavArrow}
+              onPress={() => setViewDate((d) => shiftPeriod(d, periodMode, 1))}
+              accessibilityLabel="Next period"
             >
-              <FontAwesome name="plus" size={16} color="#fff" />
-            </TooltipButton>
+              <FontAwesome name="chevron-right" size={14} color={colors.text} />
+            </TouchableOpacity>
           </View>
-          <View style={styles.listToolbarLeft}>
-            {groupBy !== 'none' && filteredExpenses.length > 0 ? (
-              <TouchableOpacity
-                style={[
-                  styles.expandCollapseButton,
-                  { backgroundColor: colors.background, borderColor: colors.border },
-                ]}
-                onPress={() => {
-                  if (sortedGroupKeys.every((key) => expandedGroups.has(key))) {
-                    setExpandedGroups(new Set());
-                  } else {
-                    setExpandedGroups(new Set(sortedGroupKeys));
-                  }
-                }}
-              >
-                <FontAwesome
-                  name={
-                    sortedGroupKeys.every((key) => expandedGroups.has(key))
-                      ? 'compress'
-                      : 'expand'
-                  }
-                  size={12}
-                  color={colors.text}
-                />
-                <Text style={[styles.expandCollapseText, { color: colors.text }]}>
-                  {sortedGroupKeys.every((key) => expandedGroups.has(key))
-                    ? 'Collapse All'
-                    : 'Expand All'}
+        )}
+
+        {/* Period summary — expand/collapse */}
+        {periodMode && (
+          <TouchableOpacity
+            style={[styles.periodSummaryBar, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
+            onPress={() => setPeriodExpanded((open) => !open)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: periodExpanded }}
+            accessibilityLabel={`${formatPeriodLabel(viewDate, periodMode)}, ${formatCurrency(periodTotal)}, ${periodExpenses.length} expenses`}
+          >
+            <View style={styles.periodSummaryLeft}>
+              <FontAwesome
+                name={periodExpanded ? 'chevron-down' : 'chevron-right'}
+                size={12}
+                color={colors.textSecondary}
+                style={styles.periodSummaryChevron}
+              />
+              <View style={styles.periodSummaryText}>
+                <Text style={[styles.periodSummaryTitle, { color: colors.text }]} numberOfLines={1}>
+                  {formatPeriodLabel(viewDate, periodMode)}
                 </Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        </View>
+                <Text style={[styles.periodSummaryMeta, { color: colors.textSecondary }]}>
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>{formatCurrency(periodTotal)}</Text>
+                  {' · '}
+                  {periodExpenses.length} {periodExpenses.length === 1 ? 'expense' : 'expenses'}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.periodSummaryToggle, { color: colors.primary }]}>
+              {periodExpanded ? 'Hide' : 'Show'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Expenses List */}
-        <ScrollView style={styles.expensesList}>
-          {filteredExpenses.length === 0 ? (
+        <ScrollView style={styles.expensesList} contentContainerStyle={styles.expensesListContent}>
+          {periodMode && !periodExpanded ? null : (periodMode ? periodExpenses : filteredExpenses).length === 0 ? (
             <View style={styles.centerContainer}>
-              <FontAwesome name="file-text-o" size={64} color={colors.textSecondary} />
+              <FontAwesome name="file-text-o" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {searchQuery || filterCategory || filterPaymentMethod || filterTag || filterRecurring
+                {searchQuery || hasActiveFilters
                   ? 'No expenses match your filters'
-                  : 'No expenses yet'}
+                  : periodMode
+                    ? 'No expenses in this period'
+                    : 'No expenses yet'}
               </Text>
             </View>
-          ) : groupBy !== 'none' ? (
-            // Grouped view with accordions
-            sortedGroupKeys.map((groupKey) => {
-              const groupExpensesList = groupedExpenses[groupKey];
-              const groupTotal = groupExpensesList.reduce((sum, exp) => sum + exp.amount, 0);
-              const isExpanded = expandedGroups.has(groupKey);
-
-              return (
-                <View key={groupKey} style={styles.groupContainer}>
-                  <TouchableOpacity
-                    style={[styles.groupHeader, { backgroundColor: colors.background, borderBottomColor: colors.borderStrong }]}
-                    onPress={() => {
-                      const newExpanded = new Set(expandedGroups);
-                      if (isExpanded) {
-                        newExpanded.delete(groupKey);
-                      } else {
-                        newExpanded.add(groupKey);
-                      }
-                      setExpandedGroups(newExpanded);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.groupHeaderContent}>
-                      <FontAwesome
-                        name={isExpanded ? 'chevron-down' : 'chevron-right'}
-                        size={14}
-                        color={colors.textSecondary}
-                        style={styles.groupChevron}
-                      />
-                      <Text style={[styles.groupTitle, { color: colors.text }]}>{groupKey}</Text>
-                    </View>
-                    <View style={styles.groupHeaderRight}>
-                      <Text style={[styles.groupCount, { color: colors.textSecondary }]}>
-                        {groupExpensesList.length} {groupExpensesList.length === 1 ? 'expense' : 'expenses'}
-                      </Text>
-                      <Text style={[styles.groupTotal, { color: colors.primary }]}>
-                        ${groupTotal.toFixed(2)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  {isExpanded && (
-                    <View style={styles.groupContent}>
-                      {groupExpensesList.map((expense) => (
-                        <ExpenseCard
-                          key={expense.id}
-                          expense={expense}
-                          onPress={() => void openExpenseEditor(expense)}
-                          onDelete={() => requestDeleteExpense(expense)}
-                        />
-                      ))}
-                    </View>
-                  )}
-                </View>
-              );
-            })
+          ) : periodMode ? (
+            periodExpenses.map((expense) => (
+              <ExpenseCard
+                key={expense.id}
+                expense={expense}
+                onPress={() => void openExpenseEditor(expense)}
+                onDelete={() => requestDeleteExpense(expense)}
+              />
+            ))
           ) : showCombinedView ? (
             <>
-              {/* Upcoming Recurring Expenses */}
               {recurringExpenses.filter((re) => re.is_active).length > 0 && (
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>Upcoming Recurring</Text>
@@ -916,9 +962,7 @@ export default function ExpensesScreen() {
                   nextDate.setHours(0, 0, 0, 0);
                   const today = new Date();
                   today.setHours(0, 0, 0, 0);
-                  const isUpcoming = nextDate >= today;
-
-                  if (!isUpcoming) return null;
+                  if (nextDate < today) return null;
 
                   return (
                     <RecurringExpenseRow
@@ -934,7 +978,6 @@ export default function ExpensesScreen() {
                   );
                 })}
 
-              {/* Actual Expenses */}
               {filteredExpenses.length > 0 && (
                 <View style={[styles.sectionHeader, { marginTop: 16 }]}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>Expenses</Text>
@@ -1303,14 +1346,37 @@ export default function ExpensesScreen() {
     return (
       <ScrollView style={styles.content}>
         <View style={styles.generateButtonContainer}>
+          <View style={[styles.dryRunRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.dryRunTextWrap}>
+              <Text style={[styles.dryRunLabel, { color: colors.text }]}>Dry run</Text>
+              <Text style={[styles.dryRunHint, { color: colors.textSecondary }]}>
+                Preview only — nothing is created
+              </Text>
+            </View>
+            <Switch
+              value={generateDryRun}
+              onValueChange={setGenerateDryRun}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
           <TouchableOpacity
-            style={[styles.generateButton, { backgroundColor: colors.primary }]}
+            style={[
+              styles.generateButton,
+              { backgroundColor: generateDryRun ? colors.textSecondary : colors.primary },
+            ]}
             onPress={handleGenerateExpenses}
             disabled={creating}
           >
-            <FontAwesome name="magic" size={18} color="#fff" />
+            <FontAwesome name={generateDryRun ? 'eye' : 'magic'} size={18} color="#fff" />
             <Text style={styles.generateButtonText}>
-              {creating ? 'Generating...' : 'Generate Expenses'}
+              {creating
+                ? generateDryRun
+                  ? 'Previewing...'
+                  : 'Generating...'
+                : generateDryRun
+                  ? 'Preview generation'
+                  : 'Generate Expenses'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1396,7 +1462,7 @@ export default function ExpensesScreen() {
                       {groupRecurringList.length} {groupRecurringList.length === 1 ? 'item' : 'items'}
                     </Text>
                     <Text style={[styles.groupTotal, { color: colors.primary }]}>
-                      ${groupTotal.toFixed(2)}
+                      {formatCurrency(groupTotal)}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1645,17 +1711,14 @@ export default function ExpensesScreen() {
       {/* Expense Form */}
       {selectedFamily && showExpenseForm && (
         <ExpenseForm
-          key={editingExpense?.id || 'new'}
+          key={expenseFormSessionKey}
           visible={showExpenseForm}
           expense={editingExpense}
           categories={categories}
           tags={tags}
           familyId={selectedFamily.id}
-          onSubmit={editingExpense ? handleUpdateExpense : handleCreateExpense}
-          onCancel={() => {
-            setShowExpenseForm(false);
-            setEditingExpense(null);
-          }}
+          onSubmit={handleExpenseFormSubmit}
+          onCancel={closeExpenseForm}
           loading={creating}
         />
       )}
@@ -1739,7 +1802,7 @@ export default function ExpensesScreen() {
         title="Delete expense?"
         message={
           expensePendingDelete
-            ? `Delete “${expensePendingDelete.description}” ($${expensePendingDelete.amount.toFixed(2)})? This cannot be undone.`
+            ? `Delete “${expensePendingDelete.description}” (${formatCurrency(expensePendingDelete.amount)})? This cannot be undone.`
             : ''
         }
         type="warning"
@@ -1760,6 +1823,165 @@ export default function ExpensesScreen() {
         message={error}
         onClose={() => setError('')}
       />
+
+      <Modal
+        visible={!!generateResult}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setGenerateResult(null)}
+      >
+        <View style={styles.generateResultOverlay}>
+          <View style={[styles.generateResultSheet, { backgroundColor: colors.surface }]}>
+            <View style={[styles.generateResultHeader, { borderBottomColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.generateResultTitle, { color: colors.text }]}>
+                  {generateResult?.dry_run ? 'Generation preview' : 'Generation complete'}
+                </Text>
+                <Text style={[styles.generateResultSubtitle, { color: colors.textSecondary }]}>
+                  {generateResult?.message}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setGenerateResult(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <FontAwesome name="times" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.generateResultSummary, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.generateResultStat, { color: colors.text }]}>
+                {generateResult?.dry_run ? 'Would create' : 'Created'}:{' '}
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                  {generateResult?.generated_count ?? 0}
+                </Text>
+              </Text>
+              <Text style={[styles.generateResultStat, { color: colors.text }]}>
+                Skipped:{' '}
+                <Text style={{ fontWeight: '700' }}>{generateResult?.skipped_count ?? 0}</Text>
+              </Text>
+              <Text style={[styles.generateResultStat, { color: colors.text }]}>
+                Templates: <Text style={{ fontWeight: '700' }}>{generateResult?.recurring_count ?? 0}</Text>
+              </Text>
+            </View>
+
+            <ScrollView style={styles.generateResultList} contentContainerStyle={{ paddingBottom: 24 }}>
+              {(generateResult?.errors || []).map((err, idx) => (
+                <Text key={`err-${idx}`} style={[styles.generateResultError, { color: '#ef4444' }]}>
+                  {err}
+                </Text>
+              ))}
+
+              {(generateResult?.by_recurring || []).map((group) => (
+                <View key={group.recurring_id} style={styles.generateResultGroup}>
+                  <Text style={[styles.generateResultGroupTitle, { color: colors.text }]}>
+                    {group.description}
+                  </Text>
+                  <Text style={[styles.generateResultGroupMeta, { color: colors.textSecondary }]}>
+                    {group.category_name || 'No category'} · {group.frequency} · {group.generation_start} → {group.generation_end}
+                  </Text>
+                  <Text style={[styles.generateResultGroupMeta, { color: colors.textSecondary }]}>
+                    {generateResult?.dry_run ? 'Would create' : 'Created'} {group.generated_count}
+                    {' · '}Skipped {group.skipped_count}
+                  </Text>
+
+                  {group.created.map((item, idx) => (
+                    <View
+                      key={`c-${group.recurring_id}-${item.expense_date}-${idx}`}
+                      style={[styles.generateResultRow, { borderBottomColor: colors.border }]}
+                    >
+                      <FontAwesome
+                        name={item.action === 'would_create' ? 'eye' : 'plus-circle'}
+                        size={14}
+                        color={colors.primary}
+                        style={{ marginTop: 2 }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.generateResultRowTitle, { color: colors.text }]}>
+                          {item.expense_date} · {formatCurrency(item.amount)}
+                        </Text>
+                        <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary }]}>
+                          {item.action === 'would_create' ? 'Would create' : 'Created'}
+                          {item.expense_id ? ` #${item.expense_id}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  {group.skipped.map((item, idx) => (
+                    <View
+                      key={`s-${group.recurring_id}-${item.expense_date}-${idx}`}
+                      style={[styles.generateResultRow, { borderBottomColor: colors.border }]}
+                    >
+                      <FontAwesome name="minus-circle" size={14} color={colors.textSecondary} style={{ marginTop: 2 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.generateResultRowTitle, { color: colors.textSecondary }]}>
+                          {item.expense_date} · {formatCurrency(item.amount)}
+                        </Text>
+                        <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary }]}>
+                          Skipped — {item.reason || 'already exists'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  {group.generated_count === 0 && group.skipped_count === 0 && (
+                    <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary, marginTop: 4 }]}>
+                      Nothing to generate in range
+                    </Text>
+                  )}
+                </View>
+              ))}
+
+              {(generateResult?.by_recurring || []).length === 0 && (
+                <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary, padding: 16 }]}>
+                  No active recurring templates.
+                </Text>
+              )}
+            </ScrollView>
+
+            <View style={[styles.generateResultFooter, { borderTopColor: colors.border }]}>
+              {generateResult?.dry_run && (generateResult.generated_count ?? 0) > 0 && (
+                <TouchableOpacity
+                  style={[styles.generateButton, { backgroundColor: colors.primary, flex: 1 }]}
+                  onPress={() => {
+                    setGenerateResult(null);
+                    setGenerateDryRun(false);
+                    // Run for real on next tick after closing modal
+                    setTimeout(() => {
+                      void (async () => {
+                        if (!selectedFamily) return;
+                        setCreating(true);
+                        try {
+                          const result = await expenseService.generateExpenses(selectedFamily.id, {
+                            dryRun: false,
+                          });
+                          setGenerateResult(result);
+                          await fetchData();
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to generate expenses');
+                        } finally {
+                          setCreating(false);
+                        }
+                      })();
+                    }, 100);
+                  }}
+                  disabled={creating}
+                >
+                  <FontAwesome name="magic" size={16} color="#fff" />
+                  <Text style={styles.generateButtonText}>Run for real</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.generateResultCloseBtn,
+                  { backgroundColor: colors.border, flex: generateResult?.dry_run && (generateResult.generated_count ?? 0) > 0 ? 0.6 : 1 },
+                ]}
+                onPress={() => setGenerateResult(null)}
+              >
+                <Text style={[styles.generateResultCloseText, { color: colors.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1930,6 +2152,28 @@ const styles = StyleSheet.create({
   },
   generateButtonContainer: {
     marginBottom: 16,
+    gap: 10,
+  },
+  dryRunRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+  },
+  dryRunTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  dryRunLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dryRunHint: {
+    fontSize: 12,
   },
   generateButton: {
     flexDirection: 'row',
@@ -1942,6 +2186,95 @@ const styles = StyleSheet.create({
   generateButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  generateResultOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  generateResultSheet: {
+    maxHeight: '88%',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    overflow: 'hidden',
+  },
+  generateResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  generateResultTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  generateResultSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+  },
+  generateResultSummary: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  generateResultStat: {
+    fontSize: 13,
+  },
+  generateResultList: {
+    paddingHorizontal: 16,
+  },
+  generateResultError: {
+    fontSize: 13,
+    marginTop: 10,
+  },
+  generateResultGroup: {
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  generateResultGroupTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  generateResultGroupMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  generateResultRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  generateResultRowTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  generateResultRowMeta: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  generateResultFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 16,
+    borderTopWidth: 1,
+  },
+  generateResultCloseBtn: {
+    minHeight: 48,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  generateResultCloseText: {
+    fontSize: 15,
     fontWeight: '600',
   },
   fab: {
@@ -2071,21 +2404,133 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
+  compactBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  compactIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactIconBtnPrimary: {
+    borderWidth: 0,
+  },
+  groupChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  groupChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  groupChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  periodNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    gap: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  periodNavArrow: {
+    width: 32,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodTabs: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  periodTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 40,
+  },
+  periodTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  periodTabNow: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  periodSummaryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  periodSummaryLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+    gap: 8,
+  },
+  periodSummaryChevron: {
+    marginTop: 1,
+  },
+  periodSummaryText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  periodSummaryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  periodSummaryMeta: {
+    fontSize: 12,
+  },
+  periodSummaryToggle: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderRadius: 7,
+    paddingHorizontal: 8,
+    minHeight: 32,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 6,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
-    paddingVertical: 8,
+    fontSize: 13,
+    paddingVertical: 4,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : null),
   },
   clearButton: {
     padding: 4,
@@ -2116,7 +2561,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   filterPanel: {
-    padding: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
   },
   groupByPickerTitle: {
@@ -2142,34 +2588,38 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
     gap: 8,
   },
   filterLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
-    minWidth: 100,
+    minWidth: 72,
   },
   sortOrderButton: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 4,
   },
   clearFiltersButton: {
-    padding: 10,
-    borderRadius: 8,
+    padding: 8,
+    borderRadius: 7,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 4,
   },
   clearFiltersText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   expensesList: {
     flex: 1,
+  },
+  expensesListContent: {
+    paddingBottom: 24,
+    paddingHorizontal: 8,
   },
   groupContainer: {
     marginBottom: 16,

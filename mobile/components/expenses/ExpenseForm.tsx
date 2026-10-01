@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -37,7 +37,10 @@ interface ExpenseFormProps {
   categories: ExpenseCategory[];
   tags: ExpenseTag[];
   familyId: number;
-  onSubmit: (data: CreateExpenseData | UpdateExpenseData) => void;
+  onSubmit: (
+    data: CreateExpenseData | UpdateExpenseData,
+    options?: { stayOpen?: boolean }
+  ) => void | Promise<Expense | void>;
   onCancel: () => void;
   onExpenseCreated?: (expenseId: number) => void;
   loading?: boolean;
@@ -74,7 +77,26 @@ export default function ExpenseForm({
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [showReceiptSourcePicker, setShowReceiptSourcePicker] = useState(false);
   const [lines, setLines] = useState<DraftLineItem[]>([]);
+  const [boundExpenseId, setBoundExpenseId] = useState<number | null>(null);
+  const boundExpenseIdRef = useRef<number | null>(null);
+
+  const activeExpenseId = expense?.id ?? boundExpenseId;
+  const isExisting = !!activeExpenseId;
+  const defaultCategoryId = useMemo(
+    () => categories.find((c) => c.is_default)?.id ?? categories[0]?.id ?? null,
+    [categories]
+  );
+
+  useEffect(() => {
+    boundExpenseIdRef.current = activeExpenseId;
+  }, [activeExpenseId]);
+
+  const setBoundId = (id: number | null) => {
+    boundExpenseIdRef.current = id;
+    setBoundExpenseId(id);
+  };
 
   useEffect(() => {
     if (!visible) {
@@ -88,10 +110,13 @@ export default function ExpenseForm({
       setSelectedTags([]);
       setReceipt(null);
       setLines([]);
+      setBoundId(null);
+      setShowReceiptSourcePicker(false);
       return;
     }
 
     if (expense) {
+      setBoundId(expense.id);
       setDescription(expense.description);
       setAmount(formatMoneyDisplay(expense.amount));
       setCategoryId(expense.category);
@@ -99,7 +124,11 @@ export default function ExpenseForm({
       setExpenseDate(expense.expense_date);
       setNotes(expense.notes || '');
       setSelectedTags(expense.tags || []);
-      setLines(draftLinesFromExpenseItems(expense.line_items));
+      setLines((prev) => {
+        const hasNamed = prev.some((l) => l.name.trim());
+        if (hasNamed) return prev;
+        return draftLinesFromExpenseItems(expense.line_items);
+      });
       if (expense.receipt_url) {
         setReceipt({
           id: expense.receipt_id || 0,
@@ -114,13 +143,11 @@ export default function ExpenseForm({
           created_at: '',
           updated_at: '',
         });
-      } else {
-        setReceipt(null);
       }
-    } else {
+    } else if (!boundExpenseId) {
       setDescription('');
       setAmount('');
-      setCategoryId(null);
+      setCategoryId(defaultCategoryId);
       setPaymentMethod('credit_card');
       setExpenseDate(new Date().toISOString().split('T')[0]);
       setNotes('');
@@ -128,35 +155,69 @@ export default function ExpenseForm({
       setReceipt(null);
       setLines([]);
     }
-  }, [visible, expense]);
+  }, [visible, expense?.id, defaultCategoryId]);
 
-  const handlePickReceipt = async () => {
-    try {
-      // Request permissions for image picker
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant camera roll permissions to upload receipts.');
-        return;
-      }
-
-      // Show action sheet to choose between camera and gallery
-      Alert.alert(
-        'Select Receipt',
-        'Choose an option',
-        [
-          { text: 'Camera', onPress: handleTakePhoto },
-          { text: 'Gallery', onPress: handlePickImage },
-          { text: 'Document', onPress: handlePickDocument },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
-    } catch (err: any) {
-      console.error('Error picking receipt:', err);
-      Alert.alert('Error', 'Failed to pick receipt. Please try again.');
+  const validateForm = (): CreateExpenseData | UpdateExpenseData | null => {
+    if (!description.trim()) {
+      Alert.alert('Validation Error', 'Please enter a description');
+      return null;
     }
+    if (!amount.trim()) {
+      Alert.alert('Validation Error', 'Please enter an amount');
+      return null;
+    }
+    if (!categoryId) {
+      Alert.alert('Validation Error', 'Please select a category');
+      return null;
+    }
+    if (!expenseDate) {
+      Alert.alert('Validation Error', 'Please select a date');
+      return null;
+    }
+
+    const amountNum = parseMoneyDisplay(amount);
+    if (amountNum == null || amountNum <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid amount greater than 0');
+      return null;
+    }
+
+    if (isExisting) {
+      return {
+        description: description.trim(),
+        amount: amountNum,
+        category: categoryId,
+        payment_method: paymentMethod,
+        expense_date: expenseDate,
+        notes: notes.trim() || undefined,
+        tags: selectedTags.length > 0 ? selectedTags : undefined,
+        line_items_input: toLineItemsInput(lines),
+      };
+    }
+
+    return {
+      family: familyId,
+      description: description.trim(),
+      amount: amountNum,
+      category: categoryId,
+      payment_method: paymentMethod,
+      expense_date: expenseDate,
+      notes: notes.trim() || undefined,
+      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      line_items_input: toLineItemsInput(lines),
+    };
+  };
+
+  /** Always opens the source chooser — no form fields required first. */
+  const handleReceiptButtonPress = () => {
+    if (!categories.length) {
+      Alert.alert('No categories', 'Create a category first, then attach a receipt.');
+      return;
+    }
+    setShowReceiptSourcePicker((open) => !open);
   };
 
   const handleTakePhoto = async () => {
+    setShowReceiptSourcePicker(false);
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
@@ -184,7 +245,16 @@ export default function ExpenseForm({
   };
 
   const handlePickImage = async () => {
+    setShowReceiptSourcePicker(false);
     try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Please grant camera roll permissions to upload receipts.');
+          return;
+        }
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -205,6 +275,7 @@ export default function ExpenseForm({
   };
 
   const handlePickDocument = async () => {
+    setShowReceiptSourcePicker(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf'],
@@ -225,35 +296,116 @@ export default function ExpenseForm({
   };
 
   const uploadReceiptFile = async (fileUri: string, fileName: string, mimeType: string) => {
-    if (!expense?.id) {
-      Alert.alert('Info', 'Please save the expense first, then upload the receipt — or use Scan receipt to create both together.');
-      return;
-    }
+    const existingId = boundExpenseIdRef.current ?? activeExpenseId;
+    const categoryForSave = categoryId || defaultCategoryId;
 
     setUploadingReceipt(true);
     try {
+      // Upload first (no expense required). OCR fills the form, then we create/update quietly.
       const uploadedReceipt = await expenseService.uploadReceipt({
         familyId,
         fileUri,
         fileName,
         mimeType,
-        expenseId: expense.id,
+        expenseId: existingId || undefined,
       });
       setReceipt(uploadedReceipt);
 
-      // Prefill line items from OCR when the editor is empty
+      let parsed: Awaited<ReturnType<typeof expenseService.parseReceipt>> | null = null;
       try {
-        const parsed = await expenseService.parseReceipt(uploadedReceipt.id);
-        if (parsed?.line_items?.length) {
-          setLines((prev) =>
-            prev.length === 0 ? draftLinesFromExpenseItems(parsed.line_items) : prev
-          );
-        }
-      } catch {
-        // OCR optional on attach
+        parsed = await expenseService.parseReceipt(uploadedReceipt.id);
+      } catch (err: any) {
+        console.error('Receipt OCR failed:', err);
       }
 
-      Alert.alert('Success', 'Receipt uploaded successfully');
+      const nextDescription =
+        (parsed?.merchant || description.trim() || 'Receipt').trim() || 'Receipt';
+      const nextAmount =
+        parsed?.total != null
+          ? parsed.total
+          : parseMoneyDisplay(amount);
+      const nextDate = parsed?.expense_date || expenseDate || new Date().toISOString().split('T')[0];
+      const draft = parsed?.line_items?.length
+        ? draftLinesFromExpenseItems(parsed.line_items)
+        : lines.filter((l) => l.name.trim());
+
+      setDescription(nextDescription);
+      if (nextAmount != null && nextAmount > 0) {
+        setAmount(formatMoneyDisplay(nextAmount));
+      }
+      setExpenseDate(nextDate);
+      if (!categoryId && categoryForSave) {
+        setCategoryId(categoryForSave);
+      }
+      if (draft.length) {
+        setLines(draft);
+      }
+
+      let ocrNote = 'Receipt uploaded.';
+      if (parsed?.error || parsed?.ocr_available === false) {
+        ocrNote =
+          parsed.error ||
+          'Receipt uploaded, but OCR is not available. Fill in details and save.';
+      } else if (parsed) {
+        const n = draft.length;
+        ocrNote =
+          n > 0 && nextAmount != null
+            ? `Receipt read. Amount ${formatMoneyDisplay(nextAmount)}, ${n} line item${n === 1 ? '' : 's'} — review before closing.`
+            : nextAmount != null
+              ? `Receipt read. Amount set to ${formatMoneyDisplay(nextAmount)} — review before closing.`
+              : 'Receipt uploaded. Could not read the total — enter an amount and save.';
+      }
+
+      if (!categoryForSave) {
+        Alert.alert('Receipt', `${ocrNote} Create a category, then save.`);
+        return;
+      }
+
+      if (!existingId) {
+        if (nextAmount == null || nextAmount <= 0) {
+          Alert.alert('Receipt', ocrNote);
+          return;
+        }
+        const saved = await Promise.resolve(
+          onSubmit(
+            {
+              family: familyId,
+              category: categoryForSave,
+              amount: nextAmount,
+              description: nextDescription,
+              expense_date: nextDate,
+              payment_method: paymentMethod,
+              notes: notes.trim() || undefined,
+              tags: selectedTags.length > 0 ? selectedTags : undefined,
+              line_items_input: toLineItemsInput(draft),
+            },
+            { stayOpen: true }
+          )
+        );
+        if (saved?.id) {
+          setBoundId(saved.id);
+          onExpenseCreated?.(saved.id);
+          try {
+            await expenseService.attachReceiptToExpense(uploadedReceipt.id, saved.id);
+          } catch (attachErr) {
+            console.warn('Receipt attach failed', attachErr);
+          }
+        }
+      } else {
+        try {
+          await expenseService.updateExpense(existingId, {
+            description: nextDescription,
+            ...(nextAmount != null && nextAmount > 0 ? { amount: nextAmount } : {}),
+            expense_date: nextDate,
+            ...(categoryForSave ? { category: categoryForSave } : {}),
+            line_items_input: toLineItemsInput(draft),
+          });
+        } catch {
+          // Form still has OCR values locally
+        }
+      }
+
+      Alert.alert('Receipt', ocrNote);
     } catch (err: any) {
       console.error('Error uploading receipt:', err);
       Alert.alert('Error', err.message || 'Failed to upload receipt. Please try again.');
@@ -307,54 +459,9 @@ export default function ExpenseForm({
   };
 
   const handleSubmit = () => {
-    // Validate required fields
-    if (!description.trim()) {
-      Alert.alert('Validation Error', 'Please enter a description');
-      return;
-    }
-    if (!amount.trim()) {
-      Alert.alert('Validation Error', 'Please enter an amount');
-      return;
-    }
-    if (!categoryId) {
-      Alert.alert('Validation Error', 'Please select a category');
-      return;
-    }
-    if (!expenseDate) {
-      Alert.alert('Validation Error', 'Please select a date');
-      return;
-    }
-
-    const amountNum = parseMoneyDisplay(amount);
-    if (amountNum == null || amountNum <= 0) {
-      Alert.alert('Validation Error', 'Please enter a valid amount greater than 0');
-      return;
-    }
-
-    if (expense) {
-      onSubmit({
-        description: description.trim(),
-        amount: amountNum,
-        category: categoryId,
-        payment_method: paymentMethod,
-        expense_date: expenseDate,
-        notes: notes.trim() || undefined,
-        tags: selectedTags.length > 0 ? selectedTags : undefined,
-        line_items_input: toLineItemsInput(lines),
-      });
-    } else {
-      onSubmit({
-        family: familyId,
-        description: description.trim(),
-        amount: amountNum,
-        category: categoryId,
-        payment_method: paymentMethod,
-        expense_date: expenseDate,
-        notes: notes.trim() || undefined,
-        tags: selectedTags.length > 0 ? selectedTags : undefined,
-        line_items_input: toLineItemsInput(lines),
-      });
-    }
+    const data = validateForm();
+    if (!data) return;
+    void Promise.resolve(onSubmit(data));
   };
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
@@ -365,7 +472,7 @@ export default function ExpenseForm({
         <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              {expense ? 'Edit Expense' : 'Add Expense'}
+              {isExisting ? 'Edit Expense' : 'Add Expense'}
             </Text>
             <TouchableOpacity onPress={onCancel} style={styles.closeButton}>
               <FontAwesome name="times" size={24} color={colors.text} />
@@ -510,20 +617,50 @@ export default function ExpenseForm({
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity
-                  style={[styles.uploadButton, { borderColor: colors.border, backgroundColor: colors.background }]}
-                  onPress={handlePickReceipt}
-                  disabled={loading || uploadingReceipt || !expense?.id}
-                >
-                  <FontAwesome name="camera" size={16} color={colors.primary} />
-                  <Text style={[styles.uploadButtonText, { color: colors.text }]}>
-                    {uploadingReceipt
-                      ? 'Uploading…'
-                      : expense?.id
-                        ? 'Add receipt photo'
-                        : 'Save expense first to attach a receipt'}
-                  </Text>
-                </TouchableOpacity>
+                <View>
+                  <TouchableOpacity
+                    style={[styles.uploadButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                    onPress={handleReceiptButtonPress}
+                    disabled={loading || uploadingReceipt}
+                  >
+                    <FontAwesome name="camera" size={16} color={colors.primary} />
+                    <Text style={[styles.uploadButtonText, { color: colors.text }]}>
+                      {uploadingReceipt
+                        ? 'Reading receipt…'
+                        : showReceiptSourcePicker
+                          ? 'Hide options'
+                          : 'Add receipt photo'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showReceiptSourcePicker && (
+                    <View style={[styles.receiptSourcePicker, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                      <TouchableOpacity
+                        style={styles.receiptSourceOption}
+                        onPress={() => void handleTakePhoto()}
+                        disabled={loading || uploadingReceipt}
+                      >
+                        <FontAwesome name="camera" size={16} color={colors.primary} />
+                        <Text style={[styles.receiptSourceOptionText, { color: colors.text }]}>Camera</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.receiptSourceOption}
+                        onPress={() => void handlePickImage()}
+                        disabled={loading || uploadingReceipt}
+                      >
+                        <FontAwesome name="image" size={16} color={colors.primary} />
+                        <Text style={[styles.receiptSourceOptionText, { color: colors.text }]}>Gallery</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.receiptSourceOption}
+                        onPress={() => void handlePickDocument()}
+                        disabled={loading || uploadingReceipt}
+                      >
+                        <FontAwesome name="file-o" size={16} color={colors.primary} />
+                        <Text style={[styles.receiptSourceOptionText, { color: colors.text }]}>Document</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
               )}
             </View>
 
@@ -571,7 +708,7 @@ export default function ExpenseForm({
               disabled={loading || !description.trim() || !amount.trim() || !categoryId || !expenseDate}
             >
               <Text style={styles.submitButtonText}>
-                {loading ? 'Saving...' : expense ? 'Update' : 'Add'}
+                {loading ? 'Saving...' : isExisting ? 'Update' : 'Add'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -723,6 +860,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  receiptSourcePicker: {
+    marginTop: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  receiptSourceOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 10,
+  },
+  receiptSourceOptionText: {
     fontSize: 14,
     fontWeight: '500',
   },

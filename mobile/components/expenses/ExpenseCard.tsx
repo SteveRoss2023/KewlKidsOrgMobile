@@ -14,6 +14,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { Expense } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
+import { formatCurrency } from '../../utils/moneyInput';
 
 interface ExpenseCardProps {
   expense: Expense;
@@ -81,7 +82,7 @@ export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardP
         onPress={onPress}
         activeOpacity={0.65}
         accessibilityRole="button"
-        accessibilityLabel={`${expense.description}, $${expense.amount.toFixed(2)}`}
+        accessibilityLabel={`${expense.description}, ${formatCurrency(expense.amount)}`}
       >
         <View style={styles.main}>
           <View style={styles.topLine}>
@@ -89,7 +90,7 @@ export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardP
               {expense.description}
             </Text>
             <Text style={[styles.amount, { color: colors.primary }]}>
-              ${expense.amount.toFixed(2)}
+              {formatCurrency(expense.amount)}
             </Text>
           </View>
 

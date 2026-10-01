@@ -10,6 +10,14 @@ export function formatMoneyDisplay(value: number | string | null | undefined): s
   return `$${n.toFixed(2)}`;
 }
 
+/** Format currency with thousand separators, e.g. 1234.5 → "$1,234.50". */
+export function formatCurrency(value: number | string | null | undefined): string {
+  if (value == null || value === '') return '$0.00';
+  const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+  if (Number.isNaN(n)) return '$0.00';
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** Parse a money display string to a number, e.g. "$27.99" → 27.99. */
 export function parseMoneyDisplay(display: string | null | undefined): number | null {
   if (display == null || !String(display).trim()) return null;

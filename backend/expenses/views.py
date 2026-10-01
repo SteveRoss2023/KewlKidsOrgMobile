@@ -527,11 +527,20 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
             percentage = (float(total) / float(budget.amount)) * 100 if budget.amount > 0 else 0
 
-            if percentage >= 100:
+            if percentage > 100:
                 alerts.append({
                     'budget_id': budget.id,
                     'category_name': budget.category.name if budget.category else None,
                     'status': 'exceeded',
+                    'percentage': round(percentage, 2),
+                    'spent': float(total),
+                    'limit': float(budget.amount)
+                })
+            elif abs(percentage - 100) < 0.01:
+                alerts.append({
+                    'budget_id': budget.id,
+                    'category_name': budget.category.name if budget.category else None,
+                    'status': 'on_budget',
                     'percentage': round(percentage, 2),
                     'spent': float(total),
                     'limit': float(budget.amount)
@@ -603,7 +612,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         else:  # yearly
             return current_date.replace(year=current_date.year + 1)
 
-    def _generate_expenses_for_recurring(self, recurring, member, end_date=None, start_date=None):
+    def _generate_expenses_for_recurring(self, recurring, member, end_date=None, start_date=None, dry_run=False):
         """
         Generate expenses for a recurring expense from start_date to end_date.
 
@@ -612,9 +621,10 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             member: Member instance (creator)
             end_date: Optional end date (defaults to end of current year)
             start_date: Optional start date (defaults to recurring.start_date)
+            dry_run: If True, do not create expenses or update next_due_date
 
         Returns:
-            int: Number of expenses generated
+            dict with generated_count, skipped_count, created[], skipped[]
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -628,7 +638,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 start_date = recurring.start_date
 
         # Log the start_date being used
-        logger.info(f"_generate_expenses_for_recurring: recurring.start_date={recurring.start_date} (day={recurring.start_date.day}), start_date param={start_date} (day={start_date.day if start_date else 'None'})")
+        logger.info(f"_generate_expenses_for_recurring: recurring.start_date={recurring.start_date} (day={recurring.start_date.day}), start_date param={start_date} (day={start_date.day if start_date else 'None'}), dry_run={dry_run}")
 
         # Determine the end date: use provided end_date, or end of current year if None
         if end_date is None:
@@ -641,14 +651,30 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             if recurring.end_date and recurring.end_date < end_date:
                 end_date = recurring.end_date
 
+        empty_result = {
+            'generated_count': 0,
+            'skipped_count': 0,
+            'created': [],
+            'skipped': [],
+        }
+
         # If start_date is after end_date, nothing to generate
         if start_date > end_date:
             logger.warning(f"start_date ({start_date}) is after end_date ({end_date}) for recurring expense {recurring.id} - {recurring.description}")
-            return 0
+            return empty_result
 
         current_date = start_date
         generated_count = 0
         skipped_count = 0
+        created_items = []
+        skipped_items = []
+
+        try:
+            amount_val = float(Decimal(str(recurring.amount))) if recurring.amount else 0.0
+        except (ValueError, InvalidOperation, TypeError):
+            amount_val = 0.0
+
+        category_name = recurring.category.name if recurring.category else None
 
         # Debug logging for date calculation
         logger.info(f"Starting expense generation for {recurring.id}: recurring.start_date={recurring.start_date}, start_date={start_date}, end_date={end_date}, frequency={recurring.frequency}")
@@ -663,30 +689,44 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 expense_date=current_date
             ).exists()
 
+            item = {
+                'recurring_id': recurring.id,
+                'description': recurring.description,
+                'category_name': category_name,
+                'amount': amount_val,
+                'expense_date': current_date.isoformat(),
+                'frequency': recurring.frequency,
+            }
+
             if not existing:
-                # Create expense (amount is already a string in recurring.amount)
-                # Log before creating to verify the date
-                logger.info(f"Creating expense for {recurring.id} on date {current_date} (day={current_date.day}, month={current_date.month}, year={current_date.year}, iso={current_date.isoformat()})")
-                expense = Expense.objects.create(
-                    family=recurring.family,
-                    created_by=member,
-                    category=recurring.category,
-                    amount=str(recurring.amount) if recurring.amount else '0.00',
-                    description=recurring.description,
-                    notes=recurring.notes,
-                    expense_date=current_date,
-                    payment_method=recurring.payment_method,
-                    is_recurring=True,
-                    recurring_expense=recurring
-                )
-                # Log after creating to verify what was stored
-                logger.info(f"Created expense {expense.id} with expense_date={expense.expense_date} (day={expense.expense_date.day}, month={expense.expense_date.month}, year={expense.expense_date.year}, iso={expense.expense_date.isoformat()})")
-
-                # Copy tags
-                expense.tags.set(recurring.tags.all())
-
-                generated_count += 1
+                if dry_run:
+                    item['action'] = 'would_create'
+                    created_items.append(item)
+                    generated_count += 1
+                else:
+                    logger.info(f"Creating expense for {recurring.id} on date {current_date} (day={current_date.day}, month={current_date.month}, year={current_date.year}, iso={current_date.isoformat()})")
+                    expense = Expense.objects.create(
+                        family=recurring.family,
+                        created_by=member,
+                        category=recurring.category,
+                        amount=str(recurring.amount) if recurring.amount else '0.00',
+                        description=recurring.description,
+                        notes=recurring.notes,
+                        expense_date=current_date,
+                        payment_method=recurring.payment_method,
+                        is_recurring=True,
+                        recurring_expense=recurring
+                    )
+                    logger.info(f"Created expense {expense.id} with expense_date={expense.expense_date}")
+                    expense.tags.set(recurring.tags.all())
+                    item['action'] = 'created'
+                    item['expense_id'] = expense.id
+                    created_items.append(item)
+                    generated_count += 1
             else:
+                item['action'] = 'skipped'
+                item['reason'] = 'already exists'
+                skipped_items.append(item)
                 skipped_count += 1
 
             # Move to next period based on frequency (daily, weekly, monthly, or yearly)
@@ -696,17 +736,11 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
             # Safety check to prevent infinite loops
             if generated_count + skipped_count > 1000:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"Too many iterations in expense generation for {recurring.id} - breaking loop")
                 break
 
-        # Update next_due_date to the next occurrence after the last generated expense
-        # Only update if we actually generated expenses AND next_due_date needs updating
-        # Don't update if user explicitly set next_due_date to match start_date pattern
-        if generated_count > 0:
-            # Find the last expense that was actually generated (or would have been generated)
-            # This ensures we calculate from an actual occurrence, preserving the day pattern
+        # Update next_due_date only when actually generating
+        if not dry_run and generated_count > 0:
             last_generated_expense = Expense.objects.filter(
                 family=recurring.family,
                 recurring_expense=recurring,
@@ -715,12 +749,8 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             ).order_by('-expense_date').first()
 
             if last_generated_expense:
-                # Calculate next_due_date from the last generated expense date
-                # This preserves the exact day pattern (e.g., if expenses are on the 1st, next will be 1st)
                 calculated_next_due = self._get_next_date(last_generated_expense.expense_date, recurring.frequency)
             else:
-                # Fallback: calculate from the last occurrence we would have generated
-                # This should rarely happen, but ensures we have a value
                 last_occurrence = start_date
                 temp_date = start_date
                 while temp_date <= end_date:
@@ -728,9 +758,6 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                     temp_date = self._get_next_date(temp_date, recurring.frequency)
                 calculated_next_due = self._get_next_date(last_occurrence, recurring.frequency)
 
-            # Always update next_due_date to the next occurrence after the last generated expense
-            # This ensures it's always calculated from the pattern, not manually set
-            # Check if end_date is reached
             if recurring.end_date and calculated_next_due > recurring.end_date:
                 recurring.is_active = False
             else:
@@ -739,7 +766,12 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
             recurring.save()
 
-        return generated_count
+        return {
+            'generated_count': generated_count,
+            'skipped_count': skipped_count,
+            'created': created_items,
+            'skipped': skipped_items,
+        }
 
     def perform_create(self, serializer):
         """Create recurring expense with creator as created_by and auto-generate expenses."""
@@ -776,7 +808,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         try:
             logger.info(f"Auto-generating expenses for new recurring expense {recurring.id}: {recurring.description}, start_date={recurring.start_date} (day={recurring.start_date.day}), next_due_date={recurring.next_due_date}, end_date={end_date}, frequency={recurring.frequency}, generation_start_date={generation_start_date} (day={generation_start_date.day})")
             count = self._generate_expenses_for_recurring(recurring, member, end_date=end_date, start_date=generation_start_date)
-            logger.info(f"Auto-generated {count} expenses for recurring expense {recurring.id}")
+            logger.info(f"Auto-generated {count.get('generated_count', 0) if isinstance(count, dict) else count} expenses for recurring expense {recurring.id}")
         except Exception as e:
             logger.error(f"Error auto-generating expenses for recurring expense {recurring.id}: {str(e)}", exc_info=True)
             # Don't fail the creation if generation fails, but log the error
@@ -792,10 +824,16 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def generate_expenses(self, request):
-        """Generate expenses from recurring expense templates for all active recurring expenses."""
+        """Generate expenses from recurring expense templates for all active recurring expenses.
+
+        Pass dry_run=true to preview what would be created without writing anything.
+        """
         family_id = request.data.get('family')
         if not family_id:
             return Response({'error': 'family is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dry_run_raw = request.data.get('dry_run', False)
+        dry_run = str(dry_run_raw).lower() in ('1', 'true', 'yes') if not isinstance(dry_run_raw, bool) else dry_run_raw
 
         family = get_object_or_404(Family, id=family_id, members__user=request.user)
         member = get_object_or_404(Member, user=request.user, family=family)
@@ -806,104 +844,104 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         )
 
         generated_count = 0
+        skipped_count = 0
+        created_items = []
+        skipped_items = []
+        by_recurring = []
         today = timezone.now().date()
         current_year = today.year
         current_year_start = date(current_year, 1, 1)
         current_year_end = date(current_year, 12, 31)
         errors = []
 
+        import logging
+        logger = logging.getLogger(__name__)
+
         for recurring in recurring_expenses:
             try:
                 # For manual generation, generate expenses for the current year
-                # Start from the first occurrence in the current year (or start_date if later)
-                # If start_date is in the current year, use it; otherwise find first occurrence in current year
                 generation_start = recurring.start_date
 
-                # Log the original start_date
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Processing recurring expense {recurring.id}: start_date={recurring.start_date} (day={recurring.start_date.day}, month={recurring.start_date.month}, year={recurring.start_date.year}), current_year={current_year}, current_year_start={current_year_start}")
+                logger.info(f"Processing recurring expense {recurring.id}: start_date={recurring.start_date}, dry_run={dry_run}")
 
-                # If start_date is before current year, find the first occurrence in the current year
-                # If start_date is in current year, we'll use it directly (generation_start is already set)
                 if generation_start.year < current_year:
-                    # Calculate first occurrence in current year based on frequency
                     if recurring.frequency == 'daily':
-                        # For daily, just use current year start
                         generation_start = current_year_start
                     elif recurring.frequency == 'weekly':
-                        # Find first occurrence on or after current year start, preserving day of week
                         days_since_start = (current_year_start - recurring.start_date).days
-                        weeks_to_add = (days_since_start + 6) // 7  # Round up
+                        weeks_to_add = (days_since_start + 6) // 7
                         generation_start = recurring.start_date + timedelta(weeks=weeks_to_add)
                         if generation_start < current_year_start:
                             generation_start = generation_start + timedelta(weeks=1)
                     elif recurring.frequency == 'monthly':
-                        # Find first occurrence in current year, preserving the day
-                        # Use the same day of month as start_date
                         from calendar import monthrange
                         start_day = recurring.start_date.day
-                        # Find the first month in current year where this day exists
-                        # Start from January
                         for month in range(1, 13):
                             last_day = monthrange(current_year, month)[1]
                             if start_day <= last_day:
                                 generation_start = date(current_year, month, start_day)
                                 break
-                        # Log to debug
-                        logger.info(f"Monthly frequency: start_date={recurring.start_date} (day={recurring.start_date.day}), current_year={current_year}, generation_start={generation_start} (day={generation_start.day})")
                     elif recurring.frequency == 'yearly':
-                        # For yearly, use the same month/day in current year
                         from calendar import monthrange
                         last_day = monthrange(current_year, recurring.start_date.month)[1]
                         safe_day = min(recurring.start_date.day, last_day)
                         generation_start = date(current_year, recurring.start_date.month, safe_day)
 
-                # Ensure generation_start is not before the original start_date
                 if generation_start < recurring.start_date:
                     generation_start = recurring.start_date
 
-                # If start_date is in the current year, use it directly to preserve the exact day
-                # This is critical for monthly expenses - if start_date is Jan 1, we want Jan 1, not Jan 3
                 if recurring.start_date.year == current_year:
                     generation_start = recurring.start_date
-                    logger.info(f"start_date is in current year, using it directly: {generation_start} (day={generation_start.day})")
 
-                # Log the final generation_start
-                logger.info(f"Final generation_start for {recurring.id}: {generation_start} (day={generation_start.day}, month={generation_start.month}, year={generation_start.year})")
-
-                # Determine end date: use recurring.end_date if provided and within current year, otherwise use current year end
                 if recurring.end_date and recurring.end_date <= current_year_end:
                     end_date = recurring.end_date
                 else:
                     end_date = current_year_end
 
-                # Debug logging
-                logger.info(f"Generating expenses for {recurring.description}: start_date={recurring.start_date}, generation_start={generation_start}, end_date={end_date}, frequency={recurring.frequency}")
-
-                # Generate expenses from generation_start to end_date
-                count = self._generate_expenses_for_recurring(recurring, member, end_date=end_date, start_date=generation_start)
-                logger.info(f"Generated {count} expenses for {recurring.description}")
-                generated_count += count
+                result = self._generate_expenses_for_recurring(
+                    recurring,
+                    member,
+                    end_date=end_date,
+                    start_date=generation_start,
+                    dry_run=dry_run,
+                )
+                generated_count += result['generated_count']
+                skipped_count += result['skipped_count']
+                created_items.extend(result['created'])
+                skipped_items.extend(result['skipped'])
+                by_recurring.append({
+                    'recurring_id': recurring.id,
+                    'description': recurring.description,
+                    'category_name': recurring.category.name if recurring.category else None,
+                    'frequency': recurring.frequency,
+                    'generation_start': generation_start.isoformat(),
+                    'generation_end': end_date.isoformat(),
+                    'generated_count': result['generated_count'],
+                    'skipped_count': result['skipped_count'],
+                    'created': result['created'],
+                    'skipped': result['skipped'],
+                })
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"Error generating expenses for {recurring.description}: {str(e)}", exc_info=True)
                 errors.append(f"Error generating expenses for {recurring.description}: {str(e)}")
 
+        verb = 'Would generate' if dry_run else 'Generated'
         response_data = {
-            'message': f'Generated {generated_count} expenses from recurring templates',
+            'dry_run': dry_run,
+            'message': f'{verb} {generated_count} expenses from recurring templates'
+                       + (f' ({skipped_count} already existed)' if skipped_count else ''),
             'generated_count': generated_count,
-            'recurring_count': recurring_expenses.count()
+            'skipped_count': skipped_count,
+            'recurring_count': recurring_expenses.count(),
+            'created': created_items,
+            'skipped': skipped_items,
+            'by_recurring': by_recurring,
         }
 
         if errors:
             response_data['errors'] = errors
 
-        # Log the response for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Generate expenses response: {response_data}")
+        logger.info(f"Generate expenses response: dry_run={dry_run} generated={generated_count} skipped={skipped_count}")
 
         return Response(response_data, status=status.HTTP_200_OK)
 
