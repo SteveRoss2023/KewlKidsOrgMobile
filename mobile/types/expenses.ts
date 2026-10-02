@@ -45,6 +45,7 @@ export interface Expense {
   receipt_url: string | null;
   receipt_id?: number | null;
   is_recurring: boolean;
+  is_paid: boolean;
   recurring_expense: number | null;
   line_items?: ExpenseLineItem[];
   created_at: string;
@@ -93,6 +94,8 @@ export interface Budget {
   category: number;
   category_name: string | null;
   amount: number;
+  /** Standing monthly amount before yearly due-month additions */
+  base_amount?: number;
   period: BudgetPeriod;
   start_date: string;
   end_date: string | null;
@@ -169,6 +172,7 @@ export interface UpdateExpenseData {
   expense_date?: string;
   payment_method?: PaymentMethod;
   tags?: number[];
+  is_paid?: boolean;
   line_items_input?: Array<{
     name: string;
     quantity?: number | null;
@@ -322,4 +326,40 @@ export interface GenerateExpensesResult {
   skipped: GenerateExpenseItem[];
   by_recurring: GenerateExpensesByRecurring[];
   errors?: string[];
+}
+
+export interface CreateBudgetFromRecurringItem {
+  category_id: number;
+  category_name: string | null;
+  amount: number;
+  recurring_amount: number;
+  expense_avg: number;
+  sources: 'recurring' | 'expenses' | 'both' | 'none';
+  period: 'monthly';
+  action:
+    | 'would_create'
+    | 'created'
+    | 'would_update'
+    | 'updated'
+    | 'would_reactivate'
+    | 'reactivated'
+    | 'would_deactivate'
+    | 'deactivated'
+    | 'skipped';
+  old_amount?: number | null;
+  budget_id?: number;
+  reason?: string;
+  has_yearly?: boolean;
+}
+
+export interface CreateBudgetsFromRecurringResult {
+  dry_run: boolean;
+  analyze_expenses: boolean;
+  period: 'monthly';
+  message: string;
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  deactivated_count?: number;
+  by_category: CreateBudgetFromRecurringItem[];
 }

@@ -23,6 +23,7 @@ import {
   ExpenseByPeriod,
   BudgetAlert,
   GenerateExpensesResult,
+  CreateBudgetsFromRecurringResult,
 } from '../types/expenses';
 
 /** Follow DRF `next` links until all pages are loaded. */
@@ -281,14 +282,42 @@ class ExpenseService {
   /**
    * Get all budgets for a family
    */
-  async getBudgets(familyId: number, isActive?: boolean): Promise<Budget[]> {
+  async getBudgets(
+    familyId: number,
+    isActive?: boolean,
+    options?: { asOf?: string; budgetPeriod?: 'month' | 'year' }
+  ): Promise<Budget[]> {
     try {
       const params: any = { family: familyId };
       if (isActive !== undefined) params.is_active = isActive.toString();
+      if (options?.asOf) params.as_of = options.asOf;
+      if (options?.budgetPeriod) params.budget_period = options.budgetPeriod;
 
       return await fetchAllPages<Budget>('/budgets/', params);
     } catch (error) {
       console.error('Error fetching budgets:', error);
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Create/update monthly budgets from recurring templates (optional expense analysis).
+   */
+  async createBudgetsFromRecurring(
+    familyId: number,
+    options?: { dryRun?: boolean; analyzeExpenses?: boolean }
+  ): Promise<CreateBudgetsFromRecurringResult> {
+    try {
+      const response = await apiClient.post<CreateBudgetsFromRecurringResult>(
+        '/budgets/create_from_recurring/',
+        {
+          family: familyId,
+          dry_run: !!options?.dryRun,
+          analyze_expenses: !!options?.analyzeExpenses,
+        }
+      );
+      return response.data;
+    } catch (error) {
       throw handleAPIError(error as any);
     }
   }
@@ -375,6 +404,31 @@ class ExpenseService {
   async updateRecurringExpense(recurringId: number, data: UpdateRecurringExpenseData): Promise<RecurringExpense> {
     try {
       const response = await apiClient.patch<RecurringExpense>(`/recurring-expenses/${recurringId}/`, data);
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Mark a recurring occurrence as paid or unpaid (creates the expense row if needed).
+   */
+  async toggleRecurringPaid(
+    recurringId: number,
+    expenseDate: string,
+    isPaid?: boolean
+  ): Promise<Expense> {
+    try {
+      const body: { expense_date: string; is_paid?: boolean } = {
+        expense_date: expenseDate.slice(0, 10),
+      };
+      if (typeof isPaid === 'boolean') {
+        body.is_paid = isPaid;
+      }
+      const response = await apiClient.post<Expense>(
+        `/recurring-expenses/${recurringId}/toggle_paid/`,
+        body
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error as any);

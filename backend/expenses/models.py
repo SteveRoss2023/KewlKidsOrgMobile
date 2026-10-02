@@ -176,6 +176,7 @@ class Expense(models.Model):
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='credit_card')
     tags = models.ManyToManyField(ExpenseTag, blank=True, related_name='expenses')
     is_recurring = models.BooleanField(default=False)
+    is_paid = models.BooleanField(default=True)
     recurring_expense = models.ForeignKey(RecurringExpense, on_delete=models.CASCADE, null=True, blank=True, related_name='generated_expenses')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

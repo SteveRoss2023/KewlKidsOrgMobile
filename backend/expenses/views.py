@@ -16,6 +16,7 @@ from .serializers import (
     ExpenseCategorySerializer, ExpenseSerializer, ExpenseTagSerializer,
     BudgetSerializer, RecurringExpenseSerializer, ReceiptSerializer
 )
+from .recurring_sync import sync_all_generated_from_template, sync_generated_expense_fields
 from families.models import Family, Member
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -160,7 +161,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Return expenses for families the user belongs to."""
         user = self.request.user
-        queryset = Expense.objects.filter(family__members__user=user).prefetch_related('tags', 'line_items')
+        queryset = Expense.objects.filter(family__members__user=user).select_related(
+            'category', 'recurring_expense'
+        ).prefetch_related('tags', 'line_items')
 
         # Filter by family if provided
         family_id = self.request.query_params.get('family')
@@ -473,11 +476,368 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        as_of_raw = self.request.query_params.get('as_of')
+        if as_of_raw:
+            try:
+                context['as_of'] = date.fromisoformat(as_of_raw[:10])
+            except (ValueError, TypeError):
+                pass
+        return context
+
+    def _monthly_window_for_as_of(self, as_of: date):
+        start = as_of.replace(day=1)
+        if as_of.month == 12:
+            end = as_of.replace(day=31)
+        else:
+            end = (as_of.replace(month=as_of.month + 1, day=1) - timedelta(days=1))
+        return start, end
+
+    def list(self, request, *args, **kwargs):
+        """Hide empty placeholder budgets; batch spent/limit calcs for month or year."""
+        from .recurring_sync import build_budget_period_caches
+
+        queryset = self.filter_queryset(self.get_queryset())
+        context = self.get_serializer_context()
+        as_of = context.get('as_of') or timezone.now().date()
+        budget_period = (request.query_params.get('budget_period') or 'month').lower()
+
+        if budget_period == 'year':
+            start = date(as_of.year, 1, 1)
+            end = date(as_of.year, 12, 31)
+        else:
+            start, end = self._monthly_window_for_as_of(as_of)
+        context['period_window'] = (start, end)
+
+        family_ids = set(queryset.values_list('family_id', flat=True))
+        if len(family_ids) == 1:
+            family_id = next(iter(family_ids))
+            caches = build_budget_period_caches(family_id, start, end)
+            context.update(caches)
+
+        serializer = self.get_serializer(queryset, many=True, context=context)
+        data = [
+            row for row in serializer.data
+            if float(row.get('amount') or 0) > 0 or float(row.get('spent_amount') or 0) > 0
+        ]
+        return Response(data)
+
     def perform_create(self, serializer):
         """Create budget with family validation."""
         family_id = self.request.data.get('family')
         family = get_object_or_404(Family, id=family_id, members__user=self.request.user)
         serializer.save(family=family)
+
+    @staticmethod
+    def _normalize_recurring_to_monthly(amount: Decimal, frequency: str) -> Decimal:
+        """Convert recurring amount to a standing monthly budget contribution.
+
+        Yearly items are NOT amortized here — they only count in their due month
+        via BudgetSerializer effective amount.
+        """
+        if frequency == 'daily':
+            return amount * Decimal('30.44')
+        if frequency == 'weekly':
+            return amount * Decimal('4.33')
+        if frequency == 'yearly':
+            return Decimal('0')
+        return amount  # monthly
+
+    @action(detail=False, methods=['post'])
+    def create_from_recurring(self, request):
+        """Create/update/deactivate monthly budgets from current recurring (+ optional expense analysis).
+
+        Re-run after fixing recurring/expense categories to resync budgets.
+        Stale category budgets with no remaining source are deactivated.
+
+        Body: { family, dry_run?: bool, analyze_expenses?: bool }
+        """
+        family_id = request.data.get('family')
+        if not family_id:
+            return Response({'error': 'family is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dry_run_raw = request.data.get('dry_run', False)
+        dry_run = str(dry_run_raw).lower() in ('1', 'true', 'yes') if not isinstance(dry_run_raw, bool) else dry_run_raw
+        analyze_raw = request.data.get('analyze_expenses', False)
+        analyze_expenses = (
+            str(analyze_raw).lower() in ('1', 'true', 'yes') if not isinstance(analyze_raw, bool) else analyze_raw
+        )
+
+        family = get_object_or_404(Family, id=family_id, members__user=request.user)
+        today = timezone.now().date()
+
+        # recurring → monthly totals by category (yearly contributes 0 to standing monthly)
+        recurring_by_cat: dict[int, dict] = {}
+        yearly_only_cats: dict[int, dict] = {}
+        for recurring in RecurringExpense.objects.filter(family=family, is_active=True).select_related('category'):
+            try:
+                amount = Decimal(str(recurring.amount or '0'))
+            except (ValueError, InvalidOperation, TypeError):
+                amount = Decimal('0')
+            cat_id = recurring.category_id
+            cat_name = recurring.category.name if recurring.category else None
+            monthly = self._normalize_recurring_to_monthly(amount, recurring.frequency)
+
+            if recurring.frequency == 'yearly':
+                if cat_id not in yearly_only_cats:
+                    yearly_only_cats[cat_id] = {
+                        'category_id': cat_id,
+                        'category_name': cat_name,
+                        'recurring_ids': [],
+                    }
+                yearly_only_cats[cat_id]['recurring_ids'].append(recurring.id)
+
+            if cat_id not in recurring_by_cat:
+                recurring_by_cat[cat_id] = {
+                    'category_id': cat_id,
+                    'category_name': cat_name,
+                    'amount': Decimal('0'),
+                    'recurring_ids': [],
+                }
+            if monthly > 0:
+                recurring_by_cat[cat_id]['amount'] += monthly
+                recurring_by_cat[cat_id]['recurring_ids'].append(recurring.id)
+
+        # Drop empty recurring buckets that only existed as placeholders
+        recurring_by_cat = {
+            cid: data for cid, data in recurring_by_cat.items()
+            if data['amount'] > 0 or cid in yearly_only_cats
+        }
+
+        # expense analysis → avg monthly by category (last 12 months)
+        expense_by_cat: dict[int, dict] = {}
+        if analyze_expenses:
+            window_start = (today.replace(day=1) - timedelta(days=365))
+            expenses = Expense.objects.filter(
+                family=family,
+                expense_date__gte=window_start,
+                expense_date__lte=today,
+            ).select_related('category')
+
+            accum: dict[int, dict] = {}
+            for expense in expenses:
+                cat_id = expense.category_id
+                if cat_id is None:
+                    continue
+                try:
+                    amt = Decimal(str(expense.amount or '0'))
+                except (ValueError, InvalidOperation, TypeError):
+                    continue
+                if cat_id not in accum:
+                    accum[cat_id] = {
+                        'total': Decimal('0'),
+                        'months': set(),
+                        'category_name': expense.category.name if expense.category else None,
+                    }
+                accum[cat_id]['total'] += amt
+                accum[cat_id]['months'].add(
+                    f'{expense.expense_date.year}-{expense.expense_date.month:02d}'
+                )
+
+            for cat_id, data in accum.items():
+                months = max(len(data['months']), 1)
+                expense_by_cat[cat_id] = {
+                    'category_id': cat_id,
+                    'category_name': data['category_name'],
+                    'amount': (data['total'] / Decimal(months)).quantize(Decimal('0.01')),
+                }
+
+        # merge suggestions — include yearly-only categories so a budget row exists for due months
+        all_cat_ids = set(recurring_by_cat.keys()) | set(expense_by_cat.keys()) | set(yearly_only_cats.keys())
+        suggestions = []
+        for cat_id in all_cat_ids:
+            rec = recurring_by_cat.get(cat_id)
+            exp = expense_by_cat.get(cat_id)
+            yearly_meta = yearly_only_cats.get(cat_id)
+            rec_amt = rec['amount'].quantize(Decimal('0.01')) if rec and rec['amount'] > 0 else Decimal('0')
+            exp_amt = exp['amount'] if exp else Decimal('0')
+            if rec_amt > 0 and exp_amt > 0:
+                amount = max(rec_amt, exp_amt)
+                sources = 'both'
+            elif rec_amt > 0:
+                amount = rec_amt
+                sources = 'recurring'
+            elif exp_amt > 0:
+                amount = exp_amt
+                sources = 'expenses'
+            elif yearly_meta:
+                # Placeholder budget (standing monthly = 0); due-month amount comes from serializer
+                amount = Decimal('0')
+                sources = 'recurring'
+            else:
+                continue
+
+            category_name = (
+                (rec or {}).get('category_name')
+                or (exp or {}).get('category_name')
+                or (yearly_meta or {}).get('category_name')
+            )
+            suggestions.append({
+                'category_id': cat_id,
+                'category_name': category_name,
+                'amount': float(amount),
+                'recurring_amount': float(rec_amt),
+                'expense_avg': float(exp_amt),
+                'sources': sources,
+                'has_yearly': bool(yearly_meta),
+            })
+
+        suggestions.sort(key=lambda s: (s['category_name'] or '').lower())
+
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+        deactivated_count = 0
+        by_category = []
+        suggested_cat_ids = {s['category_id'] for s in suggestions}
+
+        for suggestion in suggestions:
+            cat_id = suggestion['category_id']
+            existing = Budget.objects.filter(
+                family=family,
+                category_id=cat_id,
+                period='monthly',
+                is_active=True,
+            ).first()
+            # Also revive inactive budget for this category if present
+            if not existing:
+                existing = Budget.objects.filter(
+                    family=family,
+                    category_id=cat_id,
+                    period='monthly',
+                ).order_by('-updated_at').first()
+
+            item = {
+                **suggestion,
+                'period': 'monthly',
+            }
+
+            if existing and existing.is_active:
+                old_amount = float(existing.amount)
+                item['old_amount'] = old_amount
+                item['budget_id'] = existing.id
+
+                # Expense analysis must never overwrite an existing budget
+                if suggestion['sources'] == 'expenses':
+                    item['action'] = 'skipped'
+                    item['reason'] = 'keeping existing budget (expense analysis does not overwrite)'
+                    item['amount'] = old_amount
+                    skipped_count += 1
+                else:
+                    # For recurring/both, only sync the recurring side — never lower a higher manual amount
+                    target = float(suggestion.get('recurring_amount') or suggestion['amount'])
+                    if suggestion['sources'] == 'both':
+                        target = float(suggestion.get('recurring_amount') or 0)
+                    item['amount'] = target
+                    if abs(old_amount - target) < 0.005:
+                        item['action'] = 'skipped'
+                        item['reason'] = 'amount unchanged'
+                        skipped_count += 1
+                    elif old_amount > target + 0.005:
+                        item['action'] = 'skipped'
+                        item['reason'] = 'keeping higher existing budget'
+                        item['amount'] = old_amount
+                        skipped_count += 1
+                    elif dry_run:
+                        item['action'] = 'would_update'
+                        updated_count += 1
+                    else:
+                        existing.amount = Decimal(str(target))
+                        existing.save(update_fields=['amount', 'updated_at'])
+                        item['action'] = 'updated'
+                        updated_count += 1
+            elif existing and not existing.is_active:
+                old_amount = float(existing.amount)
+                item['old_amount'] = old_amount
+                item['budget_id'] = existing.id
+                if dry_run:
+                    item['action'] = 'would_reactivate'
+                    updated_count += 1
+                else:
+                    existing.amount = Decimal(str(suggestion['amount']))
+                    existing.is_active = True
+                    existing.start_date = existing.start_date or today.replace(day=1)
+                    existing.save(update_fields=['amount', 'is_active', 'start_date', 'updated_at'])
+                    item['action'] = 'reactivated'
+                    updated_count += 1
+            else:
+                item['old_amount'] = None
+                if dry_run:
+                    item['action'] = 'would_create'
+                    created_count += 1
+                else:
+                    budget = Budget.objects.create(
+                        family=family,
+                        category_id=cat_id,
+                        amount=Decimal(str(suggestion['amount'])),
+                        period='monthly',
+                        start_date=today.replace(day=1),
+                        end_date=None,
+                        alert_threshold=80,
+                        is_active=True,
+                    )
+                    item['action'] = 'created'
+                    item['budget_id'] = budget.id
+                    created_count += 1
+
+            by_category.append(item)
+
+        # Deactivate stale budgets no longer backed by recurring/expenses
+        stale_qs = Budget.objects.filter(
+            family=family,
+            period='monthly',
+            is_active=True,
+        ).exclude(category_id__in=suggested_cat_ids)
+        for stale in stale_qs.select_related('category'):
+            stale_item = {
+                'category_id': stale.category_id,
+                'category_name': stale.category.name if stale.category else None,
+                'amount': float(stale.amount),
+                'recurring_amount': 0.0,
+                'expense_avg': 0.0,
+                'sources': 'none',
+                'period': 'monthly',
+                'budget_id': stale.id,
+                'old_amount': float(stale.amount),
+                'action': 'would_deactivate' if dry_run else 'deactivated',
+                'reason': 'no longer in recurring or expense analysis',
+            }
+            by_category.append(stale_item)
+            deactivated_count += 1
+            if not dry_run:
+                stale.is_active = False
+                stale.save(update_fields=['is_active', 'updated_at'])
+
+        by_category.sort(key=lambda s: (s.get('category_name') or '').lower())
+
+        verb = 'Would apply' if dry_run else 'Applied'
+        extras = []
+        if skipped_count:
+            extras.append(f'{skipped_count} unchanged')
+        if deactivated_count:
+            extras.append(
+                f'{deactivated_count} {"would deactivate" if dry_run else "deactivated"}'
+            )
+        message = (
+            f'{verb} {created_count} new and {updated_count} updated monthly budgets'
+            + (f' ({", ".join(extras)})' if extras else '')
+        )
+
+        return Response(
+            {
+                'dry_run': dry_run,
+                'analyze_expenses': analyze_expenses,
+                'period': 'monthly',
+                'message': message,
+                'created_count': created_count,
+                'updated_count': updated_count,
+                'skipped_count': skipped_count,
+                'deactivated_count': deactivated_count,
+                'by_category': by_category,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=['get'])
     def check_budgets(self, request):
@@ -514,7 +874,8 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 family=family,
                 category=budget.category,
                 expense_date__gte=start,
-                expense_date__lte=end
+                expense_date__lte=end,
+                is_paid=True,
             )
 
             total = Decimal('0.00')
@@ -612,6 +973,14 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         else:  # yearly
             return current_date.replace(year=current_date.year + 1)
 
+    def _sync_generated_expense_fields(self, expense, recurring, tag_ids=None):
+        """Copy template-owned fields onto a generated expense. Returns True if anything changed."""
+        return sync_generated_expense_fields(expense, recurring, tag_ids=tag_ids)
+
+    def _sync_all_generated_from_template(self, recurring):
+        """Sync all generated expenses for a recurring template to match its current fields."""
+        return sync_all_generated_from_template(recurring)
+
     def _generate_expenses_for_recurring(self, recurring, member, end_date=None, start_date=None, dry_run=False):
         """
         Generate expenses for a recurring expense from start_date to end_date.
@@ -624,7 +993,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             dry_run: If True, do not create expenses or update next_due_date
 
         Returns:
-            dict with generated_count, skipped_count, created[], skipped[]
+            dict with generated_count, skipped_count, updated_count, created[], skipped[], updated[]
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -654,8 +1023,10 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         empty_result = {
             'generated_count': 0,
             'skipped_count': 0,
+            'updated_count': 0,
             'created': [],
             'skipped': [],
+            'updated': [],
         }
 
         # If start_date is after end_date, nothing to generate
@@ -666,8 +1037,11 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         current_date = start_date
         generated_count = 0
         skipped_count = 0
+        updated_count = 0
         created_items = []
         skipped_items = []
+        updated_items = []
+        tag_ids = list(recurring.tags.values_list('id', flat=True))
 
         try:
             amount_val = float(Decimal(str(recurring.amount))) if recurring.amount else 0.0
@@ -687,7 +1061,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 family=recurring.family,
                 recurring_expense=recurring,
                 expense_date=current_date
-            ).exists()
+            ).first()
 
             item = {
                 'recurring_id': recurring.id,
@@ -715,19 +1089,48 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                         expense_date=current_date,
                         payment_method=recurring.payment_method,
                         is_recurring=True,
+                        is_paid=False,
                         recurring_expense=recurring
                     )
                     logger.info(f"Created expense {expense.id} with expense_date={expense.expense_date}")
-                    expense.tags.set(recurring.tags.all())
+                    expense.tags.set(tag_ids)
                     item['action'] = 'created'
                     item['expense_id'] = expense.id
                     created_items.append(item)
                     generated_count += 1
             else:
-                item['action'] = 'skipped'
-                item['reason'] = 'already exists'
-                skipped_items.append(item)
-                skipped_count += 1
+                # Keep existing rows aligned with the template (category etc. can drift after edits)
+                if dry_run:
+                    needs_sync = (
+                        existing.category_id != recurring.category_id
+                        or str(existing.amount or '') != (str(recurring.amount) if recurring.amount else '0.00')
+                        or existing.description != recurring.description
+                        or (existing.notes or None) != (recurring.notes or None)
+                        or existing.payment_method != recurring.payment_method
+                        or set(existing.tags.values_list('id', flat=True)) != set(tag_ids)
+                    )
+                    if needs_sync:
+                        item['action'] = 'would_update'
+                        item['expense_id'] = existing.id
+                        updated_items.append(item)
+                        updated_count += 1
+                    else:
+                        item['action'] = 'skipped'
+                        item['reason'] = 'already exists'
+                        item['expense_id'] = existing.id
+                        skipped_items.append(item)
+                        skipped_count += 1
+                elif self._sync_generated_expense_fields(existing, recurring, tag_ids=tag_ids):
+                    item['action'] = 'updated'
+                    item['expense_id'] = existing.id
+                    updated_items.append(item)
+                    updated_count += 1
+                else:
+                    item['action'] = 'skipped'
+                    item['reason'] = 'already exists'
+                    item['expense_id'] = existing.id
+                    skipped_items.append(item)
+                    skipped_count += 1
 
             # Move to next period based on frequency (daily, weekly, monthly, or yearly)
             next_date = self._get_next_date(current_date, recurring.frequency)
@@ -735,7 +1138,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             current_date = next_date
 
             # Safety check to prevent infinite loops
-            if generated_count + skipped_count > 1000:
+            if generated_count + skipped_count + updated_count > 1000:
                 logger.error(f"Too many iterations in expense generation for {recurring.id} - breaking loop")
                 break
 
@@ -769,8 +1172,10 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         return {
             'generated_count': generated_count,
             'skipped_count': skipped_count,
+            'updated_count': updated_count,
             'created': created_items,
             'skipped': skipped_items,
+            'updated': updated_items,
         }
 
     def perform_create(self, serializer):
@@ -813,14 +1218,167 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             logger.error(f"Error auto-generating expenses for recurring expense {recurring.id}: {str(e)}", exc_info=True)
             # Don't fail the creation if generation fails, but log the error
 
+    def _expected_occurrence_dates(self, recurring, end_date):
+        """Return the set of occurrence dates from recurring.start_date through end_date."""
+        dates = set()
+        if not recurring.start_date or recurring.start_date > end_date:
+            return dates
+        current = recurring.start_date
+        for _ in range(1000):
+            if recurring.end_date and current > recurring.end_date:
+                break
+            if current > end_date:
+                break
+            dates.add(current)
+            current = self._get_next_date(current, recurring.frequency)
+        return dates
+
+    def _reconcile_generated_schedule(self, recurring, member):
+        """Align unpaid generated expenses with the template schedule.
+
+        - Deletes unpaid rows whose date is not on the new schedule
+        - Creates missing schedule dates through year-end / end_date
+        Paid expenses are left alone.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        today = timezone.now().date()
+        current_year_end = date(today.year, 12, 31)
+        gen_end = (
+            recurring.end_date
+            if recurring.end_date and recurring.end_date <= current_year_end
+            else current_year_end
+        )
+        expected = self._expected_occurrence_dates(recurring, gen_end)
+
+        unpaid = list(
+            Expense.objects.filter(recurring_expense=recurring, is_paid=False)
+        )
+        orphan_ids = [e.id for e in unpaid if e.expense_date not in expected]
+        if orphan_ids:
+            deleted, _ = Expense.objects.filter(id__in=orphan_ids).delete()
+            logger.info(
+                f"Recurring {recurring.id}: removed {deleted} unpaid expenses off-schedule "
+                f"(expected {sorted(expected)[:5]}{'...' if len(expected) > 5 else ''})"
+            )
+
+        if member is None:
+            logger.warning(f"No member to regenerate expenses for recurring {recurring.id}")
+            return {'removed': len(orphan_ids), 'generated_count': 0}
+
+        if recurring.start_date and recurring.start_date <= gen_end:
+            result = self._generate_expenses_for_recurring(
+                recurring,
+                member,
+                end_date=gen_end,
+                start_date=recurring.start_date,
+            )
+            return {
+                'removed': len(orphan_ids),
+                'generated_count': result.get('generated_count', 0),
+                'updated_count': result.get('updated_count', 0),
+            }
+        return {'removed': len(orphan_ids), 'generated_count': 0}
+
     def perform_update(self, serializer):
-        """Update recurring expense and recalculate next_due_date if start_date or frequency changed."""
+        """Update recurring expense, sync fields, and realign unpaid generated expense dates."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         recurring = serializer.save()
 
         # Always recalculate next_due_date from start_date + frequency
-        # This ensures it's always correct, even if user tried to set it manually
         recurring.next_due_date = self._get_next_date(recurring.start_date, recurring.frequency)
-        recurring.save()
+        recurring.save(update_fields=['next_due_date', 'updated_at'])
+
+        # Keep category/amount/description/etc. aligned
+        self._sync_all_generated_from_template(recurring)
+
+        member = recurring.created_by
+        if member is None:
+            member = Member.objects.filter(
+                family_id=recurring.family_id, user=self.request.user
+            ).first()
+
+        # Always reconcile unpaid schedule (covers start/end/frequency changes and drift)
+        result = self._reconcile_generated_schedule(recurring, member)
+
+        # next_due_date = day after the latest generated occurrence (or start+frequency)
+        last_expense = (
+            Expense.objects.filter(recurring_expense=recurring)
+            .order_by('-expense_date')
+            .first()
+        )
+        if last_expense:
+            recurring.next_due_date = self._get_next_date(
+                last_expense.expense_date, recurring.frequency
+            )
+        else:
+            recurring.next_due_date = self._get_next_date(
+                recurring.start_date, recurring.frequency
+            )
+        if recurring.end_date and recurring.next_due_date > recurring.end_date:
+            recurring.is_active = False
+        recurring.save(update_fields=['next_due_date', 'is_active', 'updated_at'])
+
+        logger.info(
+            f"Recurring {recurring.id} schedule reconcile: removed={result.get('removed')} "
+            f"created={result.get('generated_count')} updated={result.get('updated_count')} "
+            f"next_due={recurring.next_due_date}"
+        )
+
+    @action(detail=True, methods=['post'])
+    def toggle_paid(self, request, pk=None):
+        """Mark the generated expense for a given occurrence date as paid or unpaid.
+
+        Body: { expense_date: "YYYY-MM-DD", is_paid?: bool }
+        If the expense row does not exist yet, creates it (unpaid first, then applies is_paid).
+        If is_paid is omitted, flips the current value.
+        """
+        recurring = self.get_object()
+        family = get_object_or_404(Family, id=recurring.family_id, members__user=request.user)
+        member = get_object_or_404(Member, user=request.user, family=family)
+
+        date_raw = request.data.get('expense_date')
+        if not date_raw:
+            return Response({'error': 'expense_date is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            expense_date = date.fromisoformat(str(date_raw)[:10])
+        except ValueError:
+            return Response({'error': 'Invalid expense_date'}, status=status.HTTP_400_BAD_REQUEST)
+
+        expense = Expense.objects.filter(
+            family=family,
+            recurring_expense=recurring,
+            expense_date=expense_date,
+        ).first()
+
+        if not expense:
+            expense = Expense.objects.create(
+                family=family,
+                created_by=member,
+                category=recurring.category,
+                amount=str(recurring.amount) if recurring.amount else '0.00',
+                description=recurring.description,
+                notes=recurring.notes,
+                expense_date=expense_date,
+                payment_method=recurring.payment_method,
+                is_recurring=True,
+                is_paid=False,
+                recurring_expense=recurring,
+            )
+            expense.tags.set(recurring.tags.all())
+
+        if 'is_paid' in request.data:
+            raw = request.data.get('is_paid')
+            expense.is_paid = str(raw).lower() in ('1', 'true', 'yes') if not isinstance(raw, bool) else raw
+        else:
+            expense.is_paid = not expense.is_paid
+        expense.save(update_fields=['is_paid', 'updated_at'])
+
+        serializer = ExpenseSerializer(expense, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def generate_expenses(self, request):
@@ -845,8 +1403,10 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
         generated_count = 0
         skipped_count = 0
+        updated_count = 0
         created_items = []
         skipped_items = []
+        updated_items = []
         by_recurring = []
         today = timezone.now().date()
         current_year = today.year
@@ -907,8 +1467,10 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 )
                 generated_count += result['generated_count']
                 skipped_count += result['skipped_count']
+                updated_count += result.get('updated_count', 0)
                 created_items.extend(result['created'])
                 skipped_items.extend(result['skipped'])
+                updated_items.extend(result.get('updated', []))
                 by_recurring.append({
                     'recurring_id': recurring.id,
                     'description': recurring.description,
@@ -918,30 +1480,43 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                     'generation_end': end_date.isoformat(),
                     'generated_count': result['generated_count'],
                     'skipped_count': result['skipped_count'],
+                    'updated_count': result.get('updated_count', 0),
                     'created': result['created'],
                     'skipped': result['skipped'],
+                    'updated': result.get('updated', []),
                 })
             except Exception as e:
                 logger.error(f"Error generating expenses for {recurring.description}: {str(e)}", exc_info=True)
                 errors.append(f"Error generating expenses for {recurring.description}: {str(e)}")
 
         verb = 'Would generate' if dry_run else 'Generated'
+        update_verb = 'would update' if dry_run else 'updated'
+        extras = []
+        if skipped_count:
+            extras.append(f'{skipped_count} already matched')
+        if updated_count:
+            extras.append(f'{updated_count} {update_verb}')
         response_data = {
             'dry_run': dry_run,
             'message': f'{verb} {generated_count} expenses from recurring templates'
-                       + (f' ({skipped_count} already existed)' if skipped_count else ''),
+                       + (f' ({", ".join(extras)})' if extras else ''),
             'generated_count': generated_count,
             'skipped_count': skipped_count,
+            'updated_count': updated_count,
             'recurring_count': recurring_expenses.count(),
             'created': created_items,
             'skipped': skipped_items,
+            'updated': updated_items,
             'by_recurring': by_recurring,
         }
 
         if errors:
             response_data['errors'] = errors
 
-        logger.info(f"Generate expenses response: dry_run={dry_run} generated={generated_count} skipped={skipped_count}")
+        logger.info(
+            f"Generate expenses response: dry_run={dry_run} generated={generated_count} "
+            f"skipped={skipped_count} updated={updated_count}"
+        )
 
         return Response(response_data, status=status.HTTP_200_OK)
 

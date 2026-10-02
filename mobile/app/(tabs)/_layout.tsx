@@ -223,6 +223,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="create-budgets"
+        options={{
+          href: null, // Hide from tab bar - accessible via Budgets tab
+        }}
+      />
+      <Tabs.Screen
         name="meals"
         options={{
           href: null, // Hide from tab bar - accessible via Home card

@@ -258,7 +258,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'family', 'created_by', 'created_by_username', 'category', 'category_name',
             'amount', 'amount_input', 'description', 'notes', 'expense_date', 'payment_method', 'tags', 'tag_names',
-            'receipt_url', 'receipt_id', 'is_recurring', 'recurring_expense', 'line_items', 'line_items_input',
+            'receipt_url', 'receipt_id', 'is_recurring', 'is_paid', 'recurring_expense', 'line_items', 'line_items_input',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -273,36 +273,94 @@ class BudgetSerializer(serializers.ModelSerializer):
     remaining_amount = serializers.SerializerMethodField()
     percentage_used = serializers.SerializerMethodField()
     category_name = serializers.SerializerMethodField()
+    base_amount = serializers.SerializerMethodField()
+
+    def _reference_date(self):
+        """Use as_of from context when provided (for month navigation)."""
+        from django.utils import timezone
+        as_of = self.context.get('as_of')
+        if as_of is not None:
+            return as_of
+        return timezone.now().date()
+
+    def _period_window(self, obj):
+        from datetime import timedelta
+        # Optional override (e.g. full calendar year for expenses year view)
+        override = self.context.get('period_window')
+        if override is not None:
+            return override
+
+        ref = self._reference_date()
+        if obj.period == 'daily':
+            return ref, ref
+        if obj.period == 'weekly':
+            start = ref - timedelta(days=ref.weekday())
+            return start, start + timedelta(days=6)
+        if obj.period == 'monthly':
+            start = ref.replace(day=1)
+            if ref.month == 12:
+                end = ref.replace(day=31)
+            else:
+                end = (ref.replace(month=ref.month + 1, day=1) - timedelta(days=1))
+            return start, end
+        # yearly
+        return ref.replace(month=1, day=1), ref.replace(month=12, day=31)
+
+    @staticmethod
+    def _months_spanned(start, end) -> int:
+        return max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
+
+    def _base_amount(self, obj) -> Decimal:
+        try:
+            return Decimal(str(obj.amount or '0'))
+        except (ValueError, InvalidOperation, TypeError):
+            return Decimal('0.00')
+
+    def _effective_amount(self, obj) -> Decimal:
+        """Period-aware budget limit.
+
+        Categories with active recurring templates: sum amounts due in the viewed window
+        (so future-start items like Shaw in Apr 2027 don't inflate Oct; year view sums
+        all dues in that year).
+        Categories without recurring (manual / expense-analysis): stored monthly amount
+        × months in the window (1 for month view, 12 for year view).
+        """
+        from .recurring_sync import recurring_due_in_window, category_has_active_recurring
+        base = self._base_amount(obj)
+        start, end = self._period_window(obj)
+        months = self._months_spanned(start, end)
+
+        if obj.period != 'monthly':
+            return base
+
+        recurring_due_map = self.context.get('recurring_due_by_category')
+        recurring_cats = self.context.get('recurring_categories')
+        if recurring_due_map is not None and recurring_cats is not None:
+            if obj.category_id in recurring_cats:
+                return Decimal(str(recurring_due_map.get(obj.category_id, 0)))
+            return base * Decimal(months)
+
+        if category_has_active_recurring(obj.family_id, obj.category_id):
+            return recurring_due_in_window(obj.family_id, obj.category_id, start, end)
+        return base * Decimal(months)
+
+    def get_base_amount(self, obj):
+        return float(self._base_amount(obj))
 
     def get_spent_amount(self, obj):
         """Calculate total spent for this budget period."""
-        from django.utils import timezone
-        from datetime import timedelta
+        spent_map = self.context.get('spent_by_category')
+        if spent_map is not None:
+            return float(spent_map.get(obj.category_id, 0) or 0)
 
-        # Determine date range based on period
-        today = timezone.now().date()
-        if obj.period == 'daily':
-            start = today
-            end = today
-        elif obj.period == 'weekly':
-            start = today - timedelta(days=today.weekday())
-            end = start + timedelta(days=6)
-        elif obj.period == 'monthly':
-            start = today.replace(day=1)
-            if today.month == 12:
-                end = today.replace(day=31)
-            else:
-                end = (today.replace(month=today.month + 1, day=1) - timedelta(days=1))
-        else:  # yearly
-            start = today.replace(month=1, day=1)
-            end = today.replace(month=12, day=31)
+        start, end = self._period_window(obj)
 
-        # Get expenses for this category in the date range
         expenses = Expense.objects.filter(
             family=obj.family,
             category=obj.category,
             expense_date__gte=start,
-            expense_date__lte=end
+            expense_date__lte=end,
+            is_paid=True,
         )
 
         total = Decimal('0.00')
@@ -316,25 +374,35 @@ class BudgetSerializer(serializers.ModelSerializer):
 
     def get_remaining_amount(self, obj):
         spent = self.get_spent_amount(obj)
-        return float(obj.amount) - spent
+        return float(self._effective_amount(obj)) - spent
 
     def get_percentage_used(self, obj):
         spent = self.get_spent_amount(obj)
-        if obj.amount > 0:
-            return round((spent / float(obj.amount)) * 100, 2)
+        limit = float(self._effective_amount(obj))
+        if limit > 0:
+            return round((spent / limit) * 100, 2)
         return 0.0
 
     def get_category_name(self, obj):
         return obj.category.name if obj.category else None
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Expose month-aware limit as amount (yearly only in its due month)
+        data['amount'] = float(self._effective_amount(instance))
+        return data
+
     class Meta:
         model = Budget
         fields = [
-            'id', 'family', 'category', 'category_name', 'amount', 'period', 'start_date', 'end_date',
+            'id', 'family', 'category', 'category_name', 'amount', 'base_amount', 'period', 'start_date', 'end_date',
             'alert_threshold', 'is_active', 'spent_amount', 'remaining_amount', 'percentage_used',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'spent_amount', 'remaining_amount', 'percentage_used', 'category_name']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'spent_amount', 'remaining_amount', 'percentage_used',
+            'category_name', 'base_amount',
+        ]
 
 
 class RecurringExpenseSerializer(serializers.ModelSerializer):

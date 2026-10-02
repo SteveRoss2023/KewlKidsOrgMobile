@@ -10,8 +10,9 @@ import {
   Platform,
   Modal,
   Switch,
+  useWindowDimensions,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -92,6 +93,23 @@ function expenseInPeriod(expenseDate: string, viewDate: Date, mode: PeriodMode):
   return date >= start && date < end;
 }
 
+function toDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Inclusive start/end YYYY-MM-DD for API expense filters. */
+function periodDateRange(viewDate: Date, mode: PeriodMode | null): { start_date: string; end_date: string } {
+  if (!mode) {
+    const y = new Date().getFullYear();
+    return { start_date: `${y}-01-01`, end_date: `${y}-12-31` };
+  }
+  const start = startOfPeriod(viewDate, mode);
+  const endExclusive = shiftPeriod(start, mode, 1);
+  const endInclusive = new Date(endExclusive);
+  endInclusive.setDate(endInclusive.getDate() - 1);
+  return { start_date: toDateKey(start), end_date: toDateKey(endInclusive) };
+}
+
 function TooltipButton({
   children,
   tooltip,
@@ -147,6 +165,8 @@ function TooltipButton({
 
 export default function ExpensesScreen() {
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const router = useRouter();
   const { selectedFamily } = useFamily();
   const [activeTab, setActiveTab] = useState<ActiveTab>('expenses');
   const [loading, setLoading] = useState(false);
@@ -164,6 +184,7 @@ export default function ExpensesScreen() {
   const [showTagForm, setShowTagForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const editingExpenseRef = useRef<Expense | null>(null);
+  const fetchGenerationRef = useRef(0);
   const [expenseFormSessionKey, setExpenseFormSessionKey] = useState('new');
   const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
@@ -177,16 +198,19 @@ export default function ExpensesScreen() {
   const [filterTag, setFilterTag] = useState<number | null>(null);
   const [filterRecurring, setFilterRecurring] = useState<boolean | null>(null);
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'category'>('date');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [showCombinedView, setShowCombinedView] = useState(false);
   const [groupBy, setGroupBy] = useState<GroupMode>('month');
-  const [recurringGroupBy, setRecurringGroupBy] = useState<GroupMode>('month');
+  const [recurringGroupBy, setRecurringGroupBy] = useState<GroupMode>('none');
   const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
-  const [periodExpanded, setPeriodExpanded] = useState(true);
+  const [periodExpanded, setPeriodExpanded] = useState(false);
+  const [budgetDetailsExpanded, setBudgetDetailsExpanded] = useState(false);
   const [expandedRecurringGroups, setExpandedRecurringGroups] = useState<Set<string>>(new Set());
   const [generateDryRun, setGenerateDryRun] = useState(true);
   const [generateResult, setGenerateResult] = useState<GenerateExpensesResult | null>(null);
+  const [budgetViewDate, setBudgetViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
+  const [paidToggleExpenseId, setPaidToggleExpenseId] = useState<number | null>(null);
 
   const currentGroupKey = useCallback((mode: PeriodMode) => {
     return formatPeriodLabel(new Date(), mode, false);
@@ -200,57 +224,80 @@ export default function ExpensesScreen() {
   useEffect(() => {
     if (groupBy === 'none') return;
     setViewDate(startOfPeriod(new Date(), groupBy));
-    setPeriodExpanded(true);
+    setPeriodExpanded(false);
   }, [groupBy, selectedFamily?.id]);
 
   useEffect(() => {
     setPeriodExpanded(false);
   }, [viewDate]);
 
+  useEffect(() => {
+    setBudgetDetailsExpanded(false);
+  }, [budgetViewDate]);
+
   // Load data when family changes or screen comes into focus
   useFocusEffect(
     useCallback(() => {
       if (selectedFamily) {
-        fetchData();
+        void fetchData({ soft: expenses.length > 0 || budgets.length > 0 || categories.length > 0 });
       } else {
         setExpenses([]);
         setCategories([]);
         setBudgets([]);
       }
-    }, [selectedFamily, activeTab])
+    }, [selectedFamily, activeTab, budgetViewDate, viewDate, groupBy])
   );
 
-  const fetchData = async () => {
+  const fetchData = async (opts?: { soft?: boolean }) => {
     if (!selectedFamily) return;
 
-    setLoading(true);
+    const soft = !!opts?.soft;
+    const generation = ++fetchGenerationRef.current;
+    if (!soft) {
+      setLoading(true);
+    }
     setError('');
 
     try {
-      // Always fetch categories and tags first to ensure they exist
-      const categoriesData = await expenseService.getCategories(selectedFamily.id);
+      const periodMode: PeriodMode | null = groupBy === 'none' ? null : groupBy;
+      const expenseRange = periodDateRange(viewDate, periodMode);
+      const asOfDate = activeTab === 'budgets' ? budgetViewDate : viewDate;
+      const asOf =
+        periodMode === 'year' && activeTab === 'expenses'
+          ? `${asOfDate.getFullYear()}-01-01`
+          : `${asOfDate.getFullYear()}-${String(asOfDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const budgetPeriod =
+        periodMode === 'year' && activeTab === 'expenses' ? 'year' : 'month';
+      const needBudgets = activeTab === 'budgets' || activeTab === 'expenses';
+
+      const [categoriesData, tagsData, expensesData, recurringData, budgetsData] = await Promise.all([
+        expenseService.getCategories(selectedFamily.id),
+        expenseService.getTags(selectedFamily.id),
+        expenseService.getExpenses(selectedFamily.id, expenseRange),
+        expenseService.getRecurringExpenses(selectedFamily.id),
+        needBudgets
+          ? expenseService.getBudgets(selectedFamily.id, true, { asOf, budgetPeriod })
+          : Promise.resolve(null as Awaited<ReturnType<typeof expenseService.getBudgets>> | null),
+      ]);
+
+      // Ignore stale responses when the user changed month/tab quickly
+      if (generation !== fetchGenerationRef.current) return;
+
       setCategories(categoriesData);
-      const tagsData = await expenseService.getTags(selectedFamily.id);
       setTags(tagsData);
-
-      // Always fetch expenses and recurring expenses since they're used in multiple tabs
-      // (expenses tab uses both, recurring tab uses recurring expenses, combined view uses both)
-      const expensesData = await expenseService.getExpenses(selectedFamily.id);
       setExpenses(expensesData);
-
-      const recurringData = await expenseService.getRecurringExpenses(selectedFamily.id);
       setRecurringExpenses(recurringData);
-
-      // Fetch budgets only when on budgets tab
-      if (activeTab === 'budgets') {
-        const budgetsData = await expenseService.getBudgets(selectedFamily.id, true);
+      if (budgetsData) {
         setBudgets(budgetsData);
       }
     } catch (err: any) {
+      if (generation !== fetchGenerationRef.current) return;
       console.error('Error fetching data:', err);
       setError(err.message || 'Failed to load data');
     } finally {
-      setLoading(false);
+      if (generation === fetchGenerationRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -291,7 +338,7 @@ export default function ExpensesScreen() {
     try {
       const created = await expenseService.createExpense(data);
       const full = await expenseService.getExpense(created.id);
-      await fetchData();
+      await fetchData({ soft: true });
       if (options?.stayOpen) {
         editingExpenseRef.current = full;
         setEditingExpense(full);
@@ -314,7 +361,7 @@ export default function ExpensesScreen() {
     try {
       await expenseService.updateExpense(current.id, data);
       closeExpenseForm();
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update expense');
       throw err;
@@ -340,7 +387,7 @@ export default function ExpensesScreen() {
     try {
       await expenseService.deleteExpense(expenseId);
       setExpensePendingDelete(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setExpensePendingDelete(null);
       setError(err.message || 'Failed to delete expense');
@@ -359,7 +406,7 @@ export default function ExpensesScreen() {
       await expenseService.createCategory(data);
       setShowCategoryForm(false);
       setEditingCategory(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to create category');
     } finally {
@@ -375,7 +422,7 @@ export default function ExpensesScreen() {
       await expenseService.updateCategory(editingCategory.id, data);
       setShowCategoryForm(false);
       setEditingCategory(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update category');
     } finally {
@@ -388,7 +435,7 @@ export default function ExpensesScreen() {
 
     try {
       await expenseService.deleteCategory(categoryId);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete category');
     }
@@ -402,7 +449,7 @@ export default function ExpensesScreen() {
       await expenseService.createBudget(data);
       setShowBudgetForm(false);
       setEditingBudget(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to create budget');
     } finally {
@@ -418,7 +465,7 @@ export default function ExpensesScreen() {
       await expenseService.updateBudget(editingBudget.id, data);
       setShowBudgetForm(false);
       setEditingBudget(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update budget');
     } finally {
@@ -431,7 +478,7 @@ export default function ExpensesScreen() {
 
     try {
       await expenseService.deleteBudget(budgetId);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete budget');
     }
@@ -445,7 +492,7 @@ export default function ExpensesScreen() {
       await expenseService.createRecurringExpense(data);
       setShowRecurringForm(false);
       setEditingRecurring(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to create recurring expense');
     } finally {
@@ -461,7 +508,7 @@ export default function ExpensesScreen() {
       await expenseService.updateRecurringExpense(editingRecurring.id, data);
       setShowRecurringForm(false);
       setEditingRecurring(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update recurring expense');
     } finally {
@@ -474,9 +521,21 @@ export default function ExpensesScreen() {
 
     try {
       await expenseService.deleteRecurringExpense(recurringId);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete recurring expense');
+    }
+  };
+
+  const handleToggleExpensePaid = async (expense: Expense, nextPaid: boolean) => {
+    setPaidToggleExpenseId(expense.id);
+    try {
+      const updated = await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
+      setExpenses((prev) => prev.map((e) => (e.id === updated.id ? { ...e, ...updated } : e)));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update paid status');
+    } finally {
+      setPaidToggleExpenseId(null);
     }
   };
 
@@ -490,7 +549,7 @@ export default function ExpensesScreen() {
       });
       setGenerateResult(result);
       if (!generateDryRun) {
-        await fetchData();
+        await fetchData({ soft: true });
       }
     } catch (err: any) {
       console.error('Error generating expenses:', err);
@@ -508,7 +567,7 @@ export default function ExpensesScreen() {
       await expenseService.createTag(data);
       setShowTagForm(false);
       setEditingTag(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to create tag');
     } finally {
@@ -524,7 +583,7 @@ export default function ExpensesScreen() {
       await expenseService.updateTag(editingTag.id, data);
       setShowTagForm(false);
       setEditingTag(null);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update tag');
     } finally {
@@ -537,7 +596,7 @@ export default function ExpensesScreen() {
 
     try {
       await expenseService.deleteTag(tagId);
-      await fetchData();
+      await fetchData({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete tag');
     }
@@ -548,20 +607,6 @@ export default function ExpensesScreen() {
       return (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      );
-    }
-
-    if (expenses.length === 0) {
-      return (
-        <View style={styles.centerContainer}>
-          <FontAwesome name="file-text-o" size={64} color={colors.textSecondary} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            No expenses yet
-          </Text>
-          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-            Add your first expense to get started
-          </Text>
         </View>
       );
     }
@@ -635,11 +680,51 @@ export default function ExpensesScreen() {
     const periodExpenses = periodMode
       ? filteredExpenses.filter((exp) => expenseInPeriod(exp.expense_date, viewDate, periodMode))
       : filteredExpenses;
-    const periodTotal = periodExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const toAmt = (v: number | string | null | undefined) => {
+      const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0));
+      return Number.isNaN(n) ? 0 : n;
+    };
+    const periodTotal = periodExpenses.reduce((sum, exp) => sum + toAmt(exp.amount), 0);
+    const periodPaid = periodExpenses.reduce(
+      (sum, exp) => sum + (exp.is_paid !== false ? toAmt(exp.amount) : 0),
+      0
+    );
+    const periodBudgetTotal = budgets.reduce((sum, b) => sum + toAmt(b.amount), 0);
+    const showPeriodBudget = periodMode === 'month' || periodMode === 'year';
     const todayPeriod = periodMode ? startOfPeriod(new Date(), periodMode) : null;
     const tabDates = periodMode
       ? [shiftPeriod(viewDate, periodMode, -1), startOfPeriod(viewDate, periodMode), shiftPeriod(viewDate, periodMode, 1)]
       : [];
+    const onTodayPeriod = !!(
+      periodMode &&
+      todayPeriod &&
+      startOfPeriod(viewDate, periodMode).getTime() === todayPeriod.getTime()
+    );
+    const expenseColumns = windowWidth < 700 ? 2 : windowWidth < 1100 ? 3 : 4;
+
+    const renderExpenseCards = (list: Expense[]) => (
+      <View style={styles.budgetGrid}>
+        {list.map((expense) => (
+          <View
+            key={expense.id}
+            style={[
+              styles.budgetGridItem,
+              { width: `${100 / expenseColumns}%` as `${number}%` },
+            ]}
+          >
+            <ExpenseCard
+              expense={expense}
+              onPress={() => void openExpenseEditor(expense)}
+              onDelete={() => requestDeleteExpense(expense)}
+              paidToggleDisabled={paidToggleExpenseId === expense.id}
+              onTogglePaid={(nextPaid) => {
+                void handleToggleExpensePaid(expense, nextPaid);
+              }}
+            />
+          </View>
+        ))}
+      </View>
+    );
 
     const groupOptions: { label: string; value: GroupMode }[] = [
       { label: 'Day', value: 'day' },
@@ -832,7 +917,7 @@ export default function ExpensesScreen() {
                 setFilterTag(null);
                 setFilterRecurring(null);
                 setSortBy('date');
-                setSortOrder('desc');
+                setSortOrder('asc');
                 setShowCombinedView(false);
               }}
             >
@@ -841,7 +926,7 @@ export default function ExpensesScreen() {
           </View>
         )}
 
-        {/* Prev / current / next period tabs */}
+        {/* Prev / current / next period tabs + Today */}
         {periodMode && (
           <View style={[styles.periodNav, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
             <TouchableOpacity
@@ -889,6 +974,28 @@ export default function ExpensesScreen() {
             >
               <FontAwesome name="chevron-right" size={14} color={colors.text} />
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.periodTodayBtn,
+                {
+                  backgroundColor: onTodayPeriod ? colors.card : colors.primary,
+                  borderColor: onTodayPeriod ? colors.border : colors.primary,
+                },
+              ]}
+              onPress={() => todayPeriod && setViewDate(todayPeriod)}
+              disabled={onTodayPeriod}
+              accessibilityLabel="Go to today"
+            >
+              <Text
+                style={[
+                  styles.periodTodayBtnText,
+                  { color: onTodayPeriod ? colors.textSecondary : '#fff' },
+                ]}
+                numberOfLines={1}
+              >
+                Today
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -900,7 +1007,11 @@ export default function ExpensesScreen() {
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityState={{ expanded: periodExpanded }}
-            accessibilityLabel={`${formatPeriodLabel(viewDate, periodMode)}, ${formatCurrency(periodTotal)}, ${periodExpenses.length} expenses`}
+            accessibilityLabel={
+              showPeriodBudget
+                ? `${formatPeriodLabel(viewDate, periodMode)}, ${formatCurrency(periodPaid)} paid of ${formatCurrency(periodBudgetTotal > 0 ? periodBudgetTotal : periodTotal)} budget, ${periodExpenses.length} expenses`
+                : `${formatPeriodLabel(viewDate, periodMode)}, ${formatCurrency(periodPaid)} paid, ${periodExpenses.length} expenses`
+            }
           >
             <View style={styles.periodSummaryLeft}>
               <FontAwesome
@@ -913,15 +1024,23 @@ export default function ExpensesScreen() {
                 <Text style={[styles.periodSummaryTitle, { color: colors.text }]} numberOfLines={1}>
                   {formatPeriodLabel(viewDate, periodMode)}
                 </Text>
-                <Text style={[styles.periodSummaryMeta, { color: colors.textSecondary }]}>
-                  <Text style={{ color: colors.primary, fontWeight: '700' }}>{formatCurrency(periodTotal)}</Text>
+                <Text style={[styles.periodSummaryMeta, { color: colors.textSecondary }]} numberOfLines={2}>
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                    {formatCurrency(periodPaid)}
+                  </Text>
+                  {showPeriodBudget ? (
+                    <Text style={{ fontWeight: '500' }}>
+                      {' / '}
+                      {formatCurrency(periodBudgetTotal > 0 ? periodBudgetTotal : periodTotal)}
+                    </Text>
+                  ) : null}
                   {' · '}
                   {periodExpenses.length} {periodExpenses.length === 1 ? 'expense' : 'expenses'}
                 </Text>
               </View>
             </View>
             <Text style={[styles.periodSummaryToggle, { color: colors.primary }]}>
-              {periodExpanded ? 'Hide' : 'Show'}
+              {periodExpanded ? 'Hide' : 'Show'} · {periodExpenses.length}
             </Text>
           </TouchableOpacity>
         )}
@@ -940,14 +1059,7 @@ export default function ExpensesScreen() {
               </Text>
             </View>
           ) : periodMode ? (
-            periodExpenses.map((expense) => (
-              <ExpenseCard
-                key={expense.id}
-                expense={expense}
-                onPress={() => void openExpenseEditor(expense)}
-                onDelete={() => requestDeleteExpense(expense)}
-              />
-            ))
+            renderExpenseCards(periodExpenses)
           ) : showCombinedView ? (
             <>
               {recurringExpenses.filter((re) => re.is_active).length > 0 && (
@@ -983,24 +1095,10 @@ export default function ExpensesScreen() {
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>Expenses</Text>
                 </View>
               )}
-              {filteredExpenses.map((expense) => (
-                <ExpenseCard
-                  key={expense.id}
-                  expense={expense}
-                  onPress={() => void openExpenseEditor(expense)}
-                  onDelete={() => requestDeleteExpense(expense)}
-                />
-              ))}
+              {renderExpenseCards(filteredExpenses)}
             </>
           ) : (
-            filteredExpenses.map((expense) => (
-              <ExpenseCard
-                key={expense.id}
-                expense={expense}
-                onPress={() => void openExpenseEditor(expense)}
-                onDelete={() => requestDeleteExpense(expense)}
-              />
-            ))
+            renderExpenseCards(filteredExpenses)
           )}
         </ScrollView>
       </View>
@@ -1124,54 +1222,231 @@ export default function ExpensesScreen() {
       );
     }
 
+    const budgetMonthLabel = formatPeriodLabel(budgetViewDate, 'month');
+    const todayMonth = startOfPeriod(new Date(), 'month');
+    const budgetTabDates = [
+      shiftPeriod(budgetViewDate, 'month', -1),
+      startOfPeriod(budgetViewDate, 'month'),
+      shiftPeriod(budgetViewDate, 'month', 1),
+    ];
+    const budgetOnToday = budgetViewDate.getTime() === todayMonth.getTime();
+    // Phones always 2-up; wider screens can show 3–4
+    const budgetColumns = windowWidth < 700 ? 2 : windowWidth < 1100 ? 3 : 4;
+    const sortedBudgets = [...budgets].sort((a, b) =>
+      (a.category_name || '').localeCompare(b.category_name || '', undefined, { sensitivity: 'base' })
+    );
+
+    const monthlyBudgets = budgets.filter((b) => b.period === 'monthly');
+    const monthSpent = monthlyBudgets.reduce((sum, b) => {
+      const n = typeof b.spent_amount === 'number' ? b.spent_amount : parseFloat(String(b.spent_amount ?? 0));
+      return sum + (Number.isNaN(n) ? 0 : n);
+    }, 0);
+    const monthLimit = monthlyBudgets.reduce((sum, b) => {
+      const n = typeof b.amount === 'number' ? b.amount : parseFloat(String(b.amount ?? 0));
+      return sum + (Number.isNaN(n) ? 0 : n);
+    }, 0);
+    const monthPct = monthLimit > 0 ? (monthSpent / monthLimit) * 100 : 0;
+    const monthRemaining = monthLimit - monthSpent;
+
+    const createControls = (
+      <View style={styles.budgetCreateControls}>
+        <TouchableOpacity
+          style={[styles.generateButton, { backgroundColor: colors.primary }]}
+          onPress={() => router.push('/(tabs)/create-budgets')}
+        >
+          <FontAwesome name="magic" size={18} color="#fff" />
+          <Text style={styles.generateButtonText}>Create budget</Text>
+        </TouchableOpacity>
+
+        <View style={[styles.periodNav, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <TouchableOpacity
+            style={styles.periodNavArrow}
+            onPress={() => setBudgetViewDate((d) => shiftPeriod(d, 'month', -1))}
+            accessibilityLabel="Previous month"
+          >
+            <FontAwesome name="chevron-left" size={14} color={colors.text} />
+          </TouchableOpacity>
+          <View style={styles.periodTabs}>
+            {budgetTabDates.map((tabDate, index) => {
+              const selected = tabDate.getTime() === startOfPeriod(budgetViewDate, 'month').getTime();
+              const isNow = tabDate.getTime() === todayMonth.getTime();
+              return (
+                <TouchableOpacity
+                  key={`budget-${tabDate.toISOString()}-${index}`}
+                  style={[
+                    styles.periodTab,
+                    {
+                      backgroundColor: selected ? colors.primary : colors.card,
+                      borderColor: isNow && !selected ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setBudgetViewDate(startOfPeriod(tabDate, 'month'))}
+                >
+                  <Text
+                    style={[styles.periodTabText, { color: selected ? '#fff' : colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {formatPeriodLabel(tabDate, 'month', true)}
+                  </Text>
+                  {isNow && (
+                    <Text style={[styles.periodTabNow, { color: selected ? '#fff' : colors.primary }]}>
+                      Now
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity
+            style={styles.periodNavArrow}
+            onPress={() => setBudgetViewDate((d) => shiftPeriod(d, 'month', 1))}
+            accessibilityLabel="Next month"
+          >
+            <FontAwesome name="chevron-right" size={14} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.periodTodayBtn,
+              {
+                backgroundColor: budgetOnToday ? colors.card : colors.primary,
+                borderColor: budgetOnToday ? colors.border : colors.primary,
+              },
+            ]}
+            onPress={() => setBudgetViewDate(todayMonth)}
+            disabled={budgetOnToday}
+            accessibilityLabel="Go to today"
+          >
+            <Text
+              style={[
+                styles.periodTodayBtnText,
+                { color: budgetOnToday ? colors.textSecondary : '#fff' },
+              ]}
+              numberOfLines={1}
+            >
+              Today
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.budgetMonthSummary, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => setBudgetDetailsExpanded((open) => !open)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: budgetDetailsExpanded }}
+          accessibilityLabel={`${budgetMonthLabel} budget ${formatCurrency(monthSpent)} of ${formatCurrency(monthLimit)}, ${budgets.length} categories`}
+        >
+          <View style={styles.budgetMonthSummaryTop}>
+            <View style={styles.budgetMonthSummaryLeft}>
+              <View style={styles.budgetMonthSummaryLabelRow}>
+                <FontAwesome
+                  name={budgetDetailsExpanded ? 'chevron-down' : 'chevron-right'}
+                  size={12}
+                  color={colors.textSecondary}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.budgetMonthSummaryLabel, { color: colors.textSecondary }]}>
+                  Monthly total
+                </Text>
+              </View>
+              <Text style={[styles.budgetMonthSummaryAmount, { color: colors.text }]} numberOfLines={1}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                  {formatCurrency(monthSpent)}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontWeight: '500' }}>
+                  {' / '}
+                  {formatCurrency(monthLimit)}
+                </Text>
+              </Text>
+            </View>
+            <View style={styles.budgetMonthSummaryRight}>
+              <Text
+                style={[
+                  styles.budgetMonthSummaryPct,
+                  {
+                    color:
+                      monthPct > 100
+                        ? '#ef4444'
+                        : Math.abs(monthPct - 100) < 0.5
+                          ? '#10b981'
+                          : colors.primary,
+                  },
+                ]}
+              >
+                {monthPct.toFixed(0)}%
+              </Text>
+              <Text style={[styles.budgetMonthSummaryRemain, { color: colors.textSecondary }]} numberOfLines={1}>
+                {formatCurrency(monthRemaining)} left
+              </Text>
+              <Text style={[styles.budgetMonthSummaryToggle, { color: colors.primary }]}>
+                {budgetDetailsExpanded ? 'Hide' : 'Show'} · {budgets.length}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.budgetMonthSummaryTrack, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.budgetMonthSummaryFill,
+                {
+                  width: `${Math.min(monthPct, 100)}%`,
+                  backgroundColor:
+                    monthPct > 100
+                      ? '#ef4444'
+                      : Math.abs(monthPct - 100) < 0.5
+                        ? '#10b981'
+                        : monthPct >= 80
+                          ? '#f59e0b'
+                          : colors.primary,
+                },
+              ]}
+            />
+          </View>
+        </TouchableOpacity>
+      </View>
+    );
+
     if (budgets.length === 0) {
       return (
-        <View style={styles.centerContainer}>
-          <FontAwesome name="credit-card" size={64} color={colors.textSecondary} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            No budgets set
-          </Text>
-          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-            Create a budget to track your spending
-          </Text>
-        </View>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 88 }}>
+          {createControls}
+          <View style={[styles.centerContainer, { minHeight: 200 }]}>
+            <FontAwesome name="credit-card" size={64} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No budgets set
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+              Tap Create budget or + to add one
+            </Text>
+          </View>
+        </ScrollView>
       );
     }
 
     return (
-      <ScrollView style={styles.content}>
-        {budgets.map((budget) => (
-          <TouchableOpacity
-            key={budget.id}
-            onPress={() => {
-              setEditingBudget(budget);
-              setShowBudgetForm(true);
-            }}
-          >
-            <BudgetCard budget={budget} />
-            <View style={styles.budgetActions}>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation();
-                  setEditingBudget(budget);
-                  setShowBudgetForm(true);
-                }}
-                style={styles.budgetActionButton}
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 88 }}>
+        {createControls}
+        {budgetDetailsExpanded && (
+          <View style={styles.budgetGrid}>
+            {sortedBudgets.map((budget) => (
+              <View
+                key={budget.id}
+                style={[
+                  styles.budgetGridItem,
+                  { width: `${100 / budgetColumns}%` as `${number}%` },
+                ]}
               >
-                <FontAwesome name="pencil" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation();
-                  handleDeleteBudget(budget.id);
-                }}
-                style={styles.budgetActionButton}
-              >
-                <FontAwesome name="trash" size={18} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        ))}
+                <BudgetCard
+                  budget={budget}
+                  onPress={() => {
+                    setEditingBudget(budget);
+                    setShowBudgetForm(true);
+                  }}
+                  onDelete={() => handleDeleteBudget(budget.id)}
+                />
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     );
   };
@@ -1551,131 +1826,45 @@ export default function ExpensesScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.tabsScrollContent}
         >
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'expenses' && { backgroundColor: colors.primary },
-              { borderColor: colors.border },
-            ]}
-            onPress={() => setActiveTab('expenses')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome
-              name="file-text-o"
-              size={16}
-              color={activeTab === 'expenses' ? '#fff' : colors.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === 'expenses' ? '#fff' : colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              Expenses
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'categories' && { backgroundColor: colors.primary },
-              { borderColor: colors.border },
-            ]}
-            onPress={() => setActiveTab('categories')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome
-              name="folder-o"
-              size={16}
-              color={activeTab === 'categories' ? '#fff' : colors.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === 'categories' ? '#fff' : colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              Categories
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'budgets' && { backgroundColor: colors.primary },
-              { borderColor: colors.border },
-            ]}
-            onPress={() => setActiveTab('budgets')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome
-              name="credit-card"
-              size={16}
-              color={activeTab === 'budgets' ? '#fff' : colors.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === 'budgets' ? '#fff' : colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              Budgets
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'recurring' && { backgroundColor: colors.primary },
-              { borderColor: colors.border },
-            ]}
-            onPress={() => setActiveTab('recurring')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome
-              name="repeat"
-              size={16}
-              color={activeTab === 'recurring' ? '#fff' : colors.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === 'recurring' ? '#fff' : colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              Recurring
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'reports' && { backgroundColor: colors.primary },
-              { borderColor: colors.border },
-            ]}
-            onPress={() => setActiveTab('reports')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome
-              name="bar-chart"
-              size={16}
-              color={activeTab === 'reports' ? '#fff' : colors.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === 'reports' ? '#fff' : colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              Reports
-            </Text>
-          </TouchableOpacity>
+          {(
+            [
+              { id: 'budgets', label: 'Budgets', icon: 'credit-card' },
+              { id: 'expenses', label: 'Expenses', icon: 'file-text-o' },
+              { id: 'recurring', label: 'Recurring', icon: 'repeat' },
+              { id: 'reports', label: 'Reports', icon: 'bar-chart' },
+              { id: 'categories', label: 'Categories', icon: 'folder-o' },
+            ] as const
+          ).map((tab) => {
+            const selected = activeTab === tab.id;
+            return (
+              <TouchableOpacity
+                key={tab.id}
+                style={[
+                  styles.tab,
+                  selected && { backgroundColor: colors.primary },
+                  { borderColor: colors.border },
+                ]}
+                onPress={() => setActiveTab(tab.id)}
+                activeOpacity={0.7}
+              >
+                <FontAwesome
+                  name={tab.icon}
+                  size={16}
+                  color={selected ? '#fff' : colors.textSecondary}
+                  style={styles.tabIcon}
+                />
+                <Text
+                  style={[
+                    styles.tabText,
+                    { color: selected ? '#fff' : colors.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
       {renderContent()}
@@ -1730,7 +1919,7 @@ export default function ExpensesScreen() {
           categories={categories}
           onClose={() => setShowReceiptWizard(false)}
           onSaved={() => {
-            void fetchData();
+            void fetchData({ soft: true });
           }}
         />
       )}
@@ -1954,7 +2143,7 @@ export default function ExpensesScreen() {
                             dryRun: false,
                           });
                           setGenerateResult(result);
-                          await fetchData();
+                          await fetchData({ soft: true });
                         } catch (err: any) {
                           setError(err.message || 'Failed to generate expenses');
                         } finally {
@@ -2153,6 +2342,79 @@ const styles = StyleSheet.create({
   generateButtonContainer: {
     marginBottom: 16,
     gap: 10,
+  },
+  budgetCreateControls: {
+    marginBottom: 16,
+    gap: 10,
+  },
+  budgetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+    paddingBottom: 8,
+  },
+  budgetGridItem: {
+    padding: 4,
+  },
+  budgetMonthSummary: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  budgetMonthSummaryTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  budgetMonthSummaryLeft: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  budgetMonthSummaryLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  budgetMonthSummaryLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  budgetMonthSummaryAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  budgetMonthSummaryRight: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: 1,
+  },
+  budgetMonthSummaryPct: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  budgetMonthSummaryRemain: {
+    fontSize: 11,
+  },
+  budgetMonthSummaryToggle: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  budgetMonthSummaryTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  budgetMonthSummaryFill: {
+    height: '100%',
+    borderRadius: 3,
   },
   dryRunRow: {
     flexDirection: 'row',
@@ -2459,25 +2721,41 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     gap: 4,
+    minWidth: 0,
   },
   periodTab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 7,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     borderRadius: 8,
     borderWidth: 1,
     minHeight: 40,
+    minWidth: 0,
   },
   periodTabText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   periodTabNow: {
     fontSize: 9,
     fontWeight: '700',
     marginTop: 1,
+  },
+  periodTodayBtn: {
+    paddingHorizontal: 8,
+    minHeight: 40,
+    minWidth: 48,
+    maxWidth: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  periodTodayBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   periodSummaryBar: {
     flexDirection: 'row',

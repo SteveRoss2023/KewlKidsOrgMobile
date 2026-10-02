@@ -9,6 +9,7 @@ import {
   Linking,
   Platform,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { Expense } from '../../types/expenses';
@@ -20,15 +21,24 @@ interface ExpenseCardProps {
   expense: Expense;
   onPress?: () => void;
   onDelete?: () => void;
+  onTogglePaid?: (nextPaid: boolean) => void;
+  paidToggleDisabled?: boolean;
 }
 
-export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardProps) {
+export default function ExpenseCard({
+  expense,
+  onPress,
+  onDelete,
+  onTogglePaid,
+  paidToggleDisabled,
+}: ExpenseCardProps) {
   const { colors } = useTheme();
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
 
   const receiptUrl = resolveMediaUrl(expense.receipt_url);
   const isGenerated = !!(expense.is_recurring && expense.recurring_expense);
+  const isPaid = expense.is_paid !== false;
 
   const formatDate = (dateString: string): string => {
     try {
@@ -37,7 +47,6 @@ export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardP
       return date.toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
-        year: 'numeric',
       });
     } catch {
       return new Date(dateString).toLocaleDateString();
@@ -70,73 +79,103 @@ export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardP
     }
   };
 
-  const metaParts = [
-    formatDate(expense.expense_date),
-    expense.category_name || null,
-  ].filter(Boolean);
-
   return (
     <>
       <TouchableOpacity
-        style={[styles.row, { borderBottomColor: colors.border }]}
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+          },
+        ]}
         onPress={onPress}
-        activeOpacity={0.65}
+        activeOpacity={0.7}
         accessibilityRole="button"
         accessibilityLabel={`${expense.description}, ${formatCurrency(expense.amount)}`}
       >
-        <View style={styles.main}>
-          <View style={styles.topLine}>
-            <Text style={[styles.description, { color: colors.text }]} numberOfLines={1}>
+        <View style={styles.header}>
+          <View style={styles.headerText}>
+            <Text style={[styles.description, { color: colors.text }]} numberOfLines={2}>
               {expense.description}
             </Text>
-            <Text style={[styles.amount, { color: colors.primary }]}>
-              {formatCurrency(expense.amount)}
-            </Text>
-          </View>
-
-          <View style={styles.bottomLine}>
             <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
-              {metaParts.join(' · ')}
+              {formatDate(expense.expense_date)}
+              {expense.category_name ? ` · ${expense.category_name}` : ''}
             </Text>
-            <View style={styles.chips}>
-              {isGenerated && (
-                <View style={[styles.chip, { backgroundColor: '#10b98122' }]}>
-                  <FontAwesome name="refresh" size={9} color="#10b981" />
-                  <Text style={[styles.chipText, { color: '#10b981' }]}>Recurring</Text>
-                </View>
-              )}
-              {!!receiptUrl && (
-                <TouchableOpacity
-                  style={[styles.chip, styles.receiptChip]}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    openReceipt();
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="View receipt"
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <FontAwesome name="file-image-o" size={9} color="#fff" />
-                  <Text style={styles.receiptChipText}>Receipt</Text>
-                </TouchableOpacity>
-              )}
-            </View>
           </View>
+          {onDelete && (
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onDelete();
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Delete expense"
+            >
+              <FontAwesome name="trash-o" size={13} color={colors.error || '#ef4444'} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {onDelete && (
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onDelete();
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-            accessibilityLabel="Delete expense"
-          >
-            <FontAwesome name="trash-o" size={16} color={colors.error || '#ef4444'} />
-          </TouchableOpacity>
-        )}
+        <Text style={[styles.amount, { color: colors.primary }]} numberOfLines={1}>
+          {formatCurrency(expense.amount)}
+        </Text>
+
+        <View style={styles.footer}>
+          {onTogglePaid ? (
+            <TouchableOpacity
+              style={styles.paidWrap}
+              activeOpacity={1}
+              onPress={(e) => {
+                e.stopPropagation?.();
+              }}
+            >
+              <Text
+                style={[
+                  styles.paidLabel,
+                  { color: isPaid ? '#10b981' : colors.textSecondary },
+                ]}
+              >
+                {isPaid ? 'Paid' : 'Unpaid'}
+              </Text>
+              <Switch
+                value={isPaid}
+                onValueChange={(value) => onTogglePaid(value)}
+                disabled={paidToggleDisabled}
+                trackColor={{ false: colors.border, true: '#10b981' }}
+                thumbColor="#fff"
+                style={styles.paidSwitch}
+              />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.paidWrap} />
+          )}
+          <View style={styles.chips}>
+            {isGenerated && (
+              <View style={[styles.chip, { backgroundColor: '#10b98122' }]}>
+                <FontAwesome name="refresh" size={8} color="#10b981" />
+                <Text style={[styles.chipText, { color: '#10b981' }]}>Recurring</Text>
+              </View>
+            )}
+            {!!receiptUrl && (
+              <TouchableOpacity
+                style={[styles.chip, styles.receiptChip]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  openReceipt();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="View receipt"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <FontAwesome name="file-image-o" size={8} color="#fff" />
+                <Text style={styles.receiptChipText}>Receipt</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
       </TouchableOpacity>
 
       <Modal
@@ -200,73 +239,89 @@ export default function ExpenseCard({ expense, onPress, onDelete }: ExpenseCardP
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 56,
+  card: {
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 8,
+    gap: 5,
+    minHeight: 110,
+    width: '100%',
   },
-  main: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  headerText: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
-  },
-  topLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    gap: 1,
   },
   description: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  meta: {
+    fontSize: 10,
+    fontWeight: '500',
   },
   amount: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
-  bottomLine: {
+  footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    minHeight: 18,
-  },
-  meta: {
-    flexShrink: 1,
-    fontSize: 12,
+    justifyContent: 'space-between',
+    gap: 4,
+    flexWrap: 'wrap',
   },
   chips: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginLeft: 'auto',
+    flexShrink: 1,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 3,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   chipText: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  paidWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  paidLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  paidSwitch: {
+    transform: [{ scaleX: 0.7 }, { scaleY: 0.7 }],
   },
   receiptChip: {
     backgroundColor: '#0ea5e9',
   },
   receiptChipText: {
     color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '700',
   },
   deleteBtn: {
-    paddingLeft: 10,
-    paddingVertical: 8,
+    padding: 2,
+    marginTop: -2,
+    marginRight: -2,
   },
   receiptOverlay: {
     flex: 1,
