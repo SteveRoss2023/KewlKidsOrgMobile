@@ -46,9 +46,13 @@ export default function RecurringExpenseRow({
   const { colors } = useTheme();
   const frequency =
     recurring.frequency.charAt(0).toUpperCase() + recurring.frequency.slice(1);
+  const startLabel = formatDate(recurring.start_date);
+  const endLabel = recurring.end_date ? formatDate(recurring.end_date) : 'no end';
   const metaParts = [
     frequency,
-    dateLabel ?? formatDate(recurring.next_due_date),
+    dateLabel ? `due ${dateLabel}` : null,
+    `start ${startLabel}`,
+    `end ${endLabel}`,
     recurring.category_name || null,
   ].filter(Boolean);
 

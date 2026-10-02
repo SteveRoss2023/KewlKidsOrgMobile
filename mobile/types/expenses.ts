@@ -298,7 +298,7 @@ export interface GenerateExpenseItem {
   amount: number;
   expense_date: string;
   frequency: string;
-  action: 'created' | 'would_create' | 'skipped';
+  action: 'created' | 'would_create' | 'skipped' | 'updated' | 'would_update';
   reason?: string;
   expense_id?: number;
 }
@@ -312,8 +312,10 @@ export interface GenerateExpensesByRecurring {
   generation_end: string;
   generated_count: number;
   skipped_count: number;
+  updated_count?: number;
   created: GenerateExpenseItem[];
   skipped: GenerateExpenseItem[];
+  updated?: GenerateExpenseItem[];
 }
 
 export interface GenerateExpensesResult {
@@ -321,9 +323,11 @@ export interface GenerateExpensesResult {
   message: string;
   generated_count: number;
   skipped_count: number;
+  updated_count?: number;
   recurring_count: number;
   created: GenerateExpenseItem[];
   skipped: GenerateExpenseItem[];
+  updated?: GenerateExpenseItem[];
   by_recurring: GenerateExpensesByRecurring[];
   errors?: string[];
 }
@@ -347,6 +351,11 @@ export interface CreateBudgetFromRecurringItem {
     | 'deactivated'
     | 'skipped';
   old_amount?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  old_start_date?: string | null;
+  old_end_date?: string | null;
+  changes?: string[];
   budget_id?: number;
   reason?: string;
   has_yearly?: boolean;

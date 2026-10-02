@@ -594,7 +594,9 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     'category_name': cat_name,
                     'amount': Decimal('0'),
                     'recurring_ids': [],
+                    'end_dates': [],
                 }
+            recurring_by_cat[cat_id]['end_dates'].append(recurring.end_date)
             if monthly > 0:
                 recurring_by_cat[cat_id]['amount'] += monthly
                 recurring_by_cat[cat_id]['recurring_ids'].append(recurring.id)
@@ -673,6 +675,17 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 or (exp or {}).get('category_name')
                 or (yearly_meta or {}).get('category_name')
             )
+            # Budget end: expense-analysis ends this calendar year; recurring is open-ended
+            # unless every template in the category has an end_date (then use the latest).
+            if sources == 'expenses':
+                desired_end = date(today.year, 12, 31)
+            else:
+                end_dates = (rec or {}).get('end_dates') or []
+                if end_dates and all(e is not None for e in end_dates):
+                    desired_end = max(end_dates)
+                else:
+                    desired_end = None
+
             suggestions.append({
                 'category_id': cat_id,
                 'category_name': category_name,
@@ -681,6 +694,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 'expense_avg': float(exp_amt),
                 'sources': sources,
                 'has_yearly': bool(yearly_meta),
+                'desired_end': desired_end,
             })
 
         suggestions.sort(key=lambda s: (s['category_name'] or '').lower())
@@ -691,9 +705,18 @@ class BudgetViewSet(viewsets.ModelViewSet):
         deactivated_count = 0
         by_category = []
         suggested_cat_ids = {s['category_id'] for s in suggestions}
+        month_start = today.replace(day=1)
+
+        def fmt_date(d) -> str:
+            if not d:
+                return '—'
+            return d.strftime('%b %d, %Y').replace(' 0', ' ')
 
         for suggestion in suggestions:
             cat_id = suggestion['category_id']
+            # New budgets start this month forward (e.g. Oct create → Oct–Dec), never backdated.
+            desired_start = month_start
+            desired_end = suggestion.pop('desired_end', None)
             existing = Budget.objects.filter(
                 family=family,
                 category_id=cat_id,
@@ -711,58 +734,158 @@ class BudgetViewSet(viewsets.ModelViewSet):
             item = {
                 **suggestion,
                 'period': 'monthly',
+                'start_date': (
+                    existing.start_date.isoformat()
+                    if existing and existing.is_active and existing.start_date
+                    else desired_start.isoformat()
+                ),
+                'end_date': (
+                    existing.end_date.isoformat()
+                    if existing and existing.is_active and existing.end_date
+                    else (desired_end.isoformat() if desired_end else None)
+                ),
+                'old_start_date': existing.start_date.isoformat() if existing and existing.start_date else None,
+                'old_end_date': existing.end_date.isoformat() if existing and existing.end_date else None,
+                'changes': [],
             }
 
             if existing and existing.is_active:
                 old_amount = float(existing.amount)
                 item['old_amount'] = old_amount
                 item['budget_id'] = existing.id
+                item['start_date'] = existing.start_date.isoformat() if existing.start_date else None
+                item['end_date'] = existing.end_date.isoformat() if existing.end_date else None
+                end_needs_fix = existing.end_date != desired_end
 
-                # Expense analysis must never overwrite an existing budget
+                # Expense analysis: never overwrite amount; may set year-end if missing
                 if suggestion['sources'] == 'expenses':
-                    item['action'] = 'skipped'
-                    item['reason'] = 'keeping existing budget (expense analysis does not overwrite)'
                     item['amount'] = old_amount
-                    skipped_count += 1
-                else:
-                    # For recurring/both, only sync the recurring side — never lower a higher manual amount
-                    target = float(suggestion.get('recurring_amount') or suggestion['amount'])
-                    if suggestion['sources'] == 'both':
-                        target = float(suggestion.get('recurring_amount') or 0)
-                    item['amount'] = target
-                    if abs(old_amount - target) < 0.005:
+                    changes = []
+                    # Expense-analysis budgets should not run forever — end this calendar year
+                    exp_end = date(today.year, 12, 31)
+                    if existing.end_date != exp_end:
+                        changes.append(
+                            f'end date {fmt_date(existing.end_date)} → {fmt_date(exp_end)} '
+                            f'(expense-analysis budgets end this year)'
+                        )
+                    if not changes:
                         item['action'] = 'skipped'
-                        item['reason'] = 'amount unchanged'
-                        skipped_count += 1
-                    elif old_amount > target + 0.005:
-                        item['action'] = 'skipped'
-                        item['reason'] = 'keeping higher existing budget'
-                        item['amount'] = old_amount
+                        item['reason'] = 'keeping existing budget (expense analysis does not overwrite)'
                         skipped_count += 1
                     elif dry_run:
                         item['action'] = 'would_update'
+                        item['changes'] = changes
+                        item['reason'] = '; '.join(changes)
+                        item['end_date'] = exp_end.isoformat()
                         updated_count += 1
                     else:
-                        existing.amount = Decimal(str(target))
-                        existing.save(update_fields=['amount', 'updated_at'])
+                        existing.end_date = exp_end
+                        existing.save(update_fields=['end_date', 'updated_at'])
                         item['action'] = 'updated'
+                        item['changes'] = changes
+                        item['reason'] = '; '.join(changes)
+                        item['end_date'] = exp_end.isoformat()
+                        updated_count += 1
+                else:
+                    # Sync amount + end_date from recurring; do not rewrite start_date.
+                    target = float(suggestion.get('recurring_amount') or suggestion['amount'])
+                    if suggestion['sources'] == 'both':
+                        target = float(suggestion.get('recurring_amount') or 0)
+                    keep_higher = old_amount > target + 0.005
+                    amount_unchanged = abs(old_amount - target) < 0.005
+                    new_amount = old_amount if keep_higher else target
+                    item['amount'] = new_amount
+                    changes = []
+                    if not amount_unchanged and not keep_higher:
+                        changes.append(
+                            f'amount ${old_amount:,.2f} → ${new_amount:,.2f}'
+                        )
+                    elif keep_higher and not amount_unchanged:
+                        changes.append(
+                            f'amount kept at ${old_amount:,.2f} (higher than recurring ${target:,.2f})'
+                        )
+                    if end_needs_fix:
+                        if desired_end is None:
+                            changes.append(
+                                f'end date {fmt_date(existing.end_date)} → none (open-ended recurring)'
+                            )
+                        else:
+                            changes.append(
+                                f'end date {fmt_date(existing.end_date)} → {fmt_date(desired_end)}'
+                            )
+                    item['changes'] = changes
+
+                    if amount_unchanged and not end_needs_fix:
+                        item['action'] = 'skipped'
+                        item['reason'] = 'amount and end date unchanged'
+                        skipped_count += 1
+                    elif keep_higher and not end_needs_fix:
+                        item['action'] = 'skipped'
+                        item['reason'] = 'keeping higher existing budget'
+                        skipped_count += 1
+                    elif dry_run:
+                        item['action'] = 'would_update'
+                        item['reason'] = '; '.join(changes) if changes else 'would update'
+                        item['end_date'] = desired_end.isoformat() if desired_end else None
+                        updated_count += 1
+                    else:
+                        update_fields = ['updated_at']
+                        if not keep_higher and not amount_unchanged:
+                            existing.amount = Decimal(str(target))
+                            update_fields.append('amount')
+                        if end_needs_fix:
+                            existing.end_date = desired_end
+                            update_fields.append('end_date')
+                            item['end_date'] = desired_end.isoformat() if desired_end else None
+                        existing.save(update_fields=update_fields)
+                        item['action'] = 'updated'
+                        item['reason'] = '; '.join(changes) if changes else 'updated'
                         updated_count += 1
             elif existing and not existing.is_active:
                 old_amount = float(existing.amount)
                 item['old_amount'] = old_amount
                 item['budget_id'] = existing.id
+                item['start_date'] = desired_start.isoformat()
+                item['end_date'] = desired_end.isoformat() if desired_end else None
+                changes = [
+                    f'amount ${old_amount:,.2f} → ${float(suggestion["amount"]):,.2f}',
+                    f'reactivate; start {fmt_date(existing.start_date)} → {fmt_date(desired_start)}',
+                    (
+                        f'end {fmt_date(desired_end)}'
+                        if desired_end
+                        else 'end none (open-ended)'
+                    ),
+                ]
+                item['changes'] = changes
+                item['reason'] = '; '.join(changes)
                 if dry_run:
                     item['action'] = 'would_reactivate'
                     updated_count += 1
                 else:
                     existing.amount = Decimal(str(suggestion['amount']))
                     existing.is_active = True
-                    existing.start_date = existing.start_date or today.replace(day=1)
-                    existing.save(update_fields=['amount', 'is_active', 'start_date', 'updated_at'])
+                    existing.start_date = desired_start
+                    existing.end_date = desired_end
+                    existing.save(update_fields=['amount', 'is_active', 'start_date', 'end_date', 'updated_at'])
                     item['action'] = 'reactivated'
                     updated_count += 1
             else:
                 item['old_amount'] = None
+                item['old_start_date'] = None
+                item['old_end_date'] = None
+                item['start_date'] = desired_start.isoformat()
+                item['end_date'] = desired_end.isoformat() if desired_end else None
+                end_label = (
+                    f'end date {fmt_date(desired_end)}'
+                    if desired_end
+                    else 'end date none (every month going forward)'
+                )
+                item['changes'] = [
+                    f'new budget ${float(suggestion["amount"]):,.2f}/mo',
+                    f'start date {fmt_date(desired_start)} (this month forward)',
+                    end_label,
+                ]
+                item['reason'] = '; '.join(item['changes'])
                 if dry_run:
                     item['action'] = 'would_create'
                     created_count += 1
@@ -772,8 +895,8 @@ class BudgetViewSet(viewsets.ModelViewSet):
                         category_id=cat_id,
                         amount=Decimal(str(suggestion['amount'])),
                         period='monthly',
-                        start_date=today.replace(day=1),
-                        end_date=None,
+                        start_date=desired_start,
+                        end_date=desired_end,
                         alert_threshold=80,
                         is_active=True,
                     )
@@ -800,6 +923,9 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 'period': 'monthly',
                 'budget_id': stale.id,
                 'old_amount': float(stale.amount),
+                'old_start_date': stale.start_date.isoformat() if stale.start_date else None,
+                'start_date': stale.start_date.isoformat() if stale.start_date else None,
+                'changes': ['deactivate (no longer in recurring or expense analysis)'],
                 'action': 'would_deactivate' if dry_run else 'deactivated',
                 'reason': 'no longer in recurring or expense analysis',
             }
@@ -1099,8 +1225,20 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                     created_items.append(item)
                     generated_count += 1
             else:
-                # Keep existing rows aligned with the template (category etc. can drift after edits)
-                if dry_run:
+                # Existing row: never overwrite paid actuals; unpaid may sync from template.
+                try:
+                    existing_amount = float(Decimal(str(existing.amount or '0')))
+                except (ValueError, InvalidOperation, TypeError):
+                    existing_amount = amount_val
+
+                if existing.is_paid:
+                    item['action'] = 'skipped'
+                    item['reason'] = 'paid - kept actual amount'
+                    item['amount'] = existing_amount
+                    item['expense_id'] = existing.id
+                    skipped_items.append(item)
+                    skipped_count += 1
+                elif dry_run:
                     needs_sync = (
                         existing.category_id != recurring.category_id
                         or str(existing.amount or '') != (str(recurring.amount) if recurring.amount else '0.00')
@@ -1110,8 +1248,22 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                         or set(existing.tags.values_list('id', flat=True)) != set(tag_ids)
                     )
                     if needs_sync:
+                        diffs = []
+                        if existing.category_id != recurring.category_id:
+                            diffs.append('category')
+                        if str(existing.amount or '') != (str(recurring.amount) if recurring.amount else '0.00'):
+                            diffs.append('amount')
+                        if existing.description != recurring.description:
+                            diffs.append('description')
+                        if (existing.notes or None) != (recurring.notes or None):
+                            diffs.append('notes')
+                        if existing.payment_method != recurring.payment_method:
+                            diffs.append('payment method')
+                        if set(existing.tags.values_list('id', flat=True)) != set(tag_ids):
+                            diffs.append('tags')
                         item['action'] = 'would_update'
                         item['expense_id'] = existing.id
+                        item['reason'] = 'sync ' + ', '.join(diffs) if diffs else 'sync from template'
                         updated_items.append(item)
                         updated_count += 1
                     else:
@@ -1162,7 +1314,11 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 calculated_next_due = self._get_next_date(last_occurrence, recurring.frequency)
 
             if recurring.end_date and calculated_next_due > recurring.end_date:
-                recurring.is_active = False
+                # No further occurrences; keep next_due at/after last bill but only
+                # auto-deactivate once the template end date is in the past.
+                recurring.next_due_date = calculated_next_due
+                if recurring.end_date < timezone.now().date():
+                    recurring.is_active = False
             else:
                 logger.info(f"Updating next_due_date from {recurring.next_due_date} to {calculated_next_due} for {recurring.id}")
                 recurring.next_due_date = calculated_next_due
@@ -1195,19 +1351,15 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         recurring.next_due_date = self._get_next_date(recurring.start_date, recurring.frequency)
         recurring.save()
 
-        # Automatically generate expenses from start_date to end of current year (or end_date if provided)
-        # If end_date is provided, use it; otherwise generate for current year
+        # Automatically generate expenses from start_date through template end
+        # (or end of start/current year when open-ended).
         today = timezone.now().date()
-        current_year = today.year
-        current_year_end = date(current_year, 12, 31)
-
-        if recurring.end_date and recurring.end_date <= current_year_end:
+        if recurring.end_date:
             end_date = recurring.end_date
         else:
-            end_date = current_year_end
+            horizon_year = max(today.year, recurring.start_date.year)
+            end_date = date(horizon_year, 12, 31)
 
-        # Use the exact start_date - don't recalculate if it's in the current year
-        # This ensures we preserve the exact day (e.g., Jan 1 stays Jan 1, not Jan 3)
         generation_start_date = recurring.start_date
 
         try:
@@ -1244,12 +1396,13 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         logger = logging.getLogger(__name__)
 
         today = timezone.now().date()
-        current_year_end = date(today.year, 12, 31)
-        gen_end = (
-            recurring.end_date
-            if recurring.end_date and recurring.end_date <= current_year_end
-            else current_year_end
-        )
+        # Honor template end; for open-ended, generate through end of the later of
+        # current year and template start year (so future starts still get rows).
+        if recurring.end_date:
+            gen_end = recurring.end_date
+        else:
+            horizon_year = max(today.year, recurring.start_date.year if recurring.start_date else today.year)
+            gen_end = date(horizon_year, 12, 31)
         expected = self._expected_occurrence_dates(recurring, gen_end)
 
         unpaid = list(
@@ -1286,6 +1439,9 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         import logging
         logger = logging.getLogger(__name__)
 
+        # Capture explicit is_active from the request before reconcile side-effects
+        requested_active = serializer.validated_data.get('is_active', None)
+
         recurring = serializer.save()
 
         # Always recalculate next_due_date from start_date + frequency
@@ -1318,14 +1474,22 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             recurring.next_due_date = self._get_next_date(
                 recurring.start_date, recurring.frequency
             )
-        if recurring.end_date and recurring.next_due_date > recurring.end_date:
+
+        today = timezone.now().date()
+        # Only auto-deactivate when the template has fully ended (end date in the past).
+        # Having next_due past end while end is still in the future must NOT clear Active —
+        # that was flipping Rent/Rogers/Shaw inactive as soon as end dates were set.
+        if recurring.end_date and recurring.end_date < today:
             recurring.is_active = False
+        elif requested_active is not None:
+            recurring.is_active = requested_active
+
         recurring.save(update_fields=['next_due_date', 'is_active', 'updated_at'])
 
         logger.info(
             f"Recurring {recurring.id} schedule reconcile: removed={result.get('removed')} "
             f"created={result.get('generated_count')} updated={result.get('updated_count')} "
-            f"next_due={recurring.next_due_date}"
+            f"next_due={recurring.next_due_date} active={recurring.is_active}"
         )
 
     @action(detail=True, methods=['post'])
@@ -1411,7 +1575,6 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         today = timezone.now().date()
         current_year = today.year
         current_year_start = date(current_year, 1, 1)
-        current_year_end = date(current_year, 12, 31)
         errors = []
 
         import logging
@@ -1419,11 +1582,13 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
         for recurring in recurring_expenses:
             try:
-                # For manual generation, generate expenses for the current year
+                # Honor template start/end. Never invent a window that ends before it starts.
                 generation_start = recurring.start_date
 
-                logger.info(f"Processing recurring expense {recurring.id}: start_date={recurring.start_date}, dry_run={dry_run}")
+                logger.info(f"Processing recurring expense {recurring.id}: start_date={recurring.start_date}, end_date={recurring.end_date}, dry_run={dry_run}")
 
+                # If the template began before this year, roll forward to the first
+                # occurrence in the current year (still not before template start).
                 if generation_start.year < current_year:
                     if recurring.frequency == 'daily':
                         generation_start = current_year_start
@@ -1450,13 +1615,31 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 if generation_start < recurring.start_date:
                     generation_start = recurring.start_date
 
-                if recurring.start_date.year == current_year:
-                    generation_start = recurring.start_date
-
-                if recurring.end_date and recurring.end_date <= current_year_end:
+                # End: always prefer the template end_date. Open-ended templates generate
+                # through the end of max(current year, start year) so future starts still work.
+                if recurring.end_date:
                     end_date = recurring.end_date
                 else:
-                    end_date = current_year_end
+                    horizon_year = max(current_year, generation_start.year, recurring.start_date.year)
+                    end_date = date(horizon_year, 12, 31)
+
+                if generation_start > end_date:
+                    by_recurring.append({
+                        'recurring_id': recurring.id,
+                        'description': recurring.description,
+                        'category_name': recurring.category.name if recurring.category else None,
+                        'frequency': recurring.frequency,
+                        'generation_start': generation_start.isoformat(),
+                        'generation_end': end_date.isoformat(),
+                        'generated_count': 0,
+                        'skipped_count': 0,
+                        'updated_count': 0,
+                        'created': [],
+                        'skipped': [],
+                        'updated': [],
+                        'note': 'start is after end - check template dates',
+                    })
+                    continue
 
                 result = self._generate_expenses_for_recurring(
                     recurring,
@@ -1465,12 +1648,20 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                     start_date=generation_start,
                     dry_run=dry_run,
                 )
+                # Ensure items are earliest → latest
+                def by_date(rows):
+                    return sorted(rows, key=lambda r: r.get('expense_date') or '')
+
+                created = by_date(result['created'])
+                skipped = by_date(result['skipped'])
+                updated = by_date(result.get('updated', []))
+
                 generated_count += result['generated_count']
                 skipped_count += result['skipped_count']
                 updated_count += result.get('updated_count', 0)
-                created_items.extend(result['created'])
-                skipped_items.extend(result['skipped'])
-                updated_items.extend(result.get('updated', []))
+                created_items.extend(created)
+                skipped_items.extend(skipped)
+                updated_items.extend(updated)
                 by_recurring.append({
                     'recurring_id': recurring.id,
                     'description': recurring.description,
@@ -1481,9 +1672,9 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                     'generated_count': result['generated_count'],
                     'skipped_count': result['skipped_count'],
                     'updated_count': result.get('updated_count', 0),
-                    'created': result['created'],
-                    'skipped': result['skipped'],
-                    'updated': result.get('updated', []),
+                    'created': created,
+                    'skipped': skipped,
+                    'updated': updated,
                 })
             except Exception as e:
                 logger.error(f"Error generating expenses for {recurring.description}: {str(e)}", exc_info=True)

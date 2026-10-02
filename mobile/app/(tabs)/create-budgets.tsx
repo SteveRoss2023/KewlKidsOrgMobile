@@ -70,8 +70,9 @@ export default function CreateBudgetsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={[styles.intro, { color: colors.textSecondary }]}>
-          Build monthly budgets from active recurring items. Optionally analyze recent expenses to
-          fill gaps.
+          Builds one monthly budget per category from active recurring (and optional expense
+          analysis). New budgets start this month; open-ended recurring stays every month going
+          forward. Expense-analysis budgets end Dec 31 of this year.
         </Text>
 
         <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -153,7 +154,44 @@ export default function CreateBudgetsScreen() {
               )}
             </View>
 
-            {result.by_category.map((item) => (
+            {result.by_category.map((item) => {
+              const sourceLabel =
+                item.sources === 'both'
+                  ? 'Recurring + expenses'
+                  : item.sources === 'expenses'
+                    ? 'Expenses'
+                    : item.sources === 'recurring'
+                      ? 'Recurring'
+                      : null;
+              const actionLabel =
+                item.action === 'would_create'
+                  ? 'Would create'
+                  : item.action === 'created'
+                    ? 'Created'
+                    : item.action === 'would_update'
+                      ? 'Would update'
+                      : item.action === 'updated'
+                        ? 'Updated'
+                        : item.action === 'would_reactivate'
+                          ? 'Would reactivate'
+                          : item.action === 'reactivated'
+                            ? 'Reactivated'
+                            : item.action === 'would_deactivate'
+                              ? 'Would remove'
+                              : item.action === 'deactivated'
+                                ? 'Removed'
+                                : item.reason || 'Skipped';
+              const changeLines =
+                item.changes && item.changes.length > 0
+                  ? item.changes
+                  : item.action === 'skipped'
+                    ? []
+                    : item.old_amount != null &&
+                        Math.abs((item.old_amount ?? 0) - item.amount) >= 0.005
+                      ? [`amount ${formatCurrency(item.old_amount)} → ${formatCurrency(item.amount)}`]
+                      : [];
+
+              return (
               <View
                 key={`${item.category_id}-${item.action}`}
                 style={[styles.resultRow, { borderBottomColor: colors.border }]}
@@ -189,34 +227,29 @@ export default function CreateBudgetsScreen() {
                       : ` · ${formatCurrency(item.amount)}/mo`}
                   </Text>
                   <Text style={[styles.resultMeta, { color: colors.textSecondary }]}>
-                    {item.action === 'would_create' && 'Would create'}
-                    {item.action === 'created' && 'Created'}
-                    {item.action === 'would_update' &&
-                      `Would update from ${formatCurrency(item.old_amount ?? 0)}`}
-                    {item.action === 'updated' &&
-                      `Updated from ${formatCurrency(item.old_amount ?? 0)}`}
-                    {item.action === 'would_reactivate' && 'Would reactivate'}
-                    {item.action === 'reactivated' && 'Reactivated'}
-                    {item.action === 'would_deactivate' && 'Would remove (no longer sourced)'}
-                    {item.action === 'deactivated' && 'Removed (no longer sourced)'}
-                    {item.action === 'skipped' && (item.reason || 'Skipped')}
-                    {item.action === 'skipped' &&
-                      item.reason === 'keeping higher existing budget' &&
-                      ` (kept ${formatCurrency(item.old_amount ?? item.amount)})`}
-                    {item.sources !== 'none' && (
-                      <>
-                        {' · '}
-                        {item.sources === 'both'
-                          ? 'Recurring + expenses'
-                          : item.sources === 'expenses'
-                            ? 'Expenses'
-                            : 'Recurring'}
-                      </>
-                    )}
+                    {actionLabel}
+                    {sourceLabel ? ` · ${sourceLabel}` : ''}
                   </Text>
+                  {changeLines.map((line) => (
+                    <Text
+                      key={line}
+                      style={[styles.resultChange, { color: colors.text }]}
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                  {item.action === 'skipped' && item.reason ? (
+                    <Text style={[styles.resultChange, { color: colors.textSecondary }]}>
+                      {item.reason}
+                      {item.old_start_date
+                        ? ` · start ${item.old_start_date.slice(0, 10)}`
+                        : ''}
+                    </Text>
+                  ) : null}
                 </View>
               </View>
-            ))}
+              );
+            })}
 
             {result.by_category.length === 0 && (
               <Text style={[styles.resultMeta, { color: colors.textSecondary, marginTop: 8 }]}>
@@ -382,5 +415,10 @@ const styles = StyleSheet.create({
   resultMeta: {
     fontSize: 11,
     marginTop: 1,
+  },
+  resultChange: {
+    fontSize: 12,
+    marginTop: 3,
+    fontWeight: '500',
   },
 });

@@ -6,7 +6,13 @@ from decimal import Decimal, InvalidOperation
 
 
 def sync_generated_expense_fields(expense, recurring, tag_ids=None):
-    """Copy template-owned fields onto a generated expense. Returns True if anything changed."""
+    """Copy template-owned fields onto a generated expense. Returns True if anything changed.
+
+    Paid expenses are left alone — actual billed amounts must not be overwritten by the template.
+    """
+    if getattr(expense, 'is_paid', False):
+        return False
+
     changed = False
     updates = {}
     if expense.category_id != recurring.category_id:

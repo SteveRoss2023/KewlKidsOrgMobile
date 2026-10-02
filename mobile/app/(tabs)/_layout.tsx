@@ -225,7 +225,13 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="create-budgets"
         options={{
-          href: null, // Hide from tab bar - accessible via Budgets tab
+          href: null, // Hide from tab bar - accessible via Settings > Budgets
+        }}
+      />
+      <Tabs.Screen
+        name="manage-budgets"
+        options={{
+          href: null, // Hide from tab bar - accessible via Settings > Budgets
         }}
       />
       <Tabs.Screen

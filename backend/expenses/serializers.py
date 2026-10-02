@@ -306,6 +306,21 @@ class BudgetSerializer(serializers.ModelSerializer):
         # yearly
         return ref.replace(month=1, day=1), ref.replace(month=12, day=31)
 
+    def _active_window(self, obj):
+        """Clip the viewed period to the budget's start_date / end_date.
+
+        Budgets apply from their start month forward (e.g. Oct create → Oct–Dec),
+        including recurring-backed ones.
+        """
+        start, end = self._period_window(obj)
+        if obj.start_date and obj.start_date > start:
+            start = obj.start_date
+        if obj.end_date and obj.end_date < end:
+            end = obj.end_date
+        if start > end:
+            return None
+        return start, end
+
     @staticmethod
     def _months_spanned(start, end) -> int:
         return max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
@@ -324,10 +339,14 @@ class BudgetSerializer(serializers.ModelSerializer):
         all dues in that year).
         Categories without recurring (manual / expense-analysis): stored monthly amount
         × months in the window (1 for month view, 12 for year view).
+        Clipped to the budget's own start_date / end_date.
         """
         from .recurring_sync import recurring_due_in_window, category_has_active_recurring
+        window = self._active_window(obj)
+        if window is None:
+            return Decimal('0')
+        start, end = window
         base = self._base_amount(obj)
-        start, end = self._period_window(obj)
         months = self._months_spanned(start, end)
 
         if obj.period != 'monthly':
@@ -337,7 +356,10 @@ class BudgetSerializer(serializers.ModelSerializer):
         recurring_cats = self.context.get('recurring_categories')
         if recurring_due_map is not None and recurring_cats is not None:
             if obj.category_id in recurring_cats:
-                return Decimal(str(recurring_due_map.get(obj.category_id, 0)))
+                period = self._period_window(obj)
+                if (start, end) == period:
+                    return Decimal(str(recurring_due_map.get(obj.category_id, 0)))
+                return recurring_due_in_window(obj.family_id, obj.category_id, start, end)
             return base * Decimal(months)
 
         if category_has_active_recurring(obj.family_id, obj.category_id):
@@ -348,12 +370,15 @@ class BudgetSerializer(serializers.ModelSerializer):
         return float(self._base_amount(obj))
 
     def get_spent_amount(self, obj):
-        """Calculate total spent for this budget period."""
+        """Calculate total spent for this budget's active window."""
+        window = self._active_window(obj)
+        if window is None:
+            return 0.0
+        start, end = window
+        period = self._period_window(obj)
         spent_map = self.context.get('spent_by_category')
-        if spent_map is not None:
+        if spent_map is not None and (start, end) == period:
             return float(spent_map.get(obj.category_id, 0) or 0)
-
-        start, end = self._period_window(obj)
 
         expenses = Expense.objects.filter(
             family=obj.family,

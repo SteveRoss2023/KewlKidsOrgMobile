@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Switch,
   useWindowDimensions,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -31,7 +31,7 @@ import BudgetCard from '../../components/expenses/BudgetCard';
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
 import { formatCurrency } from '../../utils/moneyInput';
 
-type ActiveTab = 'expenses' | 'categories' | 'budgets' | 'recurring' | 'reports';
+type ActiveTab = 'expenses' | 'categories' | 'recurring' | 'reports';
 type GroupMode = 'none' | 'day' | 'week' | 'month' | 'year';
 type PeriodMode = Exclude<GroupMode, 'none'>;
 
@@ -165,7 +165,6 @@ function TooltipButton({
 export default function ExpensesScreen() {
   const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
-  const router = useRouter();
   const { selectedFamily } = useFamily();
   const [activeTab, setActiveTab] = useState<ActiveTab>('expenses');
   const [loading, setLoading] = useState(false);
@@ -204,11 +203,10 @@ export default function ExpensesScreen() {
   const [recurringGroupBy, setRecurringGroupBy] = useState<GroupMode>('none');
   const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
   const [periodExpanded, setPeriodExpanded] = useState(false);
-  const [budgetDetailsExpanded, setBudgetDetailsExpanded] = useState(false);
   const [expandedRecurringGroups, setExpandedRecurringGroups] = useState<Set<string>>(new Set());
   const [generateDryRun, setGenerateDryRun] = useState(true);
   const [generateResult, setGenerateResult] = useState<GenerateExpensesResult | null>(null);
-  const [budgetViewDate, setBudgetViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
+  const [recurringHelpOpen, setRecurringHelpOpen] = useState(false);
   const [paidToggleExpenseId, setPaidToggleExpenseId] = useState<number | null>(null);
 
   const currentGroupKey = useCallback((mode: PeriodMode) => {
@@ -230,10 +228,6 @@ export default function ExpensesScreen() {
     setPeriodExpanded(false);
   }, [viewDate]);
 
-  useEffect(() => {
-    setBudgetDetailsExpanded(false);
-  }, [budgetViewDate]);
-
   // Load data when family changes or screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -244,7 +238,7 @@ export default function ExpensesScreen() {
         setCategories([]);
         setBudgets([]);
       }
-    }, [selectedFamily, activeTab, budgetViewDate, viewDate, groupBy])
+    }, [selectedFamily, activeTab, viewDate, groupBy])
   );
 
   const fetchData = async (opts?: { soft?: boolean }) => {
@@ -259,18 +253,14 @@ export default function ExpensesScreen() {
 
     try {
       const periodMode: PeriodMode | null = groupBy === 'none' ? null : groupBy;
-      const expenseRange =
-        activeTab === 'budgets'
-          ? periodDateRange(budgetViewDate, 'month')
-          : periodDateRange(viewDate, periodMode);
-      const asOfDate = activeTab === 'budgets' ? budgetViewDate : viewDate;
+      const expenseRange = periodDateRange(viewDate, periodMode);
       const asOf =
         periodMode === 'year' && activeTab === 'expenses'
-          ? `${asOfDate.getFullYear()}-01-01`
-          : `${asOfDate.getFullYear()}-${String(asOfDate.getMonth() + 1).padStart(2, '0')}-01`;
+          ? `${viewDate.getFullYear()}-01-01`
+          : `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}-01`;
       const budgetPeriod =
         periodMode === 'year' && activeTab === 'expenses' ? 'year' : 'month';
-      const needBudgets = activeTab === 'budgets' || activeTab === 'expenses';
+      const needBudgets = activeTab === 'expenses';
 
       const [categoriesData, tagsData, expensesData, recurringData, budgetsData] = await Promise.all([
         expenseService.getCategories(selectedFamily.id),
@@ -472,17 +462,6 @@ export default function ExpensesScreen() {
       setError(err.message || 'Failed to update budget');
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleDeleteBudget = async (budgetId: number) => {
-    if (!selectedFamily) return;
-
-    try {
-      await expenseService.deleteBudget(budgetId);
-      await fetchData({ soft: true });
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete budget');
     }
   };
 
@@ -1104,7 +1083,7 @@ export default function ExpensesScreen() {
           </View>
         )}
 
-        {/* Period summary — expand/collapse */}
+        {/* Period summary - expand/collapse */}
         {periodMode && (
           <TouchableOpacity
             style={[styles.periodSummaryBar, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
@@ -1139,13 +1118,13 @@ export default function ExpensesScreen() {
                       {formatCurrency(periodBudgetTotal > 0 ? periodBudgetTotal : periodTotal)}
                     </Text>
                   ) : null}
-                  {' · '}
+                  {' | '}
                   {periodExpenses.length} {periodExpenses.length === 1 ? 'expense' : 'expenses'}
                 </Text>
               </View>
             </View>
             <Text style={[styles.periodSummaryToggle, { color: colors.primary }]}>
-              {periodExpanded ? 'Hide' : 'Show'} · {periodExpenses.length}
+              {periodExpanded ? 'Hide' : 'Show'} | {periodExpenses.length}
             </Text>
           </TouchableOpacity>
         )}
@@ -1316,258 +1295,55 @@ export default function ExpensesScreen() {
     );
   };
 
-  const renderBudgetsTab = () => {
-    if (loading) {
-      return (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+
+  const renderRecurringHelp = () => (
+    <View style={styles.recurringHelpWrap}>
+      <TouchableOpacity
+        style={[styles.helpHeader, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        onPress={() => setRecurringHelpOpen((o) => !o)}
+        activeOpacity={0.7}
+      >
+        <FontAwesome
+          name={recurringHelpOpen ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          color={colors.textSecondary}
+        />
+        <FontAwesome name="info-circle" size={14} color={colors.primary} />
+        <Text style={[styles.helpTitle, { color: colors.text }]}>How this works</Text>
+      </TouchableOpacity>
+      {recurringHelpOpen && (
+        <View style={[styles.helpBody, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Recurring templates are the schedule for bills and subscriptions. Each has a start date,
+            optional end date, frequency, and amount. Rows show start and end (or "no end").
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Set an end date when you know it stops (promo, cancel-by date). Leave no end for ongoing
+            items like rent or phone — they continue every month into future years.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Generate creates unpaid expense rows from each template between its start and end
+            (open-ended templates go through the end of the relevant year). Paid expenses keep their
+            actual amounts and are never overwritten by the template.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Create Budget (Settings → Budgets) builds monthly category limits from these templates.
+            Open-ended recurring stays in every month going forward. If every item in a category has
+            an end date, that budget ends then too. Re-run Create after you change recurring amounts
+            or dates.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Active means Generate and Create Budget use this template. Templates only auto-turn
+            inactive after their end date has passed — having an end date in the future does not
+            make them inactive.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            Day-to-day paid toggles, receipts, and editing a single month live on the Expenses tab.
+          </Text>
         </View>
-      );
-    }
-
-    const budgetMonthLabel = formatPeriodLabel(budgetViewDate, 'month');
-    const todayMonth = startOfPeriod(new Date(), 'month');
-    const budgetTabDates = [
-      shiftPeriod(budgetViewDate, 'month', -1),
-      startOfPeriod(budgetViewDate, 'month'),
-      shiftPeriod(budgetViewDate, 'month', 1),
-    ];
-    const budgetOnToday = budgetViewDate.getTime() === todayMonth.getTime();
-    // Phones always 2-up; wider screens can show 3–4
-    const budgetColumns = windowWidth < 700 ? 2 : windowWidth < 1100 ? 3 : 4;
-    const sortedBudgets = [...budgets].sort((a, b) =>
-      (a.category_name || '').localeCompare(b.category_name || '', undefined, { sensitivity: 'base' })
-    );
-    const budgetMonthStart = startOfPeriod(budgetViewDate, 'month');
-    const budgetMonthEnd = shiftPeriod(budgetMonthStart, 'month', 1);
-    const expensesByCategory = new Map<number, Expense[]>();
-    for (const expense of expenses) {
-      if (expense.category == null) continue;
-      const d = parseExpenseDate(expense.expense_date);
-      if (d < budgetMonthStart || d >= budgetMonthEnd) continue;
-      const list = expensesByCategory.get(expense.category) || [];
-      list.push(expense);
-      expensesByCategory.set(expense.category, list);
-    }
-
-    const monthlyBudgets = budgets.filter((b) => b.period === 'monthly');
-    const monthSpent = monthlyBudgets.reduce((sum, b) => {
-      const n = typeof b.spent_amount === 'number' ? b.spent_amount : parseFloat(String(b.spent_amount ?? 0));
-      return sum + (Number.isNaN(n) ? 0 : n);
-    }, 0);
-    const monthLimit = monthlyBudgets.reduce((sum, b) => {
-      const n = typeof b.amount === 'number' ? b.amount : parseFloat(String(b.amount ?? 0));
-      return sum + (Number.isNaN(n) ? 0 : n);
-    }, 0);
-    const monthPct = monthLimit > 0 ? (monthSpent / monthLimit) * 100 : 0;
-    const monthRemaining = monthLimit - monthSpent;
-
-    const createControls = (
-      <View style={styles.budgetCreateControls}>
-        <TouchableOpacity
-          style={[styles.generateButton, { backgroundColor: colors.primary }]}
-          onPress={() => router.push('/(tabs)/create-budgets')}
-        >
-          <FontAwesome name="magic" size={18} color="#fff" />
-          <Text style={styles.generateButtonText}>Create budget</Text>
-        </TouchableOpacity>
-
-        <View style={[styles.periodNav, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <TouchableOpacity
-            style={styles.periodNavArrow}
-            onPress={() => setBudgetViewDate((d) => shiftPeriod(d, 'month', -1))}
-            accessibilityLabel="Previous month"
-          >
-            <FontAwesome name="chevron-left" size={14} color={colors.text} />
-          </TouchableOpacity>
-          <View style={styles.periodTabs}>
-            {budgetTabDates.map((tabDate, index) => {
-              const selected = tabDate.getTime() === startOfPeriod(budgetViewDate, 'month').getTime();
-              const isNow = tabDate.getTime() === todayMonth.getTime();
-              return (
-                <TouchableOpacity
-                  key={`budget-${tabDate.toISOString()}-${index}`}
-                  style={[
-                    styles.periodTab,
-                    {
-                      backgroundColor: selected ? colors.primary : colors.card,
-                      borderColor: isNow && !selected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setBudgetViewDate(startOfPeriod(tabDate, 'month'))}
-                >
-                  <Text
-                    style={[styles.periodTabText, { color: selected ? '#fff' : colors.text }]}
-                    numberOfLines={1}
-                  >
-                    {formatPeriodLabel(tabDate, 'month', true)}
-                  </Text>
-                  {isNow && (
-                    <Text style={[styles.periodTabNow, { color: selected ? '#fff' : colors.primary }]}>
-                      Now
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <TouchableOpacity
-            style={styles.periodNavArrow}
-            onPress={() => setBudgetViewDate((d) => shiftPeriod(d, 'month', 1))}
-            accessibilityLabel="Next month"
-          >
-            <FontAwesome name="chevron-right" size={14} color={colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.periodTodayBtn,
-              {
-                backgroundColor: budgetOnToday ? colors.card : colors.primary,
-                borderColor: budgetOnToday ? colors.border : colors.primary,
-              },
-            ]}
-            onPress={() => setBudgetViewDate(todayMonth)}
-            disabled={budgetOnToday}
-            accessibilityLabel="Go to today"
-          >
-            <Text
-              style={[
-                styles.periodTodayBtnText,
-                { color: budgetOnToday ? colors.textSecondary : '#fff' },
-              ]}
-              numberOfLines={1}
-            >
-              Today
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.budgetMonthSummary, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => setBudgetDetailsExpanded((open) => !open)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: budgetDetailsExpanded }}
-          accessibilityLabel={`${budgetMonthLabel} budget ${formatCurrency(monthSpent)} of ${formatCurrency(monthLimit)}, ${budgets.length} categories`}
-        >
-          <View style={styles.budgetMonthSummaryTop}>
-            <View style={styles.budgetMonthSummaryLeft}>
-              <View style={styles.budgetMonthSummaryLabelRow}>
-                <FontAwesome
-                  name={budgetDetailsExpanded ? 'chevron-down' : 'chevron-right'}
-                  size={12}
-                  color={colors.textSecondary}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={[styles.budgetMonthSummaryLabel, { color: colors.textSecondary }]}>
-                  Monthly total
-                </Text>
-              </View>
-              <Text style={[styles.budgetMonthSummaryAmount, { color: colors.text }]} numberOfLines={1}>
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>
-                  {formatCurrency(monthSpent)}
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontWeight: '500' }}>
-                  {' / '}
-                  {formatCurrency(monthLimit)}
-                </Text>
-              </Text>
-            </View>
-            <View style={styles.budgetMonthSummaryRight}>
-              <Text
-                style={[
-                  styles.budgetMonthSummaryPct,
-                  {
-                    color:
-                      monthPct > 100
-                        ? '#ef4444'
-                        : Math.abs(monthPct - 100) < 0.5
-                          ? '#10b981'
-                          : colors.primary,
-                  },
-                ]}
-              >
-                {monthPct.toFixed(0)}%
-              </Text>
-              <Text style={[styles.budgetMonthSummaryRemain, { color: colors.textSecondary }]} numberOfLines={1}>
-                {formatCurrency(monthRemaining)} left
-              </Text>
-              <Text style={[styles.budgetMonthSummaryToggle, { color: colors.primary }]}>
-                {budgetDetailsExpanded ? 'Hide' : 'Show'} · {budgets.length}
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.budgetMonthSummaryTrack, { backgroundColor: colors.border }]}>
-            <View
-              style={[
-                styles.budgetMonthSummaryFill,
-                {
-                  width: `${Math.min(monthPct, 100)}%`,
-                  backgroundColor:
-                    monthPct > 100
-                      ? '#ef4444'
-                      : Math.abs(monthPct - 100) < 0.5
-                        ? '#10b981'
-                        : monthPct >= 80
-                          ? '#f59e0b'
-                          : colors.primary,
-                },
-              ]}
-            />
-          </View>
-        </TouchableOpacity>
-      </View>
-    );
-
-    if (budgets.length === 0) {
-      return (
-        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 88 }}>
-          {createControls}
-          <View style={[styles.centerContainer, { minHeight: 200 }]}>
-            <FontAwesome name="credit-card" size={64} color={colors.textSecondary} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No budgets set
-            </Text>
-            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-              Tap Create budget or + to add one
-            </Text>
-          </View>
-        </ScrollView>
-      );
-    }
-
-    return (
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 88 }}>
-        {createControls}
-        {budgetDetailsExpanded && (
-          <View style={styles.budgetGrid}>
-            {sortedBudgets.map((budget) => (
-              <View
-                key={budget.id}
-                style={[
-                  styles.budgetGridItem,
-                  { width: `${100 / budgetColumns}%` as `${number}%` },
-                ]}
-              >
-                <BudgetCard
-                  budget={budget}
-                  items={expensesByCategory.get(budget.category) || []}
-                  onPress={() => {
-                    setEditingBudget(budget);
-                    setShowBudgetForm(true);
-                  }}
-                  onDelete={() => handleDeleteBudget(budget.id)}
-                  onItemPress={(expense) => {
-                    void openExpenseEditor(expense);
-                  }}
-                />
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-    );
-  };
+      )}
+    </View>
+  );
 
   const renderRecurringTab = () => {
     if (loading) {
@@ -1580,15 +1356,18 @@ export default function ExpensesScreen() {
 
     if (recurringExpenses.length === 0) {
       return (
-        <View style={styles.centerContainer}>
-          <FontAwesome name="repeat" size={64} color={colors.textSecondary} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            No recurring expenses yet
-          </Text>
-          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-            Create recurring expense templates for subscriptions and bills
-          </Text>
-        </View>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={styles.centerContainer}>
+            <FontAwesome name="repeat" size={64} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No recurring expenses yet
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+              Create recurring expense templates for subscriptions and bills
+            </Text>
+          </View>
+          {renderRecurringHelp()}
+        </ScrollView>
       );
     }
 
@@ -1611,13 +1390,17 @@ export default function ExpensesScreen() {
         // Parse start_date directly without timezone conversion
         const start = parseDateString(recurring.start_date);
 
-        // Determine end date: use recurring.end_date if provided, otherwise end of current year
+        // Determine end date: use recurring.end_date if provided, otherwise end of year
         let endDate: Date;
         if (recurring.end_date) {
           endDate = parseDateString(recurring.end_date);
         } else {
-          // Default to end of current year (2026)
-          endDate = new Date(2026, 11, 31); // December 31, 2026
+          const y = Math.max(new Date().getFullYear(), start.getFullYear());
+          endDate = new Date(y, 11, 31);
+        }
+        if (endDate < start) {
+          // Invalid range - nothing to list
+          return;
         }
 
         // Generate all occurrence dates based on frequency
@@ -1743,7 +1526,7 @@ export default function ExpensesScreen() {
             <View style={styles.dryRunTextWrap}>
               <Text style={[styles.dryRunLabel, { color: colors.text }]}>Dry run</Text>
               <Text style={[styles.dryRunHint, { color: colors.textSecondary }]}>
-                Preview only — nothing is created
+                Preview only - nothing is created
               </Text>
             </View>
             <Switch
@@ -1903,6 +1686,8 @@ export default function ExpensesScreen() {
             );
           })
         )}
+
+        {renderRecurringHelp()}
       </ScrollView>
     );
   };
@@ -1924,8 +1709,6 @@ export default function ExpensesScreen() {
         return renderExpensesTab();
       case 'categories':
         return renderCategoriesTab();
-      case 'budgets':
-        return renderBudgetsTab();
       case 'recurring':
         return renderRecurringTab();
       case 'reports':
@@ -1946,7 +1729,6 @@ export default function ExpensesScreen() {
         >
           {(
             [
-              { id: 'budgets', label: 'Budgets', icon: 'credit-card' },
               { id: 'expenses', label: 'Expenses', icon: 'file-text-o' },
               { id: 'recurring', label: 'Recurring', icon: 'repeat' },
               { id: 'reports', label: 'Reports', icon: 'bar-chart' },
@@ -1988,23 +1770,18 @@ export default function ExpensesScreen() {
       {renderContent()}
 
       {/* Floating Action Button (non-expenses tabs) */}
-      {selectedFamily && (activeTab === 'categories' || activeTab === 'budgets' || activeTab === 'recurring') && (
+      {selectedFamily && (activeTab === 'categories' || activeTab === 'recurring') && (
         <TooltipButton
           tooltip={
             activeTab === 'categories'
               ? 'Add category'
-              : activeTab === 'budgets'
-                ? 'Add budget'
-                : 'Add recurring expense'
+              : 'Add recurring expense'
           }
           style={[styles.fab, { backgroundColor: colors.primary }]}
           onPress={() => {
             if (activeTab === 'categories') {
               setEditingCategory(null);
               setShowCategoryForm(true);
-            } else if (activeTab === 'budgets') {
-              setEditingBudget(null);
-              setShowBudgetForm(true);
             } else if (activeTab === 'recurring') {
               setEditingRecurring(null);
               setShowRecurringForm(true);
@@ -2109,7 +1886,7 @@ export default function ExpensesScreen() {
         title="Delete expense?"
         message={
           expensePendingDelete
-            ? `Delete “${expensePendingDelete.description}” (${formatCurrency(expensePendingDelete.amount)})? This cannot be undone.`
+            ? `Delete "${expensePendingDelete.description}" (${formatCurrency(expensePendingDelete.amount)})? This cannot be undone.`
             : ''
         }
         type="warning"
@@ -2161,6 +1938,10 @@ export default function ExpensesScreen() {
                 </Text>
               </Text>
               <Text style={[styles.generateResultStat, { color: colors.text }]}>
+                {generateResult?.dry_run ? 'Would update' : 'Updated'}:{' '}
+                <Text style={{ fontWeight: '700' }}>{generateResult?.updated_count ?? 0}</Text>
+              </Text>
+              <Text style={[styles.generateResultStat, { color: colors.text }]}>
                 Skipped:{' '}
                 <Text style={{ fontWeight: '700' }}>{generateResult?.skipped_count ?? 0}</Text>
               </Text>
@@ -2176,18 +1957,47 @@ export default function ExpensesScreen() {
                 </Text>
               ))}
 
-              {(generateResult?.by_recurring || []).map((group) => (
+              {(generateResult?.by_recurring || [])
+                .slice()
+                .sort((a, b) => (b.updated_count ?? 0) - (a.updated_count ?? 0))
+                .map((group) => (
                 <View key={group.recurring_id} style={styles.generateResultGroup}>
                   <Text style={[styles.generateResultGroupTitle, { color: colors.text }]}>
                     {group.description}
                   </Text>
                   <Text style={[styles.generateResultGroupMeta, { color: colors.textSecondary }]}>
-                    {group.category_name || 'No category'} · {group.frequency} · {group.generation_start} → {group.generation_end}
+                    {group.category_name || 'No category'} | {group.frequency} | {group.generation_start} -> {group.generation_end}
                   </Text>
                   <Text style={[styles.generateResultGroupMeta, { color: colors.textSecondary }]}>
                     {generateResult?.dry_run ? 'Would create' : 'Created'} {group.generated_count}
-                    {' · '}Skipped {group.skipped_count}
+                    {' | '}
+                    {generateResult?.dry_run ? 'Would update' : 'Updated'} {group.updated_count ?? 0}
+                    {' | '}Skipped {group.skipped_count}
                   </Text>
+
+                  {(group.updated || []).map((item, idx) => (
+                    <View
+                      key={`u-${group.recurring_id}-${item.expense_date}-${idx}`}
+                      style={[styles.generateResultRow, { borderBottomColor: colors.border }]}
+                    >
+                      <FontAwesome
+                        name="refresh"
+                        size={14}
+                        color={colors.primary}
+                        style={{ marginTop: 2 }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.generateResultRowTitle, { color: colors.text }]}>
+                          {item.expense_date} | {formatCurrency(item.amount)}
+                        </Text>
+                        <Text style={[styles.generateResultRowMeta, { color: colors.primary }]}>
+                          {item.action === 'would_update' ? 'Would update' : 'Updated'}
+                          {item.expense_id ? ` #${item.expense_id}` : ''}
+                          {item.reason ? ` - ${item.reason}` : ' - sync fields from template'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
 
                   {group.created.map((item, idx) => (
                     <View
@@ -2202,7 +2012,7 @@ export default function ExpensesScreen() {
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.generateResultRowTitle, { color: colors.text }]}>
-                          {item.expense_date} · {formatCurrency(item.amount)}
+                          {item.expense_date} | {formatCurrency(item.amount)}
                         </Text>
                         <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary }]}>
                           {item.action === 'would_create' ? 'Would create' : 'Created'}
@@ -2220,16 +2030,18 @@ export default function ExpensesScreen() {
                       <FontAwesome name="minus-circle" size={14} color={colors.textSecondary} style={{ marginTop: 2 }} />
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.generateResultRowTitle, { color: colors.textSecondary }]}>
-                          {item.expense_date} · {formatCurrency(item.amount)}
+                          {item.expense_date} | {formatCurrency(item.amount)}
                         </Text>
                         <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary }]}>
-                          Skipped — {item.reason || 'already exists'}
+                          Skipped - {item.reason || 'already exists'}
                         </Text>
                       </View>
                     </View>
                   ))}
 
-                  {group.generated_count === 0 && group.skipped_count === 0 && (
+                  {group.generated_count === 0 &&
+                    (group.updated_count ?? 0) === 0 &&
+                    group.skipped_count === 0 && (
                     <Text style={[styles.generateResultRowMeta, { color: colors.textSecondary, marginTop: 4 }]}>
                       Nothing to generate in range
                     </Text>
@@ -2454,14 +2266,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 8,
   },
-  budgetActionButton: {
-    padding: 8,
-  },
   generateButtonContainer: {
-    marginBottom: 16,
-    gap: 10,
-  },
-  budgetCreateControls: {
     marginBottom: 16,
     gap: 10,
   },
@@ -2473,66 +2278,6 @@ const styles = StyleSheet.create({
   },
   budgetGridItem: {
     padding: 4,
-  },
-  budgetMonthSummary: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 8,
-  },
-  budgetMonthSummaryTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  budgetMonthSummaryLeft: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  budgetMonthSummaryLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  budgetMonthSummaryLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  budgetMonthSummaryAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  budgetMonthSummaryRight: {
-    alignItems: 'flex-end',
-    flexShrink: 0,
-    gap: 1,
-  },
-  budgetMonthSummaryPct: {
-    fontSize: 16,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  budgetMonthSummaryRemain: {
-    fontSize: 11,
-  },
-  budgetMonthSummaryToggle: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  budgetMonthSummaryTrack: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  budgetMonthSummaryFill: {
-    height: '100%',
-    borderRadius: 3,
   },
   dryRunRow: {
     flexDirection: 'row',
@@ -2568,6 +2313,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  recurringHelpWrap: {
+    marginTop: 16,
+    marginBottom: 24,
+    paddingHorizontal: 12,
+    gap: 0,
+  },
+  helpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  helpTitle: { fontSize: 14, fontWeight: '700', flex: 1 },
+  helpBody: {
+    marginTop: 6,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  helpText: { fontSize: 13, lineHeight: 18 },
   generateResultOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
