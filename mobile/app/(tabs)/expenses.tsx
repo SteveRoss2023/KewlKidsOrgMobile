@@ -26,7 +26,6 @@ import CategoryForm from '../../components/expenses/CategoryForm';
 import BudgetForm from '../../components/expenses/BudgetForm';
 import RecurringExpenseForm from '../../components/expenses/RecurringExpenseForm';
 import TagForm from '../../components/expenses/TagForm';
-import ExpenseCard from '../../components/expenses/ExpenseCard';
 import RecurringExpenseRow, { formatOccurrenceDate } from '../../components/expenses/RecurringExpenseRow';
 import BudgetCard from '../../components/expenses/BudgetCard';
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
@@ -260,7 +259,10 @@ export default function ExpensesScreen() {
 
     try {
       const periodMode: PeriodMode | null = groupBy === 'none' ? null : groupBy;
-      const expenseRange = periodDateRange(viewDate, periodMode);
+      const expenseRange =
+        activeTab === 'budgets'
+          ? periodDateRange(budgetViewDate, 'month')
+          : periodDateRange(viewDate, periodMode);
       const asOfDate = activeTab === 'budgets' ? budgetViewDate : viewDate;
       const asOf =
         periodMode === 'year' && activeTab === 'expenses'
@@ -702,29 +704,101 @@ export default function ExpensesScreen() {
     );
     const expenseColumns = windowWidth < 700 ? 2 : windowWidth < 1100 ? 3 : 4;
 
-    const renderExpenseCards = (list: Expense[]) => (
-      <View style={styles.budgetGrid}>
-        {list.map((expense) => (
-          <View
-            key={expense.id}
-            style={[
-              styles.budgetGridItem,
-              { width: `${100 / expenseColumns}%` as `${number}%` },
-            ]}
-          >
-            <ExpenseCard
-              expense={expense}
-              onPress={() => void openExpenseEditor(expense)}
-              onDelete={() => requestDeleteExpense(expense)}
-              paidToggleDisabled={paidToggleExpenseId === expense.id}
-              onTogglePaid={(nextPaid) => {
-                void handleToggleExpensePaid(expense, nextPaid);
-              }}
-            />
-          </View>
-        ))}
-      </View>
-    );
+    const renderExpenseCards = (list: Expense[]) => {
+      const groups = new Map<
+        number,
+        { name: string; expenses: Expense[]; budget: Budget | null }
+      >();
+      const budgetByCategory = new Map(budgets.map((b) => [b.category, b]));
+
+      for (const expense of list) {
+        const categoryId = expense.category ?? 0;
+        const existing = groups.get(categoryId);
+        if (existing) {
+          existing.expenses.push(expense);
+        } else {
+          groups.set(categoryId, {
+            name: expense.category_name || 'Uncategorized',
+            expenses: [expense],
+            budget: budgetByCategory.get(categoryId) ?? null,
+          });
+        }
+      }
+
+      const sortedGroups = [...groups.entries()].sort((a, b) =>
+        a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' })
+      );
+
+      return (
+        <View style={styles.budgetGrid}>
+          {sortedGroups.map(([categoryId, group]) => {
+            const paid = group.expenses.reduce(
+              (sum, exp) => sum + (exp.is_paid !== false ? toAmt(exp.amount) : 0),
+              0
+            );
+            const showLimit = showPeriodBudget && !!group.budget;
+            const limit = showLimit ? toAmt(group.budget!.amount) : paid;
+            const cardBudget: Budget = group.budget
+              ? {
+                  ...group.budget,
+                  spent_amount: paid,
+                  remaining_amount: limit - paid,
+                  percentage_used: limit > 0 ? (paid / limit) * 100 : 0,
+                }
+              : {
+                  id: -Math.max(categoryId, 1),
+                  family: selectedFamily?.id ?? 0,
+                  category: categoryId,
+                  category_name: group.name,
+                  amount: paid,
+                  base_amount: paid,
+                  period: 'monthly',
+                  start_date: '',
+                  end_date: null,
+                  alert_threshold: 80,
+                  is_active: true,
+                  spent_amount: paid,
+                  remaining_amount: 0,
+                  percentage_used: 0,
+                  created_at: '',
+                  updated_at: '',
+                };
+
+            return (
+              <View
+                key={`cat-${categoryId}`}
+                style={[
+                  styles.budgetGridItem,
+                  { width: `${100 / expenseColumns}%` as `${number}%` },
+                ]}
+              >
+                <BudgetCard
+                  budget={cardBudget}
+                  items={group.expenses}
+                  showBudgetLimit={showLimit}
+                  subtitle={`${group.expenses.length} ${group.expenses.length === 1 ? 'expense' : 'expenses'}`}
+                  onPress={
+                    group.budget
+                      ? () => {
+                          setEditingBudget(group.budget);
+                          setShowBudgetForm(true);
+                        }
+                      : undefined
+                  }
+                  onItemPress={(expense) => {
+                    void openExpenseEditor(expense);
+                  }}
+                  onToggleItemPaid={(expense, nextPaid) => {
+                    void handleToggleExpensePaid(expense, nextPaid);
+                  }}
+                  paidToggleExpenseId={paidToggleExpenseId}
+                />
+              </View>
+            );
+          })}
+        </View>
+      );
+    };
 
     const groupOptions: { label: string; value: GroupMode }[] = [
       { label: 'Day', value: 'day' },
@@ -1235,6 +1309,17 @@ export default function ExpensesScreen() {
     const sortedBudgets = [...budgets].sort((a, b) =>
       (a.category_name || '').localeCompare(b.category_name || '', undefined, { sensitivity: 'base' })
     );
+    const budgetMonthStart = startOfPeriod(budgetViewDate, 'month');
+    const budgetMonthEnd = shiftPeriod(budgetMonthStart, 'month', 1);
+    const expensesByCategory = new Map<number, Expense[]>();
+    for (const expense of expenses) {
+      if (expense.category == null) continue;
+      const d = parseExpenseDate(expense.expense_date);
+      if (d < budgetMonthStart || d >= budgetMonthEnd) continue;
+      const list = expensesByCategory.get(expense.category) || [];
+      list.push(expense);
+      expensesByCategory.set(expense.category, list);
+    }
 
     const monthlyBudgets = budgets.filter((b) => b.period === 'monthly');
     const monthSpent = monthlyBudgets.reduce((sum, b) => {
@@ -1437,11 +1522,15 @@ export default function ExpensesScreen() {
               >
                 <BudgetCard
                   budget={budget}
+                  items={expensesByCategory.get(budget.category) || []}
                   onPress={() => {
                     setEditingBudget(budget);
                     setShowBudgetForm(true);
                   }}
                   onDelete={() => handleDeleteBudget(budget.id)}
+                  onItemPress={(expense) => {
+                    void openExpenseEditor(expense);
+                  }}
                 />
               </View>
             ))}

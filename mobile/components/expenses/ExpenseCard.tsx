@@ -25,6 +25,12 @@ interface ExpenseCardProps {
   paidToggleDisabled?: boolean;
 }
 
+function toNumber(value: number | string | null | undefined): number {
+  if (value == null || value === '') return 0;
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isNaN(n) ? 0 : n;
+}
+
 export default function ExpenseCard({
   expense,
   onPress,
@@ -35,10 +41,14 @@ export default function ExpenseCard({
   const { colors } = useTheme();
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   const receiptUrl = resolveMediaUrl(expense.receipt_url);
   const isGenerated = !!(expense.is_recurring && expense.recurring_expense);
   const isPaid = expense.is_paid !== false;
+  const lineItems = [...(expense.line_items || [])].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0)
+  );
 
   const formatDate = (dateString: string): string => {
     try {
@@ -81,7 +91,7 @@ export default function ExpenseCard({
 
   return (
     <>
-      <TouchableOpacity
+      <View
         style={[
           styles.card,
           {
@@ -89,13 +99,16 @@ export default function ExpenseCard({
             borderColor: colors.border,
           },
         ]}
-        onPress={onPress}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel={`${expense.description}, ${formatCurrency(expense.amount)}`}
       >
         <View style={styles.header}>
-          <View style={styles.headerText}>
+          <TouchableOpacity
+            style={styles.headerText}
+            onPress={onPress}
+            activeOpacity={0.7}
+            disabled={!onPress}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${expense.description}`}
+          >
             <Text style={[styles.description, { color: colors.text }]} numberOfLines={2}>
               {expense.description}
             </Text>
@@ -103,35 +116,40 @@ export default function ExpenseCard({
               {formatDate(expense.expense_date)}
               {expense.category_name ? ` · ${expense.category_name}` : ''}
             </Text>
+          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {onPress && (
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={onPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Edit expense"
+              >
+                <FontAwesome name="pencil" size={12} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+            {onDelete && (
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={onDelete}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Delete expense"
+              >
+                <FontAwesome name="trash-o" size={13} color={colors.error || '#ef4444'} />
+              </TouchableOpacity>
+            )}
           </View>
-          {onDelete && (
-            <TouchableOpacity
-              style={styles.deleteBtn}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onDelete();
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Delete expense"
-            >
-              <FontAwesome name="trash-o" size={13} color={colors.error || '#ef4444'} />
-            </TouchableOpacity>
-          )}
         </View>
 
-        <Text style={[styles.amount, { color: colors.primary }]} numberOfLines={1}>
-          {formatCurrency(expense.amount)}
-        </Text>
+        <TouchableOpacity onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
+          <Text style={[styles.amount, { color: colors.primary }]} numberOfLines={1}>
+            {formatCurrency(expense.amount)}
+          </Text>
+        </TouchableOpacity>
 
         <View style={styles.footer}>
           {onTogglePaid ? (
-            <TouchableOpacity
-              style={styles.paidWrap}
-              activeOpacity={1}
-              onPress={(e) => {
-                e.stopPropagation?.();
-              }}
-            >
+            <View style={styles.paidWrap}>
               <Text
                 style={[
                   styles.paidLabel,
@@ -148,7 +166,7 @@ export default function ExpenseCard({
                 thumbColor="#fff"
                 style={styles.paidSwitch}
               />
-            </TouchableOpacity>
+            </View>
           ) : (
             <View style={styles.paidWrap} />
           )}
@@ -162,10 +180,7 @@ export default function ExpenseCard({
             {!!receiptUrl && (
               <TouchableOpacity
                 style={[styles.chip, styles.receiptChip]}
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  openReceipt();
-                }}
+                onPress={openReceipt}
                 accessibilityRole="button"
                 accessibilityLabel="View receipt"
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -176,7 +191,68 @@ export default function ExpenseCard({
             )}
           </View>
         </View>
-      </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.expandToggle, { borderTopColor: colors.border }]}
+          onPress={() => setExpanded((open) => !open)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={
+            expanded
+              ? `Hide ${lineItems.length} line items`
+              : `Show ${lineItems.length} line items`
+          }
+        >
+          <FontAwesome
+            name={expanded ? 'chevron-down' : 'chevron-right'}
+            size={10}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.expandToggleText, { color: colors.primary }]}>
+            {lineItems.length} {lineItems.length === 1 ? 'item' : 'items'}
+          </Text>
+        </TouchableOpacity>
+
+        {expanded && (
+          <View style={styles.itemsList}>
+            {lineItems.length === 0 ? (
+              <Text style={[styles.emptyItems, { color: colors.textSecondary }]}>
+                No line items
+              </Text>
+            ) : (
+              lineItems.map((item, index) => {
+                const qty = toNumber(item.quantity);
+                const unit = toNumber(item.unit_price);
+                const total = toNumber(item.line_total);
+                const metaParts: string[] = [];
+                if (qty > 0) metaParts.push(`×${qty}`);
+                if (unit > 0) metaParts.push(`@ ${formatCurrency(unit)}`);
+                return (
+                  <View
+                    key={item.id ?? `${item.name}-${index}`}
+                    style={[styles.itemRow, { borderTopColor: colors.border }]}
+                  >
+                    <View style={styles.itemMain}>
+                      <Text style={[styles.itemDesc, { color: colors.text }]} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      {metaParts.length > 0 ? (
+                        <Text style={[styles.itemMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {metaParts.join(' ')}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={[styles.itemAmt, { color: colors.primary }]} numberOfLines={1}>
+                      {formatCurrency(total > 0 ? total : unit * (qty || 1))}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+      </View>
 
       <Modal
         visible={receiptVisible}
@@ -243,7 +319,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     paddingTop: 8,
-    paddingBottom: 8,
+    paddingBottom: 4,
     paddingHorizontal: 8,
     gap: 5,
     minHeight: 110,
@@ -259,6 +335,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 1,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
   description: {
     fontSize: 13,
     fontWeight: '700',
@@ -267,6 +348,9 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 10,
     fontWeight: '500',
+  },
+  iconBtn: {
+    padding: 4,
   },
   amount: {
     fontSize: 14,
@@ -318,10 +402,49 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
   },
-  deleteBtn: {
-    padding: 2,
-    marginTop: -2,
-    marginRight: -2,
+  expandToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 6,
+    paddingBottom: 4,
+    marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  expandToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  itemsList: {
+    paddingBottom: 4,
+  },
+  emptyItems: {
+    fontSize: 10,
+    paddingVertical: 4,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  itemMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  itemDesc: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  itemMeta: {
+    fontSize: 9,
+  },
+  itemAmt: {
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   receiptOverlay: {
     flex: 1,
