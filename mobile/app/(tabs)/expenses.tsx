@@ -725,9 +725,37 @@ export default function ExpensesScreen() {
         }
       }
 
+      // Month/year: include budget categories with no expenses yet (e.g. Food & Dining)
+      if (showPeriodBudget) {
+        for (const budget of budgets) {
+          if (budget.category == null || groups.has(budget.category)) continue;
+          if (toAmt(budget.amount) <= 0 && toAmt(budget.spent_amount) <= 0) continue;
+          groups.set(budget.category, {
+            name: budget.category_name || 'Uncategorized',
+            expenses: [],
+            budget,
+          });
+        }
+      }
+
       const sortedGroups = [...groups.entries()].sort((a, b) =>
         a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' })
       );
+
+      if (sortedGroups.length === 0) {
+        return (
+          <View style={styles.centerContainer}>
+            <FontAwesome name="file-text-o" size={48} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              {searchQuery || hasActiveFilters
+                ? 'No expenses match your filters'
+                : periodMode
+                  ? 'No expenses in this period'
+                  : 'No expenses yet'}
+            </Text>
+          </View>
+        );
+      }
 
       return (
         <View style={styles.budgetGrid}>
@@ -787,6 +815,9 @@ export default function ExpensesScreen() {
                   }
                   onItemPress={(expense) => {
                     void openExpenseEditor(expense);
+                  }}
+                  onItemDelete={(expense) => {
+                    requestDeleteExpense(expense);
                   }}
                   onToggleItemPaid={(expense, nextPaid) => {
                     void handleToggleExpensePaid(expense, nextPaid);
@@ -1121,19 +1152,17 @@ export default function ExpensesScreen() {
 
         {/* Expenses List */}
         <ScrollView style={styles.expensesList} contentContainerStyle={styles.expensesListContent}>
-          {periodMode && !periodExpanded ? null : (periodMode ? periodExpenses : filteredExpenses).length === 0 ? (
+          {periodMode && !periodExpanded ? null : periodMode ? (
+            renderExpenseCards(periodExpenses)
+          ) : filteredExpenses.length === 0 ? (
             <View style={styles.centerContainer}>
               <FontAwesome name="file-text-o" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
                 {searchQuery || hasActiveFilters
                   ? 'No expenses match your filters'
-                  : periodMode
-                    ? 'No expenses in this period'
-                    : 'No expenses yet'}
+                  : 'No expenses yet'}
               </Text>
             </View>
-          ) : periodMode ? (
-            renderExpenseCards(periodExpenses)
           ) : showCombinedView ? (
             <>
               {recurringExpenses.filter((re) => re.is_active).length > 0 && (
