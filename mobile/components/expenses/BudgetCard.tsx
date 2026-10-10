@@ -113,13 +113,15 @@ export default function BudgetCard({
   const isOnBudget = showBudgetLimit && percentageUsed >= 100 && !isExceeded;
   const isWarning =
     showBudgetLimit &&
-    percentageUsed >= budget.alert_threshold &&
     !isExceeded &&
-    !isOnBudget;
+    !isOnBudget &&
+    percentageUsed >= budget.alert_threshold;
+  const isOnTrack = showBudgetLimit && !isExceeded && !isWarning && !isOnBudget;
 
+  // Green under / on budget (100%), yellow close (alert–<100%), red over.
   const statusColor = isExceeded
     ? '#ef4444'
-    : isOnBudget
+    : isOnBudget || isOnTrack
       ? '#10b981'
       : isWarning
         ? '#f59e0b'

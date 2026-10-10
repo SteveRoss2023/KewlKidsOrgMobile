@@ -460,9 +460,8 @@ export default function HomeScreen() {
         router.push('/(tabs)/documents');
         break;
       case 'finance':
-        router.push('/(tabs)/expenses');
+        router.push('/(tabs)/expenses-hub');
         break;
-        // TODO: Navigate to finance when implemented
         break;
       case 'map':
         router.push('/(tabs)/map');

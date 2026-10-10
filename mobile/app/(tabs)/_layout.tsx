@@ -223,21 +223,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="expenses-hub"
+        options={{
+          href: null, // Hide from tab bar - new Expense Tracker landing
+        }}
+      />
+      <Tabs.Screen
         name="bills-budgets"
         options={{
           href: null, // Hide from tab bar - Bills & Budgets hub
-        }}
-      />
-      <Tabs.Screen
-        name="create-budgets"
-        options={{
-          href: null, // Hide from tab bar - legacy; prefer Update plan wizard
-        }}
-      />
-      <Tabs.Screen
-        name="manage-budgets"
-        options={{
-          href: null, // Hide from tab bar - year overview from Bills & Budgets
         }}
       />
       <Tabs.Screen
@@ -308,12 +302,6 @@ export default function TabsLayout() {
         name="chat/[roomId]"
         options={{
           href: null, // Hide from tab bar
-        }}
-      />
-      <Tabs.Screen
-        name="expenses"
-        options={{
-          href: null, // Hide from tab bar - accessible via Home card
         }}
       />
     </Tabs>

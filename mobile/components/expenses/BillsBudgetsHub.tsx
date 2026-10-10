@@ -33,16 +33,24 @@ interface BillsBudgetsHubProps {
   embedded?: boolean;
   /** Initial sub-tab */
   initialTab?: HubTab;
+  /** When false, hide Year Budget sub-tab (new hub puts Budgets top-level). */
+  yearTabEnabled?: boolean;
+  /** Called after Update plan successfully applies (parent can refresh Budgets/Expenses). */
+  onPlanApplied?: () => void;
 }
 
 export default function BillsBudgetsHub({
   embedded = false,
   initialTab = 'bills',
+  yearTabEnabled = true,
+  onPlanApplied,
 }: BillsBudgetsHubProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
 
-  const [hubTab, setHubTab] = useState<HubTab>(initialTab);
+  const [hubTab, setHubTab] = useState<HubTab>(
+    yearTabEnabled ? initialTab : 'bills'
+  );
   const [yearKey, setYearKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<RecurringExpense[]>([]);
@@ -152,14 +160,18 @@ export default function BillsBudgetsHub({
     );
   }
 
-  const hubTabs = (
+  const hubTabOptions = (
+    [
+      { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
+      ...(yearTabEnabled
+        ? [{ id: 'year' as const, label: 'Year Budget', icon: 'calendar' as const }]
+        : []),
+    ] as const
+  );
+
+  const hubTabs = yearTabEnabled ? (
     <View style={[styles.tabRow, { borderBottomColor: colors.border }]}>
-      {(
-        [
-          { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
-          { id: 'year' as const, label: 'Year Budget', icon: 'calendar' as const },
-        ] as const
-      ).map((tab) => {
+      {hubTabOptions.map((tab) => {
         const selected = hubTab === tab.id;
         return (
           <TouchableOpacity
@@ -187,7 +199,7 @@ export default function BillsBudgetsHub({
         );
       })}
     </View>
-  );
+  ) : null;
 
   const sharedHeader = (
     <>
@@ -300,7 +312,7 @@ export default function BillsBudgetsHub({
             </>
           )}
 
-          {!embedded ? (
+          {!embedded && yearTabEnabled ? (
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
               Switch to Year Budget to review monthly category limits.
             </Text>
@@ -316,6 +328,7 @@ export default function BillsBudgetsHub({
         onApplied={() => {
           void load();
           setYearKey((k) => k + 1);
+          onPlanApplied?.();
         }}
       />
 
