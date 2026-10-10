@@ -223,15 +223,21 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="bills-budgets"
+        options={{
+          href: null, // Hide from tab bar - Bills & Budgets hub
+        }}
+      />
+      <Tabs.Screen
         name="create-budgets"
         options={{
-          href: null, // Hide from tab bar - accessible via Settings > Budgets
+          href: null, // Hide from tab bar - legacy; prefer Update plan wizard
         }}
       />
       <Tabs.Screen
         name="manage-budgets"
         options={{
-          href: null, // Hide from tab bar - accessible via Settings > Budgets
+          href: null, // Hide from tab bar - year overview from Bills & Budgets
         }}
       />
       <Tabs.Screen

@@ -155,6 +155,7 @@ export interface CreateExpenseData {
   tags?: number[];
   is_recurring?: boolean;
   recurring_expense?: number | null;
+  is_paid?: boolean;
   line_items_input?: Array<{
     name: string;
     quantity?: number | null;
@@ -371,4 +372,11 @@ export interface CreateBudgetsFromRecurringResult {
   skipped_count: number;
   deactivated_count?: number;
   by_category: CreateBudgetFromRecurringItem[];
+}
+
+export interface SyncPlanResult {
+  dry_run: boolean;
+  message: string;
+  expenses: GenerateExpensesResult;
+  budgets: CreateBudgetsFromRecurringResult;
 }

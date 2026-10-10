@@ -594,8 +594,11 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     'category_name': cat_name,
                     'amount': Decimal('0'),
                     'recurring_ids': [],
+                    'start_dates': [],
                     'end_dates': [],
                 }
+            if recurring.start_date:
+                recurring_by_cat[cat_id]['start_dates'].append(recurring.start_date)
             recurring_by_cat[cat_id]['end_dates'].append(recurring.end_date)
             if monthly > 0:
                 recurring_by_cat[cat_id]['amount'] += monthly
@@ -686,6 +689,12 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 else:
                     desired_end = None
 
+            # Start = earliest active bill in category; expense-only uses this month.
+            if sources in ('recurring', 'both') and rec and rec.get('start_dates'):
+                desired_start = min(rec['start_dates'])
+            else:
+                desired_start = today.replace(day=1)
+
             suggestions.append({
                 'category_id': cat_id,
                 'category_name': category_name,
@@ -694,6 +703,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 'expense_avg': float(exp_amt),
                 'sources': sources,
                 'has_yearly': bool(yearly_meta),
+                'desired_start': desired_start,
                 'desired_end': desired_end,
             })
 
@@ -705,7 +715,6 @@ class BudgetViewSet(viewsets.ModelViewSet):
         deactivated_count = 0
         by_category = []
         suggested_cat_ids = {s['category_id'] for s in suggestions}
-        month_start = today.replace(day=1)
 
         def fmt_date(d) -> str:
             if not d:
@@ -714,8 +723,8 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
         for suggestion in suggestions:
             cat_id = suggestion['category_id']
-            # New budgets start this month forward (e.g. Oct create → Oct–Dec), never backdated.
-            desired_start = month_start
+            # Bill-backed: earliest active bill start. Expense-only: this month.
+            desired_start = suggestion.pop('desired_start', today.replace(day=1))
             desired_end = suggestion.pop('desired_end', None)
             existing = Budget.objects.filter(
                 family=family,
@@ -756,6 +765,11 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 item['start_date'] = existing.start_date.isoformat() if existing.start_date else None
                 item['end_date'] = existing.end_date.isoformat() if existing.end_date else None
                 end_needs_fix = existing.end_date != desired_end
+                start_needs_fix = (
+                    suggestion['sources'] in ('recurring', 'both')
+                    and desired_start
+                    and (existing.start_date is None or existing.start_date > desired_start)
+                )
 
                 # Expense analysis: never overwrite amount; may set year-end if missing
                 if suggestion['sources'] == 'expenses':
@@ -787,7 +801,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
                         item['end_date'] = exp_end.isoformat()
                         updated_count += 1
                 else:
-                    # Sync amount + end_date from recurring; do not rewrite start_date.
+                    # Sync amount, start (earliest bill), and end from recurring.
                     target = float(suggestion.get('recurring_amount') or suggestion['amount'])
                     if suggestion['sources'] == 'both':
                         target = float(suggestion.get('recurring_amount') or 0)
@@ -804,6 +818,12 @@ class BudgetViewSet(viewsets.ModelViewSet):
                         changes.append(
                             f'amount kept at ${old_amount:,.2f} (higher than recurring ${target:,.2f})'
                         )
+                    if start_needs_fix:
+                        changes.append(
+                            f'start date {fmt_date(existing.start_date)} → {fmt_date(desired_start)} '
+                            f'(earliest bill)'
+                        )
+                        item['start_date'] = desired_start.isoformat()
                     if end_needs_fix:
                         if desired_end is None:
                             changes.append(
@@ -815,17 +835,19 @@ class BudgetViewSet(viewsets.ModelViewSet):
                             )
                     item['changes'] = changes
 
-                    if amount_unchanged and not end_needs_fix:
+                    if amount_unchanged and not end_needs_fix and not start_needs_fix:
                         item['action'] = 'skipped'
-                        item['reason'] = 'amount and end date unchanged'
+                        item['reason'] = 'amount, start, and end date unchanged'
                         skipped_count += 1
-                    elif keep_higher and not end_needs_fix:
+                    elif keep_higher and not end_needs_fix and not start_needs_fix:
                         item['action'] = 'skipped'
                         item['reason'] = 'keeping higher existing budget'
                         skipped_count += 1
                     elif dry_run:
                         item['action'] = 'would_update'
                         item['reason'] = '; '.join(changes) if changes else 'would update'
+                        if start_needs_fix:
+                            item['start_date'] = desired_start.isoformat()
                         item['end_date'] = desired_end.isoformat() if desired_end else None
                         updated_count += 1
                     else:
@@ -833,6 +855,10 @@ class BudgetViewSet(viewsets.ModelViewSet):
                         if not keep_higher and not amount_unchanged:
                             existing.amount = Decimal(str(target))
                             update_fields.append('amount')
+                        if start_needs_fix:
+                            existing.start_date = desired_start
+                            update_fields.append('start_date')
+                            item['start_date'] = desired_start.isoformat()
                         if end_needs_fix:
                             existing.end_date = desired_end
                             update_fields.append('end_date')
@@ -882,7 +908,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 )
                 item['changes'] = [
                     f'new budget ${float(suggestion["amount"]):,.2f}/mo',
-                    f'start date {fmt_date(desired_start)} (this month forward)',
+                    f'start date {fmt_date(desired_start)} (earliest bill or this month)',
                     end_label,
                 ]
                 item['reason'] = '; '.join(item['changes'])
@@ -1370,6 +1396,15 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             logger.error(f"Error auto-generating expenses for recurring expense {recurring.id}: {str(e)}", exc_info=True)
             # Don't fail the creation if generation fails, but log the error
 
+        try:
+            from .budget_sync import sync_category_budget_from_bills
+            sync_category_budget_from_bills(family, recurring.category_id)
+        except Exception as e:
+            logger.error(
+                f"Error syncing budget for category {recurring.category_id} after bill create: {e}",
+                exc_info=True,
+            )
+
     def _expected_occurrence_dates(self, recurring, end_date):
         """Return the set of occurrence dates from recurring.start_date through end_date."""
         dates = set()
@@ -1485,6 +1520,15 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             recurring.is_active = requested_active
 
         recurring.save(update_fields=['next_due_date', 'is_active', 'updated_at'])
+
+        try:
+            from .budget_sync import sync_category_budget_from_bills
+            sync_category_budget_from_bills(recurring.family, recurring.category_id)
+        except Exception as e:
+            logger.error(
+                f"Error syncing budget for category {recurring.category_id} after bill update: {e}",
+                exc_info=True,
+            )
 
         logger.info(
             f"Recurring {recurring.id} schedule reconcile: removed={result.get('removed')} "
@@ -1710,6 +1754,54 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         )
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def sync_plan(self, request):
+        """Preview or apply full plan sync: generate expenses + sync budgets from bills.
+
+        Body: { family, dry_run?: bool, analyze_expenses?: bool }
+        """
+        family_id = request.data.get('family')
+        if not family_id:
+            return Response({'error': 'family is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        get_object_or_404(Family, id=family_id, members__user=request.user)
+
+        expenses_response = self.generate_expenses(request)
+        if expenses_response.status_code >= 400:
+            return expenses_response
+
+        budget_view = BudgetViewSet()
+        budget_view.request = request
+        budget_view.format_kwarg = getattr(self, 'format_kwarg', None)
+        budget_view.action = 'create_from_recurring'
+        budgets_response = budget_view.create_from_recurring(request)
+        if budgets_response.status_code >= 400:
+            return budgets_response
+
+        dry_run_raw = request.data.get('dry_run', False)
+        dry_run = (
+            str(dry_run_raw).lower() in ('1', 'true', 'yes')
+            if not isinstance(dry_run_raw, bool)
+            else dry_run_raw
+        )
+        expenses_data = expenses_response.data
+        budgets_data = budgets_response.data
+        verb = 'Would update' if dry_run else 'Updated'
+        message = (
+            f'{verb} plan: {expenses_data.get("generated_count", 0)} expenses, '
+            f'{budgets_data.get("created_count", 0)} new / '
+            f'{budgets_data.get("updated_count", 0)} updated budgets'
+        )
+        return Response(
+            {
+                'dry_run': dry_run,
+                'message': message,
+                'expenses': expenses_data,
+                'budgets': budgets_data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReceiptViewSet(viewsets.ModelViewSet):

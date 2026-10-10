@@ -10,6 +10,7 @@ import {
   Platform,
   Image,
   Alert,
+  Switch,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -70,6 +71,7 @@ export default function ExpenseForm({
   const { colors } = useTheme();
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [isPaid, setIsPaid] = useState(true);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit_card');
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
@@ -103,6 +105,7 @@ export default function ExpenseForm({
       // Reset form when modal closes
       setDescription('');
       setAmount('');
+      setIsPaid(true);
       setCategoryId(null);
       setPaymentMethod('credit_card');
       setExpenseDate(new Date().toISOString().split('T')[0]);
@@ -119,6 +122,7 @@ export default function ExpenseForm({
       setBoundId(expense.id);
       setDescription(expense.description);
       setAmount(formatMoneyDisplay(expense.amount));
+      setIsPaid(!!expense.is_paid);
       setCategoryId(expense.category);
       setPaymentMethod(expense.payment_method);
       setExpenseDate(expense.expense_date);
@@ -147,6 +151,7 @@ export default function ExpenseForm({
     } else if (!boundExpenseId) {
       setDescription('');
       setAmount('');
+      setIsPaid(true);
       setCategoryId(defaultCategoryId);
       setPaymentMethod('credit_card');
       setExpenseDate(new Date().toISOString().split('T')[0]);
@@ -190,6 +195,7 @@ export default function ExpenseForm({
         expense_date: expenseDate,
         notes: notes.trim() || undefined,
         tags: selectedTags.length > 0 ? selectedTags : undefined,
+        is_paid: isPaid,
         line_items_input: toLineItemsInput(lines),
       };
     }
@@ -203,6 +209,7 @@ export default function ExpenseForm({
       expense_date: expenseDate,
       notes: notes.trim() || undefined,
       tags: selectedTags.length > 0 ? selectedTags : undefined,
+      is_paid: isPaid,
       line_items_input: toLineItemsInput(lines),
     };
   };
@@ -497,16 +504,32 @@ export default function ExpenseForm({
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Amount *</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                value={amount}
-                onChangeText={(t) => setAmount(onMoneyChange(t))}
-                placeholder="$0.00"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="number-pad"
-                editable={!loading}
-              />
+              <View style={styles.amountRow}>
+                <View style={styles.amountField}>
+                  <Text style={[styles.label, { color: colors.text }]}>Amount *</Text>
+                  <TextInput
+                    style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    value={amount}
+                    onChangeText={(t) => setAmount(onMoneyChange(t))}
+                    placeholder="$0.00"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    editable={!loading}
+                  />
+                </View>
+                <View style={styles.paidToggle}>
+                  <Text style={[styles.label, { color: colors.text }]}>
+                    {isPaid ? 'Paid' : 'Unpaid'}
+                  </Text>
+                  <Switch
+                    value={isPaid}
+                    onValueChange={setIsPaid}
+                    disabled={loading}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              </View>
             </View>
 
             <View style={styles.formGroup}>
@@ -748,6 +771,22 @@ const styles = StyleSheet.create({
   },
   formGroup: {
     marginBottom: 16,
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  amountField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  paidToggle: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 4,
+    gap: 4,
+    minWidth: 72,
   },
   label: {
     fontSize: 14,

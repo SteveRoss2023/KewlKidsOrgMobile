@@ -86,9 +86,9 @@ const SettingsMenu = () => {
       },
       {
         id: 'budgets',
-        label: 'Budgets',
+        label: 'Bills & Budgets',
         icon: 'credit-card',
-        route: '/(tabs)/manage-budgets',
+        route: '/(tabs)/bills-budgets',
       },
     ];
 

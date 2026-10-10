@@ -24,6 +24,7 @@ import {
   BudgetAlert,
   GenerateExpensesResult,
   CreateBudgetsFromRecurringResult,
+  SyncPlanResult,
 } from '../types/expenses';
 
 /** Follow DRF `next` links until all pages are loaded. */
@@ -458,6 +459,28 @@ class ExpenseService {
       const response = await apiClient.post<GenerateExpensesResult>(
         '/recurring-expenses/generate_expenses/',
         { family: familyId, dry_run: !!options?.dryRun }
+      );
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Preview or apply full plan sync: generate expenses + sync budgets from bills.
+   */
+  async syncPlan(
+    familyId: number,
+    options?: { dryRun?: boolean; analyzeExpenses?: boolean }
+  ): Promise<SyncPlanResult> {
+    try {
+      const response = await apiClient.post<SyncPlanResult>(
+        '/recurring-expenses/sync_plan/',
+        {
+          family: familyId,
+          dry_run: !!options?.dryRun,
+          analyze_expenses: !!options?.analyzeExpenses,
+        }
       );
       return response.data;
     } catch (error) {
