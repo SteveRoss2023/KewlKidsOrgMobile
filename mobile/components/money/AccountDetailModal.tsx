@@ -29,6 +29,7 @@ interface AccountDetailModalProps {
   demoPortfolio?: boolean;
   onClose: () => void;
   onUpdateBalance: (account: MoneyAccount) => void;
+  onEditSnapshot: (account: MoneyAccount, snapshot: AccountSnapshot) => void;
   onEdit: (account: MoneyAccount) => void;
   onDelete: (account: MoneyAccount) => void;
 }
@@ -54,6 +55,7 @@ export default function AccountDetailModal({
   demoPortfolio = false,
   onClose,
   onUpdateBalance,
+  onEditSnapshot,
   onEdit,
   onDelete,
 }: AccountDetailModalProps) {
@@ -89,10 +91,15 @@ export default function AccountDetailModal({
                 {account.name}
               </Text>
               <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                {typeLabel}
-                {account.latest_as_of
-                  ? ` · latest ${formatShortDate(account.latest_as_of)}`
-                  : ' · no balance yet'}
+                {[
+                  account.institution?.trim() || null,
+                  typeLabel,
+                  account.latest_as_of
+                    ? `latest ${formatShortDate(account.latest_as_of)}`
+                    : 'no balance yet',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -145,7 +152,7 @@ export default function AccountDetailModal({
               Balance history ({history.length})
             </Text>
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Snapshots from monthly updates — used as the Forecast starting point.
+              Tap a row to edit that date’s amount. Used for YTD and year-end targets.
             </Text>
             {history.length === 0 ? (
               <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
@@ -153,15 +160,24 @@ export default function AccountDetailModal({
               </Text>
             ) : (
               history.map((s) => (
-                <View
+                <TouchableOpacity
                   key={s.id}
                   style={[styles.histRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => onEditSnapshot(account, s)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit balance for ${formatShortDate(s.as_of_date)}`}
                 >
                   <Text style={{ color: colors.text, flex: 1 }}>{formatShortDate(s.as_of_date)}</Text>
                   <Text style={[styles.histAmt, { color: colors.text }]}>
                     {displayMoney(s.balance)}
                   </Text>
-                </View>
+                  <FontAwesome
+                    name="pencil"
+                    size={12}
+                    color={colors.textSecondary}
+                    style={{ marginLeft: 8 }}
+                  />
+                </TouchableOpacity>
               ))
             )}
           </ScrollView>

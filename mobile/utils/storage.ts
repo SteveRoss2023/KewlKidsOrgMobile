@@ -12,6 +12,8 @@ export const STORAGE_KEYS = {
   FAMILY_ID: 'selected_family_id',
   /** Per-user key prefix: money_demo_portfolio:<email> */
   MONEY_DEMO_PORTFOLIO: 'money_demo_portfolio',
+  /** Per family+year: money_year_target_rate:<familyId>:<year> */
+  MONEY_YEAR_TARGET_RATE: 'money_year_target_rate',
 } as const;
 
 /**

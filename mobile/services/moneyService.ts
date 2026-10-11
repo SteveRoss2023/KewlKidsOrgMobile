@@ -114,6 +114,14 @@ class MoneyService {
     }
   }
 
+  async deleteOccurrence(id: number): Promise<void> {
+    try {
+      await apiClient.delete(`/income-occurrences/${id}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
   async getAccounts(familyId: number): Promise<MoneyAccount[]> {
     try {
       return await fetchAllPages<MoneyAccount>('/money-accounts/', { family: familyId });
@@ -163,6 +171,26 @@ class MoneyService {
     try {
       const res = await apiClient.post<AccountSnapshot>('/account-snapshots/', data);
       return res.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async updateSnapshot(
+    id: number,
+    data: { balance: number | string; notes?: string | null }
+  ): Promise<AccountSnapshot> {
+    try {
+      const res = await apiClient.patch<AccountSnapshot>(`/account-snapshots/${id}/`, data);
+      return res.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async deleteSnapshot(id: number): Promise<void> {
+    try {
+      await apiClient.delete(`/account-snapshots/${id}/`);
     } catch (error) {
       throw handleAPIError(error as any);
     }

@@ -92,6 +92,7 @@ class Account(models.Model):
 
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='money_accounts')
     name = EncryptedCharField(max_length=200)
+    institution = EncryptedCharField(max_length=100, blank=True, null=True)
     account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES, default='other')
     notes = EncryptedTextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)

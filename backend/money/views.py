@@ -210,23 +210,26 @@ class AccountSnapshotViewSet(viewsets.ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        """Upsert by (account, as_of_date) — validate after finding an existing row."""
         account_id = request.data.get('account')
         account = get_object_or_404(
             Account, id=account_id, family__members__user=request.user
         )
-        as_of = serializer.validated_data.get('as_of_date')
-        existing = AccountSnapshot.objects.filter(account=account, as_of_date=as_of).first()
+        as_of = _parse_date(request.data.get('as_of_date'))
+        existing = (
+            AccountSnapshot.objects.filter(account=account, as_of_date=as_of).first()
+            if as_of
+            else None
+        )
         if existing:
-            for key, val in serializer.validated_data.items():
-                setattr(existing, key, val)
-            existing.family = account.family
-            existing.save()
-            out = self.get_serializer(existing)
-            return Response(out.data, status=status.HTTP_200_OK)
+            # Update path so UniqueTogetherValidator excludes this instance.
+            serializer = self.get_serializer(existing, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(family=account.family, account=account)
+            return Response(serializer.data, status=status.HTTP_200_OK)
 
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         instance = serializer.save(family=account.family, account=account)
-        out = self.get_serializer(instance)
-        headers = self.get_success_headers(out.data)
-        return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)

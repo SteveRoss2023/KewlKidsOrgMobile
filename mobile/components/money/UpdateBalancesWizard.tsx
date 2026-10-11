@@ -15,6 +15,7 @@ import ThemeAwareDatePicker from '../ThemeAwareDatePicker';
 import moneyService from '../../services/moneyService';
 import { MoneyAccount } from '../../types/money';
 import { formatCurrency, formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
+import { groupAccountsByInstitution, sortAccountsByInstitution } from '../../utils/moneyAccounts';
 
 type Phase = 'edit' | 'done';
 
@@ -49,8 +50,13 @@ export default function UpdateBalancesWizard({
   const [savedCount, setSavedCount] = useState(0);
 
   const activeAccounts = useMemo(
-    () => accounts.filter((a) => a.is_active !== false),
+    () => sortAccountsByInstitution(accounts.filter((a) => a.is_active !== false)),
     [accounts]
+  );
+
+  const activeGroups = useMemo(
+    () => groupAccountsByInstitution(activeAccounts),
+    [activeAccounts]
   );
 
   useEffect(() => {
@@ -164,36 +170,46 @@ export default function UpdateBalancesWizard({
                     Add an account first.
                   </Text>
                 ) : (
-                  activeAccounts.map((a) => (
-                    <View
-                      key={a.id}
-                      style={[styles.accountBlock, { borderColor: colors.border, backgroundColor: colors.card }]}
-                    >
-                      <Text style={[styles.accountName, { color: colors.text }]}>{a.name}</Text>
-                      <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                        {a.latest_balance != null
-                          ? `Last: ${formatCurrency(a.latest_balance)}${
-                              a.latest_as_of ? ` (${a.latest_as_of})` : ''
-                            }`
-                          : 'No previous balance'}
+                  activeGroups.map((group) => (
+                    <View key={group.key || '__other'}>
+                      <Text style={[styles.institutionHeader, { color: colors.textSecondary }]}>
+                        {group.label}
                       </Text>
-                      <TextInput
-                        style={[
-                          styles.input,
-                          {
-                            color: colors.text,
-                            borderColor: colors.border,
-                            backgroundColor: colors.surface,
-                          },
-                        ]}
-                        value={balances[a.id] || ''}
-                        onChangeText={(t) =>
-                          setBalances((prev) => ({ ...prev, [a.id]: onMoneyChange(t) }))
-                        }
-                        keyboardType="decimal-pad"
-                        placeholder="$0.00"
-                        placeholderTextColor={colors.textSecondary}
-                      />
+                      {group.accounts.map((a) => (
+                        <View
+                          key={a.id}
+                          style={[
+                            styles.accountBlock,
+                            { borderColor: colors.border, backgroundColor: colors.card },
+                          ]}
+                        >
+                          <Text style={[styles.accountName, { color: colors.text }]}>{a.name}</Text>
+                          <Text style={[styles.meta, { color: colors.textSecondary }]}>
+                            {a.latest_balance != null
+                              ? `Last: ${formatCurrency(a.latest_balance)}${
+                                  a.latest_as_of ? ` (${a.latest_as_of})` : ''
+                                }`
+                              : 'No previous balance'}
+                          </Text>
+                          <TextInput
+                            style={[
+                              styles.input,
+                              {
+                                color: colors.text,
+                                borderColor: colors.border,
+                                backgroundColor: colors.surface,
+                              },
+                            ]}
+                            value={balances[a.id] || ''}
+                            onChangeText={(t) =>
+                              setBalances((prev) => ({ ...prev, [a.id]: onMoneyChange(t) }))
+                            }
+                            keyboardType="decimal-pad"
+                            placeholder="$0.00"
+                            placeholderTextColor={colors.textSecondary}
+                          />
+                        </View>
+                      ))}
                     </View>
                   ))
                 )}
@@ -257,6 +273,14 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, marginTop: 2 },
   body: { padding: 16, gap: 12, paddingBottom: 24 },
   hint: { fontSize: 13, lineHeight: 18 },
+  institutionHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    marginTop: 4,
+    marginBottom: 2,
+  },
   accountBlock: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,

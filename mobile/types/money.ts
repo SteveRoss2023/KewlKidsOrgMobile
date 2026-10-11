@@ -42,6 +42,7 @@ export interface MoneyAccount {
   id: number;
   family: number;
   name: string;
+  institution: string | null;
   account_type: AccountType;
   notes: string | null;
   is_active: boolean;
@@ -88,6 +89,7 @@ export type UpdateIncomeOccurrenceData = {
 export type CreateMoneyAccountData = {
   family: number;
   name: string;
+  institution?: string | null;
   account_type: AccountType;
   notes?: string | null;
   is_active?: boolean;
