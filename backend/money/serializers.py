@@ -32,7 +32,7 @@ class IncomeStreamSerializer(serializers.ModelSerializer):
             'default_estimate', 'start_date', 'end_date', 'notes', 'is_active',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'family', 'created_by', 'created_at', 'updated_at']
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -85,7 +85,9 @@ class AccountSerializer(serializers.ModelSerializer):
             'id', 'family', 'name', 'institution', 'account_type', 'notes', 'is_active',
             'latest_balance', 'latest_as_of', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'latest_balance', 'latest_as_of', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'family', 'latest_balance', 'latest_as_of', 'created_at', 'updated_at',
+        ]
 
     def get_latest_balance(self, obj):
         snap = obj.snapshots.order_by('-as_of_date', '-id').first()

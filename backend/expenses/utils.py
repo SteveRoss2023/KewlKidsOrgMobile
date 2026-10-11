@@ -4,6 +4,24 @@ Utility functions for expense categories.
 from .models import ExpenseCategory
 
 
+def apply_family_query_scope(queryset, request, view=None):
+    """Scope a membership queryset to ?family=.
+
+    List actions require a valid family id (invalid/missing → empty).
+    Detail/update/delete keep membership scope when family is omitted.
+    """
+    family_raw = request.query_params.get('family')
+    if family_raw not in (None, ''):
+        try:
+            return queryset.filter(family_id=int(family_raw))
+        except (ValueError, TypeError):
+            return queryset.none()
+    action = getattr(view, 'action', None) if view is not None else None
+    if action == 'list':
+        return queryset.none()
+    return queryset
+
+
 # Default expense categories to create for each family
 DEFAULT_CATEGORIES = [
     {'name': 'Food & Dining', 'description': 'Restaurants, groceries, and food delivery', 'icon': 'cutlery', 'color': '#f97316', 'order': 1},

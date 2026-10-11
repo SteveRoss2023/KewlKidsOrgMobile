@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -73,46 +73,95 @@ export default function YearBudgetOverview({
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+
+  const clearYearState = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setBudgetsByMonth({});
+    setCategories([]);
+    setExpandedMonth(-1);
+    setShowBudgetForm(false);
+    setEditingBudget(null);
+    setConfirmDeleteId(null);
+    setError('');
+    setYearLoading(true);
+  }, []);
 
   const loadYear = useCallback(
     async (y: number) => {
-      if (!selectedFamily) return;
+      if (!selectedFamily) {
+        clearYearState();
+        setYearLoading(false);
+        return;
+      }
+      const familyId = selectedFamily.id;
+      const generation = ++fetchGenerationRef.current;
       setYearLoading(true);
       try {
         const results = await Promise.all(
           Array.from({ length: 12 }, async (_, monthIndex) => {
             const key = monthKey(y, monthIndex);
             const asOf = `${key}-01`;
-            const data = await expenseService.getBudgets(selectedFamily.id, true, { asOf });
+            const data = await expenseService.getBudgets(familyId, true, { asOf });
             return [key, data] as const;
           })
         );
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         const next: Record<string, Budget[]> = {};
         for (const [key, data] of results) {
           next[key] = data;
         }
         setBudgetsByMonth(next);
       } catch (err: any) {
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setError(err.message || 'Failed to load budgets');
+        setBudgetsByMonth({});
       } finally {
-        setYearLoading(false);
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
+          setYearLoading(false);
+        }
       }
     },
-    [selectedFamily]
+    [selectedFamily, clearYearState]
   );
+
+  useEffect(() => {
+    clearYearState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) return;
+      const familyId = selectedFamily.id;
+      const generation = fetchGenerationRef.current;
       let cancelled = false;
       (async () => {
         try {
-          const cats = await expenseService.getCategories(selectedFamily.id);
-          if (!cancelled) setCategories(cats);
+          const cats = await expenseService.getCategories(familyId);
+          if (cancelled || generation !== fetchGenerationRef.current) return;
+          setCategories(cats);
         } catch (err: any) {
-          if (!cancelled) setError(err.message || 'Failed to load categories');
+          if (!cancelled && generation === fetchGenerationRef.current) {
+            setError(err.message || 'Failed to load categories');
+          }
         }
-        if (!cancelled) {
+        if (!cancelled && generation === fetchGenerationRef.current) {
           await loadYear(year);
         }
       })();
@@ -213,7 +262,7 @@ export default function YearBudgetOverview({
           </TouchableOpacity>
         </View>
 
-        {yearLoading && Object.keys(budgetsByMonth).length === 0 ? (
+        {yearLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
         ) : null}
 

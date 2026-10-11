@@ -56,6 +56,7 @@ import {
   shiftPeriod,
   startOfPeriod,
 } from '../../utils/expensePeriods';
+import { forFamily } from '../../utils/familyScope';
 
 type HubTab = 'budgets' | 'expenses' | 'bills' | 'reports' | 'categories';
 type SortBy = 'date' | 'amount' | 'category';
@@ -106,6 +107,8 @@ export default function ExpensesHubScreen() {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const editingExpenseRef = useRef<Expense | null>(null);
   const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   const [showBudgetForm, setShowBudgetForm] = useState(false);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -119,6 +122,7 @@ export default function ExpensesHubScreen() {
   const [categoryPendingDelete, setCategoryPendingDelete] = useState<ExpenseCategory | null>(null);
   const [tagPendingDelete, setTagPendingDelete] = useState<ExpenseTag | null>(null);
   const [budgetsRefreshKey, setBudgetsRefreshKey] = useState(0);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
 
   useEffect(() => {
     if (periodMode === 'all') {
@@ -129,10 +133,49 @@ export default function ExpensesHubScreen() {
     setShowPeriodPicker(false);
   }, [periodMode]);
 
+  const clearExpenseState = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setExpenses([]);
+    setBudgets([]);
+    setCategories([]);
+    setTags([]);
+    setRecurringExpenses([]);
+    setError('');
+    setSearchQuery('');
+    setFilterCategory(null);
+    setFilterPaymentMethod(null);
+    setFilterTag(null);
+    setFilterRecurring(null);
+    setFilterPaid(null);
+    setShowCombinedView(false);
+    setShowFilters(false);
+    setShowExpenseForm(false);
+    editingExpenseRef.current = null;
+    setEditingExpense(null);
+    setShowBudgetForm(false);
+    setEditingBudget(null);
+    setShowCategoryForm(false);
+    setEditingCategory(null);
+    setShowTagForm(false);
+    setEditingTag(null);
+    setShowReceiptWizard(false);
+    setExpensePendingDelete(null);
+    setCategoryPendingDelete(null);
+    setTagPendingDelete(null);
+    setDataFamilyId(null);
+    setLoading(true);
+    setBudgetsRefreshKey((k) => k + 1);
+  }, []);
+
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
-      if (!selectedFamily) return;
+      if (!selectedFamily) {
+        clearExpenseState();
+        setLoading(false);
+        return;
+      }
       const soft = !!opts?.soft;
+      const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
       if (!soft) setLoading(true);
       setError('');
@@ -144,46 +187,72 @@ export default function ExpensesHubScreen() {
         if (range.end_date) expenseFilters.end_date = range.end_date;
 
         const [cats, tagList, expList, budgetList, recurringList] = await Promise.all([
-          expenseService.getCategories(selectedFamily.id),
-          expenseService.getTags(selectedFamily.id),
-          expenseService.getExpenses(selectedFamily.id, expenseFilters),
-          expenseService.getBudgets(selectedFamily.id, true, {
+          expenseService.getCategories(familyId),
+          expenseService.getTags(familyId),
+          expenseService.getExpenses(familyId, expenseFilters),
+          expenseService.getBudgets(familyId, true, {
             asOf: range.asOf,
             budgetPeriod,
           }),
-          expenseService.getRecurringExpenses(selectedFamily.id),
+          expenseService.getRecurringExpenses(familyId),
         ]);
 
-        if (generation !== fetchGenerationRef.current) return;
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
 
         setCategories(cats);
         setTags(tagList);
         setExpenses(expList);
         setBudgets(budgetList);
         setRecurringExpenses(recurringList);
+        setDataFamilyId(familyId);
       } catch (err: any) {
-        if (generation !== fetchGenerationRef.current) return;
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setError(err.message || 'Failed to load');
+        setExpenses([]);
+        setBudgets([]);
+        setCategories([]);
+        setTags([]);
+        setRecurringExpenses([]);
+        setDataFamilyId(null);
       } finally {
-        if (generation === fetchGenerationRef.current) {
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
           setLoading(false);
         }
       }
     },
-    [selectedFamily, viewDate, periodMode]
+    [selectedFamily, viewDate, periodMode, clearExpenseState]
   );
+
+  useEffect(() => {
+    clearExpenseState();
+    if (!selectedFamily) setLoading(false);
+    // Only reset when the selected family changes — not on period/tab refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      if (activeTab === 'expenses' || activeTab === 'categories') {
-        void load({
-          soft: expenses.length > 0 || budgets.length > 0 || categories.length > 0,
-        });
-      } else if (selectedFamily && (activeTab === 'budgets' || activeTab === 'bills')) {
-        void expenseService.getCategories(selectedFamily.id).then(setCategories).catch(() => {});
-        void expenseService.getTags(selectedFamily.id).then(setTags).catch(() => {});
+      if (!selectedFamily) {
+        setLoading(false);
+        return;
       }
-    }, [selectedFamily?.id, activeTab, load])
+      // After a family switch dataFamilyId is null → hard load (no soft paint of prior family).
+      const sameFamily = dataFamilyId === selectedFamily.id;
+      void load({ soft: sameFamily && (expenses.length > 0 || categories.length > 0) });
+    }, [selectedFamily?.id, activeTab, load, dataFamilyId, expenses.length, categories.length])
   );
 
   const activePeriodMode: PeriodMode | null = periodMode === 'all' ? null : periodMode;
@@ -197,7 +266,7 @@ export default function ExpensesHubScreen() {
     periodMode === 'all' ? 'All expenses' : formatPeriodLabel(viewDate, periodMode);
 
   const filteredExpenses = useMemo(() => {
-    let list = [...expenses];
+    let list = selectedFamily ? forFamily(expenses, selectedFamily.id) : [];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(
@@ -242,6 +311,7 @@ export default function ExpensesHubScreen() {
     return list;
   }, [
     expenses,
+    selectedFamily,
     searchQuery,
     filterCategory,
     filterPaymentMethod,
@@ -959,11 +1029,23 @@ export default function ExpensesHubScreen() {
     );
   };
 
+  const familyKey = selectedFamily?.id ?? 'none';
+  const familyDataReady =
+    !!selectedFamily && dataFamilyId === selectedFamily.id && !loading;
+
   const renderContent = () => {
+    if (!familyDataReady) {
+      return (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      );
+    }
     switch (activeTab) {
       case 'budgets':
         return (
           <MonthBudgetCards
+            key={familyKey}
             refreshKey={budgetsRefreshKey}
             onExpensePress={(exp) => {
               void openExpenseEditor(exp);
@@ -980,13 +1062,14 @@ export default function ExpensesHubScreen() {
       case 'bills':
         return (
           <BillsBudgetsHub
+            key={familyKey}
             embedded
             yearTabEnabled={false}
             onPlanApplied={handlePlanApplied}
           />
         );
       case 'reports':
-        return <CashflowReport />;
+        return <CashflowReport key={familyKey} />;
       case 'categories':
         return renderCategoriesTab();
       default:

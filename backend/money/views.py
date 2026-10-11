@@ -26,6 +26,20 @@ def _parse_date(value):
     return datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
 
 
+def _apply_family_query_scope(queryset, request, view=None):
+    """Scope membership queryset to ?family=. List requires family (else empty)."""
+    family_raw = request.query_params.get('family')
+    if family_raw not in (None, ''):
+        try:
+            return queryset.filter(family_id=int(family_raw))
+        except (ValueError, TypeError):
+            return queryset.none()
+    action = getattr(view, 'action', None) if view is not None else None
+    if action == 'list':
+        return queryset.none()
+    return queryset
+
+
 def _member_for(user, family: Family):
     return Member.objects.filter(user=user, family=family).first()
 
@@ -65,13 +79,7 @@ class IncomeStreamViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = IncomeStream.objects.filter(family__members__user=user)
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                qs = qs.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
-        return qs
+        return _apply_family_query_scope(qs, self.request, self)
 
     def perform_create(self, serializer):
         family_id = self.request.data.get('family')
@@ -133,12 +141,7 @@ class IncomeOccurrenceViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = IncomeOccurrence.objects.filter(family__members__user=user).select_related('stream')
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                qs = qs.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        qs = _apply_family_query_scope(qs, self.request, self)
         stream_id = self.request.query_params.get('stream')
         if stream_id:
             try:
@@ -174,13 +177,7 @@ class AccountViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Account.objects.filter(family__members__user=user).prefetch_related('snapshots')
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                qs = qs.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
-        return qs
+        return _apply_family_query_scope(qs, self.request, self)
 
     def perform_create(self, serializer):
         family_id = self.request.data.get('family')
@@ -195,12 +192,7 @@ class AccountSnapshotViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = AccountSnapshot.objects.filter(family__members__user=user).select_related('account')
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                qs = qs.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        qs = _apply_family_query_scope(qs, self.request, self)
         account_id = self.request.query_params.get('account')
         if account_id:
             try:

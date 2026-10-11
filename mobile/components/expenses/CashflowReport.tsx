@@ -222,6 +222,8 @@ export default function CashflowReport() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   const ensuredYearRef = useRef('');
 
   const range = useMemo(() => periodDateRange(viewDate, 'month'), [viewDate]);
@@ -230,10 +232,11 @@ export default function CashflowReport() {
   const onTodayMonth = startOfPeriod(viewDate, 'month').getTime() === todayMonth.getTime();
 
   const ensureYearSchedule = useCallback(
-    async (month: Date, streamList: IncomeStream[]) => {
-      if (!selectedFamily || streamList.length === 0) return;
+    async (month: Date, streamList: IncomeStream[], familyId: number) => {
+      if (streamList.length === 0) return;
+      if (streamList.some((s) => s.family !== familyId)) return;
       const y = month.getFullYear();
-      const key = `${selectedFamily.id}:${y}:${streamList.map((s) => s.id).join(',')}`;
+      const key = `${familyId}:${y}:${streamList.map((s) => s.id).join(',')}`;
       if (ensuredYearRef.current === key) return;
       const yearStart = `${y}-01-01`;
       const yearEnd = `${y}-12-31`;
@@ -250,51 +253,107 @@ export default function CashflowReport() {
         // ignore auto-fill errors
       }
     },
-    [selectedFamily]
+    []
   );
+
+  const clearCashflowState = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setOccurrences([]);
+    setExpenses([]);
+    setBudgets([]);
+    setError('');
+    ensuredYearRef.current = '';
+    setLoading(true);
+  }, []);
 
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
-      if (!selectedFamily || !range.start_date || !range.end_date) return;
+      if (!selectedFamily || !range.start_date || !range.end_date) {
+        clearCashflowState();
+        setLoading(false);
+        return;
+      }
       const soft = !!opts?.soft;
+      const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
       if (!soft) setLoading(true);
       setError('');
       try {
-        const streams = await moneyService.getStreams(selectedFamily.id);
-        await ensureYearSchedule(viewDate, streams);
+        const streams = await moneyService.getStreams(familyId);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        await ensureYearSchedule(viewDate, streams, familyId);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         const [occs, expList, budgetList] = await Promise.all([
-          moneyService.getOccurrences(selectedFamily.id, {
+          moneyService.getOccurrences(familyId, {
             start_date: range.start_date,
             end_date: range.end_date,
           }),
-          expenseService.getExpenses(selectedFamily.id, {
+          expenseService.getExpenses(familyId, {
             start_date: range.start_date,
             end_date: range.end_date,
           }),
-          expenseService.getBudgets(selectedFamily.id, true, {
+          expenseService.getBudgets(familyId, true, {
             asOf: range.asOf,
             budgetPeriod: 'month',
           }),
         ]);
-        if (generation !== fetchGenerationRef.current) return;
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setOccurrences(occs);
         setExpenses(expList);
         setBudgets(budgetList);
       } catch (err: any) {
-        if (generation !== fetchGenerationRef.current) return;
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setError(err.message || 'Failed to load cashflow');
+        setOccurrences([]);
+        setExpenses([]);
+        setBudgets([]);
       } finally {
-        if (generation === fetchGenerationRef.current) {
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
           setLoading(false);
         }
       }
     },
-    [selectedFamily, range.start_date, range.end_date, range.asOf, viewDate, ensureYearSchedule]
+    [
+      selectedFamily,
+      range.start_date,
+      range.end_date,
+      range.asOf,
+      viewDate,
+      ensureYearSchedule,
+      clearCashflowState,
+    ]
   );
 
   useEffect(() => {
-    void load();
+    clearCashflowState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
+
+  useEffect(() => {
+    void load({ soft: false });
   }, [load]);
 
   const summary = useMemo(() => {
@@ -374,7 +433,7 @@ export default function CashflowReport() {
         <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
       ) : null}
 
-      {loading && occurrences.length === 0 && expenses.length === 0 ? (
+      {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>

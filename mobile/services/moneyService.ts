@@ -11,6 +11,7 @@ import {
   UpdateIncomeStreamData,
   UpdateMoneyAccountData,
 } from '../types/money';
+import { forFamily } from '../utils/familyScope';
 
 async function fetchAllPages<T>(
   initialPath: string,
@@ -39,10 +40,19 @@ async function fetchAllPages<T>(
   return items;
 }
 
+async function fetchFamilyPages<T extends { family?: number | null }>(
+  initialPath: string,
+  familyId: number,
+  params?: Record<string, any>
+): Promise<T[]> {
+  const items = await fetchAllPages<T>(initialPath, { family: familyId, ...params });
+  return forFamily(items, familyId);
+}
+
 class MoneyService {
   async getStreams(familyId: number): Promise<IncomeStream[]> {
     try {
-      return await fetchAllPages<IncomeStream>('/income-streams/', { family: familyId });
+      return await fetchFamilyPages<IncomeStream>('/income-streams/', familyId);
     } catch (error) {
       throw handleAPIError(error as any);
     }
@@ -93,10 +103,7 @@ class MoneyService {
     opts?: { stream?: number; start_date?: string; end_date?: string }
   ): Promise<IncomeOccurrence[]> {
     try {
-      return await fetchAllPages<IncomeOccurrence>('/income-occurrences/', {
-        family: familyId,
-        ...opts,
-      });
+      return await fetchFamilyPages<IncomeOccurrence>('/income-occurrences/', familyId, opts);
     } catch (error) {
       throw handleAPIError(error as any);
     }
@@ -124,7 +131,7 @@ class MoneyService {
 
   async getAccounts(familyId: number): Promise<MoneyAccount[]> {
     try {
-      return await fetchAllPages<MoneyAccount>('/money-accounts/', { family: familyId });
+      return await fetchFamilyPages<MoneyAccount>('/money-accounts/', familyId);
     } catch (error) {
       throw handleAPIError(error as any);
     }
@@ -158,8 +165,7 @@ class MoneyService {
 
   async getSnapshots(familyId: number, accountId?: number): Promise<AccountSnapshot[]> {
     try {
-      return await fetchAllPages<AccountSnapshot>('/account-snapshots/', {
-        family: familyId,
+      return await fetchFamilyPages<AccountSnapshot>('/account-snapshots/', familyId, {
         ...(accountId ? { account: accountId } : {}),
       });
     } catch (error) {

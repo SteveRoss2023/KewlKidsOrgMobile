@@ -26,6 +26,7 @@ import {
   CreateBudgetsFromRecurringResult,
   SyncPlanResult,
 } from '../types/expenses';
+import { forFamily } from '../utils/familyScope';
 
 /** Follow DRF `next` links until all pages are loaded. */
 async function fetchAllPages<T>(
@@ -69,6 +70,15 @@ async function fetchAllPages<T>(
   return items;
 }
 
+async function fetchFamilyPages<T extends { family?: number | null }>(
+  initialPath: string,
+  familyId: number,
+  params?: Record<string, any>
+): Promise<T[]> {
+  const items = await fetchAllPages<T>(initialPath, { family: familyId, ...params });
+  return forFamily(items, familyId);
+}
+
 /**
  * Expense Service
  */
@@ -78,9 +88,7 @@ class ExpenseService {
    */
   async getCategories(familyId: number): Promise<ExpenseCategory[]> {
     try {
-      return await fetchAllPages<ExpenseCategory>('/expense-categories/', {
-        family: familyId,
-      });
+      return await fetchFamilyPages<ExpenseCategory>('/expense-categories/', familyId);
     } catch (error) {
       console.error('Error fetching expense categories:', error);
       throw handleAPIError(error as any);
@@ -149,7 +157,7 @@ class ExpenseService {
     }
   ): Promise<Expense[]> {
     try {
-      const params: any = { family: familyId };
+      const params: Record<string, any> = {};
       if (filters) {
         if (filters.category) params.category = filters.category;
         if (filters.start_date) params.start_date = filters.start_date;
@@ -157,7 +165,7 @@ class ExpenseService {
         if (filters.payment_method) params.payment_method = filters.payment_method;
       }
 
-      return await fetchAllPages<Expense>('/expenses/', params);
+      return await fetchFamilyPages<Expense>('/expenses/', familyId, params);
     } catch (error) {
       console.error('Error fetching expenses:', error);
       throw handleAPIError(error as any);
@@ -289,12 +297,12 @@ class ExpenseService {
     options?: { asOf?: string; budgetPeriod?: 'month' | 'year' }
   ): Promise<Budget[]> {
     try {
-      const params: any = { family: familyId };
+      const params: Record<string, any> = {};
       if (isActive !== undefined) params.is_active = isActive.toString();
       if (options?.asOf) params.as_of = options.asOf;
       if (options?.budgetPeriod) params.budget_period = options.budgetPeriod;
 
-      return await fetchAllPages<Budget>('/budgets/', params);
+      return await fetchFamilyPages<Budget>('/budgets/', familyId, params);
     } catch (error) {
       console.error('Error fetching budgets:', error);
       throw handleAPIError(error as any);
@@ -377,10 +385,10 @@ class ExpenseService {
    */
   async getRecurringExpenses(familyId: number, isActive?: boolean): Promise<RecurringExpense[]> {
     try {
-      const params: any = { family: familyId };
+      const params: Record<string, any> = {};
       if (isActive !== undefined) params.is_active = isActive.toString();
 
-      return await fetchAllPages<RecurringExpense>('/recurring-expenses/', params);
+      return await fetchFamilyPages<RecurringExpense>('/recurring-expenses/', familyId, params);
     } catch (error) {
       console.error('Error fetching recurring expenses:', error);
       throw handleAPIError(error as any);
@@ -493,9 +501,7 @@ class ExpenseService {
    */
   async getTags(familyId: number): Promise<ExpenseTag[]> {
     try {
-      return await fetchAllPages<ExpenseTag>('/expense-tags/', {
-        family: familyId,
-      });
+      return await fetchFamilyPages<ExpenseTag>('/expense-tags/', familyId);
     } catch (error) {
       console.error('Error fetching expense tags:', error);
       throw handleAPIError(error as any);

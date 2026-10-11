@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -106,10 +106,28 @@ export default function MonthBudgetCards({
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const [budgetPendingDelete, setBudgetPendingDelete] = useState<Budget | null>(null);
+  const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+
+  const clearMonthCaches = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setBudgetsByMonth({});
+    setExpensesByMonth({});
+    setExpandedMonths(new Set());
+    setError('');
+    setYearLoading(true);
+  }, []);
 
   const loadYear = useCallback(
     async (y: number) => {
-      if (!selectedFamily) return;
+      if (!selectedFamily) {
+        clearMonthCaches();
+        setYearLoading(false);
+        return;
+      }
+      const familyId = selectedFamily.id;
+      const generation = ++fetchGenerationRef.current;
       setYearLoading(true);
       setError('');
       try {
@@ -117,44 +135,86 @@ export default function MonthBudgetCards({
           Array.from({ length: 12 }, async (_, monthIndex) => {
             const key = monthKey(y, monthIndex);
             const asOf = `${key}-01`;
-            const data = await expenseService.getBudgets(selectedFamily.id, true, { asOf });
+            const data = await expenseService.getBudgets(familyId, true, { asOf });
             return [key, data] as const;
           })
         );
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         const next: Record<string, Budget[]> = {};
         for (const [key, data] of results) {
           next[key] = data;
         }
         setBudgetsByMonth(next);
       } catch (err: any) {
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setError(err.message || 'Failed to load budgets');
+        setBudgetsByMonth({});
       } finally {
-        setYearLoading(false);
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
+          setYearLoading(false);
+        }
       }
     },
-    [selectedFamily]
+    [selectedFamily, clearMonthCaches]
   );
 
   const fetchMonthExpenses = useCallback(
     async (monthIndex: number, y: number) => {
       if (!selectedFamily) return;
+      const familyId = selectedFamily.id;
       const key = monthKey(y, monthIndex);
+      const generation = fetchGenerationRef.current;
       setLoadingMonth(monthIndex);
       try {
         const { start, end } = monthRange(y, monthIndex);
-        const data = await expenseService.getExpenses(selectedFamily.id, {
+        const data = await expenseService.getExpenses(familyId, {
           start_date: start,
           end_date: end,
         });
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setExpensesByMonth((prev) => ({ ...prev, [key]: data }));
       } catch (err: any) {
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
         setError(err.message || 'Failed to load expenses');
       } finally {
-        setLoadingMonth(null);
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
+          setLoadingMonth(null);
+        }
       }
     },
     [selectedFamily]
   );
+
+  useEffect(() => {
+    clearMonthCaches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -252,7 +312,7 @@ export default function MonthBudgetCards({
         </TouchableOpacity>
       </View>
 
-      {yearLoading && Object.keys(budgetsByMonth).length === 0 ? (
+      {yearLoading ? (
         <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
       ) : null}
 

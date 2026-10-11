@@ -17,6 +17,7 @@ from .serializers import (
     BudgetSerializer, RecurringExpenseSerializer, ReceiptSerializer
 )
 from .recurring_sync import sync_all_generated_from_template, sync_generated_expense_fields
+from .utils import apply_family_query_scope, ensure_default_categories
 from families.models import Family, Member
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -33,25 +34,19 @@ class ExpenseCategoryViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = ExpenseCategory.objects.filter(family__members__user=user)
 
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
+        family_raw = self.request.query_params.get('family')
+        if family_raw not in (None, ''):
             try:
-                family_id = int(family_id)
-                # Get the family first to ensure user has access
+                family_id = int(family_raw)
                 try:
                     family = Family.objects.get(id=family_id, members__user=user)
-                    # Ensure default categories exist for this family
-                    from .utils import ensure_default_categories
                     ensure_default_categories(family)
                 except Family.DoesNotExist:
                     pass
-
-                # Filter queryset after ensuring categories exist
-                queryset = queryset.filter(family_id=family_id)
             except (ValueError, TypeError):
                 pass
 
+        queryset = apply_family_query_scope(queryset, self.request, self)
         return queryset.order_by('order', 'name')
 
     def perform_create(self, serializer):
@@ -135,15 +130,7 @@ class ExpenseTagViewSet(viewsets.ModelViewSet):
         """Return tags for families the user belongs to."""
         user = self.request.user
         queryset = ExpenseTag.objects.filter(family__members__user=user)
-
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                queryset = queryset.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
-
+        queryset = apply_family_query_scope(queryset, self.request, self)
         return queryset.order_by('name')
 
     def perform_create(self, serializer):
@@ -164,14 +151,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         queryset = Expense.objects.filter(family__members__user=user).select_related(
             'category', 'recurring_expense'
         ).prefetch_related('tags', 'line_items')
-
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                queryset = queryset.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        queryset = apply_family_query_scope(queryset, self.request, self)
 
         # Filter by category if provided
         category_id = self.request.query_params.get('category')
@@ -460,14 +440,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
         """Return budgets for families the user belongs to."""
         user = self.request.user
         queryset = Budget.objects.filter(family__members__user=user)
-
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                queryset = queryset.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        queryset = apply_family_query_scope(queryset, self.request, self)
 
         # Filter by active status if provided
         is_active = self.request.query_params.get('is_active')
@@ -1080,14 +1053,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         """Return recurring expenses for families the user belongs to."""
         user = self.request.user
         queryset = RecurringExpense.objects.filter(family__members__user=user)
-
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                queryset = queryset.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        queryset = apply_family_query_scope(queryset, self.request, self)
 
         # Filter by active status if provided
         is_active = self.request.query_params.get('is_active')
@@ -1813,14 +1779,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         """Return receipts for families the user belongs to."""
         user = self.request.user
         queryset = Receipt.objects.filter(family__members__user=user)
-
-        # Filter by family if provided
-        family_id = self.request.query_params.get('family')
-        if family_id:
-            try:
-                queryset = queryset.filter(family_id=int(family_id))
-            except (ValueError, TypeError):
-                pass
+        queryset = apply_family_query_scope(queryset, self.request, self)
 
         # Filter by expense if provided
         expense_id = self.request.query_params.get('expense')

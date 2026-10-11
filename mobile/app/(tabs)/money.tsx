@@ -157,13 +157,18 @@ export default function MoneyScreen() {
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<MoneyAccount | null>(null);
   const [pendingDeleteSnapshot, setPendingDeleteSnapshot] = useState<AccountSnapshot | null>(null);
   const [pendingDeleteOcc, setPendingDeleteOcc] = useState<IncomeOccurrence | null>(null);
-  const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
+  const { showAmounts, setShowAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const [demoPortfolio, setDemoPortfolio] = useState(false);
   const [expandedStreamIds, setExpandedStreamIds] = useState<number[]>([]);
   const [expandedIncomeMonth, setExpandedIncomeMonth] = useState<string | null>(null);
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
   const [ytdAccountsExpanded, setYtdAccountsExpanded] = useState(false);
   const ensuredYearRef = useRef('');
+  const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+  /** Family id whose money data is currently in state (null while clearing / loading). */
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
 
   const loadDemoPortfolioPref = useCallback(async () => {
     const user = await AuthService.getUserData();
@@ -249,34 +254,103 @@ export default function MoneyScreen() {
     return () => clearTimeout(t);
   }, [showSnapForm]);
 
+  const clearMoneyState = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setStreams([]);
+    setOccurrences([]);
+    setAccounts([]);
+    setSnapshots([]);
+    setSelectedStreamId(null);
+    setSelectedAccountId(null);
+    setExpandedStreamIds([]);
+    setExpandedIncomeMonth(null);
+    setExpandedAccountId(null);
+    setYtdAccountsExpanded(false);
+    setExpandedTargetRates([]);
+    setShowStreamForm(false);
+    setEditingStream(null);
+    setEditingOcc(null);
+    setShowAccountForm(false);
+    setEditingAccount(null);
+    setShowSnapForm(false);
+    setShowBalancesWizard(false);
+    setEditingSnapshotId(null);
+    setPendingDeleteStream(null);
+    setPendingDeleteAccount(null);
+    setPendingDeleteSnapshot(null);
+    setPendingDeleteOcc(null);
+    ensuredYearRef.current = '';
+    setError('');
+    setDataFamilyId(null);
+    setLoading(true);
+  }, []);
+
   const load = useCallback(async () => {
-    if (!selectedFamily) return;
+    if (!selectedFamily) {
+      clearMoneyState();
+      setLoading(false);
+      return;
+    }
+    const familyId = selectedFamily.id;
+    const generation = ++fetchGenerationRef.current;
     setLoading(true);
     setError('');
     try {
       const [s, o, a, sn] = await Promise.all([
-        moneyService.getStreams(selectedFamily.id),
-        moneyService.getOccurrences(selectedFamily.id),
-        moneyService.getAccounts(selectedFamily.id),
-        moneyService.getSnapshots(selectedFamily.id),
+        moneyService.getStreams(familyId),
+        moneyService.getOccurrences(familyId),
+        moneyService.getAccounts(familyId),
+        moneyService.getSnapshots(familyId),
       ]);
+      if (
+        generation !== fetchGenerationRef.current ||
+        selectedFamilyIdRef.current !== familyId
+      ) {
+        return;
+      }
       setStreams(s);
       setOccurrences(o);
       setAccounts(a);
       setSnapshots(sn);
-      setSelectedStreamId((prev) => prev ?? (s[0]?.id ?? null));
-      setSelectedAccountId((prev) => prev ?? (a[0]?.id ?? null));
+      setSelectedStreamId(s[0]?.id ?? null);
+      setSelectedAccountId(a[0]?.id ?? null);
+      setDataFamilyId(familyId);
     } catch (err: any) {
+      if (
+        generation !== fetchGenerationRef.current ||
+        selectedFamilyIdRef.current !== familyId
+      ) {
+        return;
+      }
       setError(err.message || 'Failed to load money data');
+      setStreams([]);
+      setOccurrences([]);
+      setAccounts([]);
+      setSnapshots([]);
+      setSelectedStreamId(null);
+      setSelectedAccountId(null);
+      setDataFamilyId(null);
     } finally {
-      setLoading(false);
+      if (
+        generation === fetchGenerationRef.current &&
+        selectedFamilyIdRef.current === familyId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [selectedFamily]);
+  }, [selectedFamily, clearMoneyState]);
+
+  useEffect(() => {
+    clearMoneyState();
+    if (!selectedFamily) setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      if (selectedFamily) void load();
+      else setLoading(false);
+    }, [load, selectedFamily])
   );
 
   const incomeViewYear = incomeViewMonth.getFullYear();
@@ -483,6 +557,8 @@ export default function MoneyScreen() {
   const ensureYearSchedule = useCallback(
     async (month: Date, streamList: IncomeStream[]) => {
       if (!selectedFamily || streamList.length === 0) return;
+      if (dataFamilyId !== selectedFamily.id) return;
+      if (streamList.some((s) => s.family !== selectedFamily.id)) return;
       const y = month.getFullYear();
       const key = `${selectedFamily.id}:${y}:${streamList.map((s) => s.id).join(',')}`;
       if (ensuredYearRef.current === key) return;
@@ -504,13 +580,14 @@ export default function MoneyScreen() {
         // ignore auto-fill errors; user can navigate again
       }
     },
-    [selectedFamily, load]
+    [selectedFamily, dataFamilyId, load]
   );
 
   useEffect(() => {
     if (tab !== 'income' || streams.length === 0) return;
+    if (!selectedFamily || dataFamilyId !== selectedFamily.id) return;
     void ensureYearSchedule(incomeViewMonth, streams);
-  }, [tab, incomeSubTab, streams, incomeViewMonth, ensureYearSchedule]);
+  }, [tab, incomeSubTab, streams, incomeViewMonth, ensureYearSchedule, selectedFamily, dataFamilyId]);
 
   const openOcc = (o: IncomeOccurrence) => {
     setEditingOcc(o);
@@ -1930,7 +2007,7 @@ export default function MoneyScreen() {
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>Select a family first</Text>
         </View>
-      ) : loading && streams.length === 0 && accounts.length === 0 ? (
+      ) : loading || (selectedFamily != null && dataFamilyId !== selectedFamily.id) ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>

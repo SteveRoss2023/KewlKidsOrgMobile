@@ -3,6 +3,7 @@ import { formatCurrency } from '../utils/moneyInput';
 
 type ShowAmountsContextValue = {
   showAmounts: boolean;
+  setShowAmounts: (value: boolean) => void;
   toggleShowAmounts: () => void;
   /** Format a money value, or ***** when amounts are hidden. */
   displayMoney: (value: number | string | null | undefined, empty?: string) => string;
@@ -34,7 +35,7 @@ export function ShowAmountsProvider({ children }: { children: React.ReactNode })
   );
 
   const value = useMemo(
-    () => ({ showAmounts, toggleShowAmounts, displayMoney }),
+    () => ({ showAmounts, setShowAmounts, toggleShowAmounts, displayMoney }),
     [showAmounts, toggleShowAmounts, displayMoney]
   );
 

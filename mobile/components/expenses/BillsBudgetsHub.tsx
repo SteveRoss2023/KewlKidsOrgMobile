@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -63,26 +63,72 @@ export default function BillsBudgetsHub({
   const [showBillForm, setShowBillForm] = useState(false);
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [saving, setSaving] = useState(false);
+  const fetchGenerationRef = useRef(0);
+  const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
+  selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+
+  const clearBillsState = useCallback(() => {
+    fetchGenerationRef.current += 1;
+    setBills([]);
+    setBudgets([]);
+    setCategories([]);
+    setError('');
+    setShowBillForm(false);
+    setEditingBill(null);
+    setShowWizard(false);
+    setLoading(true);
+  }, []);
 
   const load = useCallback(async () => {
-    if (!selectedFamily) return;
+    if (!selectedFamily) {
+      clearBillsState();
+      setLoading(false);
+      return;
+    }
+    const familyId = selectedFamily.id;
+    const generation = ++fetchGenerationRef.current;
     setLoading(true);
     setError('');
     try {
       const [billsData, budgetsData, cats] = await Promise.all([
-        expenseService.getRecurringExpenses(selectedFamily.id),
-        expenseService.getBudgets(selectedFamily.id, true),
-        expenseService.getCategories(selectedFamily.id),
+        expenseService.getRecurringExpenses(familyId),
+        expenseService.getBudgets(familyId, true),
+        expenseService.getCategories(familyId),
       ]);
+      if (
+        generation !== fetchGenerationRef.current ||
+        selectedFamilyIdRef.current !== familyId
+      ) {
+        return;
+      }
       setBills(billsData);
       setBudgets(budgetsData);
       setCategories(cats);
     } catch (err: any) {
+      if (
+        generation !== fetchGenerationRef.current ||
+        selectedFamilyIdRef.current !== familyId
+      ) {
+        return;
+      }
       setError(err.message || 'Failed to load bills and budgets');
+      setBills([]);
+      setBudgets([]);
+      setCategories([]);
     } finally {
-      setLoading(false);
+      if (
+        generation === fetchGenerationRef.current &&
+        selectedFamilyIdRef.current === familyId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [selectedFamily]);
+  }, [selectedFamily, clearBillsState]);
+
+  useEffect(() => {
+    clearBillsState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -92,17 +138,25 @@ export default function BillsBudgetsHub({
 
   const activeBills = useMemo(
     () =>
-      [...bills.filter((b) => b.is_active)].sort((a, b) =>
-        a.description.localeCompare(b.description)
-      ),
-    [bills]
+      [
+        ...bills.filter(
+          (b) =>
+            b.is_active &&
+            (!selectedFamily || Number(b.family) === Number(selectedFamily.id))
+        ),
+      ].sort((a, b) => a.description.localeCompare(b.description)),
+    [bills, selectedFamily]
   );
   const inactiveBills = useMemo(
     () =>
-      [...bills.filter((b) => !b.is_active)].sort((a, b) =>
-        a.description.localeCompare(b.description)
-      ),
-    [bills]
+      [
+        ...bills.filter(
+          (b) =>
+            !b.is_active &&
+            (!selectedFamily || Number(b.family) === Number(selectedFamily.id))
+        ),
+      ].sort((a, b) => a.description.localeCompare(b.description)),
+    [bills, selectedFamily]
   );
 
   const thisMonthBudgetTotal = useMemo(
@@ -153,7 +207,7 @@ export default function BillsBudgetsHub({
     );
   }
 
-  if (loading && bills.length === 0) {
+  if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
