@@ -11,6 +11,7 @@ import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import expenseService from '../../services/expenseService';
 import {
   Budget,
@@ -24,7 +25,6 @@ import RecurringExpenseForm from './RecurringExpenseForm';
 import UpdatePlanWizard from './UpdatePlanWizard';
 import YearBudgetOverview from './YearBudgetOverview';
 import AlertModal from '../AlertModal';
-import { formatCurrency } from '../../utils/moneyInput';
 
 type HubTab = 'bills' | 'year';
 
@@ -47,6 +47,7 @@ export default function BillsBudgetsHub({
 }: BillsBudgetsHubProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
+  const { displayMoney } = useShowAmounts();
 
   const [hubTab, setHubTab] = useState<HubTab>(
     yearTabEnabled ? initialTab : 'bills'
@@ -220,7 +221,7 @@ export default function BillsBudgetsHub({
         </View>
         <View style={styles.summaryItem}>
           <Text style={[styles.summaryValue, { color: colors.primary }]}>
-            {formatCurrency(thisMonthBudgetTotal)}
+            {displayMoney(thisMonthBudgetTotal)}
           </Text>
           <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
             This month limits

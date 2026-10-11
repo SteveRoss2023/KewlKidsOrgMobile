@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { FamilyProvider } from '../contexts/FamilyContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
+import { ShowAmountsProvider } from '../contexts/ShowAmountsContext';
 import navigationService from '../services/navigationService';
 
 export default function RootLayout() {
@@ -204,20 +205,22 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <FamilyProvider>
-            <View style={{ flex: 1 }}>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  animation: 'slide_from_right',
-                }}
-              >
-                <Stack.Screen name="index" />
-                <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              </Stack>
-            </View>
-          </FamilyProvider>
+          <ShowAmountsProvider>
+            <FamilyProvider>
+              <View style={{ flex: 1 }}>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    animation: 'slide_from_right',
+                  }}
+                >
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                </Stack>
+              </View>
+            </FamilyProvider>
+          </ShowAmountsProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

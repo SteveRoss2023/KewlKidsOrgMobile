@@ -14,6 +14,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import moneyService from '../../services/moneyService';
 import {
   AccountSnapshot,
@@ -31,7 +32,7 @@ import UpdateBalancesWizard, {
   firstOfMonthYmd,
 } from '../../components/money/UpdateBalancesWizard';
 import TooltipButton from '../../components/TooltipButton';
-import { formatCurrency, formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
+import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 import AuthService from '../../services/authService';
 import { STORAGE_KEYS, storage } from '../../utils/storage';
 import {
@@ -156,7 +157,7 @@ export default function MoneyScreen() {
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<MoneyAccount | null>(null);
   const [pendingDeleteSnapshot, setPendingDeleteSnapshot] = useState<AccountSnapshot | null>(null);
   const [pendingDeleteOcc, setPendingDeleteOcc] = useState<IncomeOccurrence | null>(null);
-  const [showAmounts, setShowAmounts] = useState(false);
+  const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const [demoPortfolio, setDemoPortfolio] = useState(false);
   const [expandedStreamIds, setExpandedStreamIds] = useState<number[]>([]);
   const [expandedIncomeMonth, setExpandedIncomeMonth] = useState<string | null>(null);
@@ -215,16 +216,6 @@ export default function MoneyScreen() {
       setShowBalancesWizard(true);
     }
   }, [params.tab, params.updateBalances]);
-
-  const toggleShowAmounts = () => {
-    setShowAmounts((prev) => !prev);
-  };
-
-  const displayMoney = (value: number | null | undefined, empty = '—') => {
-    if (value == null || Number.isNaN(value)) return empty;
-    if (!showAmounts) return '*****';
-    return formatCurrency(value);
-  };
 
   /** Account balances only — optional personal demo overlay (never written to the server). */
   const displayAccountMoney = (

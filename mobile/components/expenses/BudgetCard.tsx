@@ -14,7 +14,7 @@ import {
 import { FontAwesome } from '@expo/vector-icons';
 import { Budget, Expense } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
-import { formatCurrency } from '../../utils/moneyInput';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 interface BudgetCardProps {
@@ -73,6 +73,7 @@ export default function BudgetCard({
   paidToggleExpenseId,
 }: BudgetCardProps) {
   const { colors } = useTheme();
+  const { displayMoney } = useShowAmounts();
   const [expanded, setExpanded] = useState(false);
   const [receiptExpense, setReceiptExpense] = useState<Expense | null>(null);
   const [imageLoading, setImageLoading] = useState(true);
@@ -187,11 +188,11 @@ export default function BudgetCard({
       </View>
 
       <Text style={[styles.amount, { color: colors.primary }]} numberOfLines={1}>
-        {formatCurrency(spent)}
+        {displayMoney(spent)}
         {showBudgetLimit ? (
           <Text style={[styles.amountDivider, { color: colors.textSecondary }]}>
             {' / '}
-            {formatCurrency(amount)}
+            {displayMoney(amount)}
           </Text>
         ) : null}
       </Text>
@@ -213,7 +214,7 @@ export default function BudgetCard({
       <View style={styles.footer}>
         <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
           {showBudgetLimit
-            ? `${percentageUsed.toFixed(0)}% · ${formatCurrency(remaining)} left`
+            ? `${percentageUsed.toFixed(0)}% · ${displayMoney(remaining)} left`
             : `${sortedItems.length} ${sortedItems.length === 1 ? 'expense' : 'expenses'}`}
         </Text>
         {statusLabel ? (
@@ -346,7 +347,7 @@ export default function BudgetCard({
                       ]}
                       numberOfLines={1}
                     >
-                      {formatCurrency(expense.amount)}
+                      {displayMoney(expense.amount)}
                     </Text>
                   </View>
                 </View>

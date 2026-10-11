@@ -12,11 +12,11 @@ import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import expenseService from '../../services/expenseService';
 import { Budget, Expense } from '../../types/expenses';
 import BudgetCard from './BudgetCard';
 import AlertModal from '../AlertModal';
-import { formatCurrency } from '../../utils/moneyInput';
 
 const MONTH_NAMES = [
   'January',
@@ -91,6 +91,7 @@ export default function MonthBudgetCards({
 }: MonthBudgetCardsProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
+  const { displayMoney } = useShowAmounts();
   const { width: windowWidth } = useWindowDimensions();
   const columns = gridColumns(windowWidth);
   const now = new Date();
@@ -289,13 +290,13 @@ export default function MonthBudgetCards({
           // Card inner width for amount line (grid pad + card pad + chevron).
           const amountMaxWidth =
             windowWidth / (spanFull ? 1 : columns) - 8 - 24 - 20;
-          const spentLabel = formatCurrency(totalSpent);
-          const limitLabel = formatCurrency(totalLimit);
+          const spentLabel = displayMoney(totalSpent);
+          const limitLabel = displayMoney(totalLimit);
           const amountsText = `${spentLabel} / ${limitLabel}`;
           const amountFontSize = fitFontSize(amountsText, amountMaxWidth, 15, 9);
           const metaLabel =
             totalLimit > 0
-              ? `${pct.toFixed(0)}% · ${formatCurrency(remaining)} left`
+              ? `${pct.toFixed(0)}% · ${displayMoney(remaining)} left`
               : `${budgets.length} categories`;
           const metaFontSize = fitFontSize(metaLabel, amountMaxWidth, 11, 8);
 
@@ -487,7 +488,7 @@ export default function MonthBudgetCards({
       title="Delete budget?"
       message={
         budgetPendingDelete
-          ? `Delete ${budgetPendingDelete.category_name || 'this'} budget for ${formatCurrency(budgetPendingDelete.amount)}? This cannot be undone.`
+          ? `Delete ${budgetPendingDelete.category_name || 'this'} budget for ${displayMoney(budgetPendingDelete.amount)}? This cannot be undone.`
           : ''
       }
       type="warning"

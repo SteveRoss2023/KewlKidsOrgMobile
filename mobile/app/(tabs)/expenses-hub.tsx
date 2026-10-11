@@ -14,7 +14,9 @@ import { FontAwesome } from '@expo/vector-icons';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import expenseService from '../../services/expenseService';
+import TooltipButton from '../../components/TooltipButton';
 import {
   Budget,
   Expense,
@@ -39,12 +41,12 @@ import BudgetForm from '../../components/expenses/BudgetForm';
 import CategoryForm from '../../components/expenses/CategoryForm';
 import TagForm from '../../components/expenses/TagForm';
 import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
+import CashflowReport from '../../components/expenses/CashflowReport';
 import RecurringExpenseRow, {
   formatOccurrenceDate,
 } from '../../components/expenses/RecurringExpenseRow';
 import AlertModal from '../../components/AlertModal';
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
-import { formatCurrency } from '../../utils/moneyInput';
 import {
   PeriodMode,
   PeriodModeOrAll,
@@ -72,6 +74,7 @@ function parseExpenseDate(dateString: string): Date {
 export default function ExpensesHubScreen() {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
+  const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const { width: windowWidth } = useWindowDimensions();
 
   const [activeTab, setActiveTab] = useState<HubTab>('budgets');
@@ -93,6 +96,8 @@ export default function ExpensesHubScreen() {
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<PaymentMethod | null>(null);
   const [filterTag, setFilterTag] = useState<number | null>(null);
   const [filterRecurring, setFilterRecurring] = useState<boolean | null>(null);
+  /** null = all, true = paid, false = unpaid */
+  const [filterPaid, setFilterPaid] = useState<boolean | null>(null);
   const [showCombinedView, setShowCombinedView] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -217,6 +222,11 @@ export default function ExpensesHubScreen() {
         ? list.filter((exp) => exp.is_recurring && exp.recurring_expense !== null)
         : list.filter((exp) => !exp.is_recurring || exp.recurring_expense === null);
     }
+    if (filterPaid !== null) {
+      list = filterPaid
+        ? list.filter((exp) => exp.is_paid !== false)
+        : list.filter((exp) => exp.is_paid === false);
+    }
     list.sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'date') {
@@ -237,6 +247,7 @@ export default function ExpensesHubScreen() {
     filterPaymentMethod,
     filterTag,
     filterRecurring,
+    filterPaid,
     sortBy,
     sortOrder,
   ]);
@@ -245,7 +256,8 @@ export default function ExpensesHubScreen() {
     filterCategory ||
     filterPaymentMethod ||
     filterTag ||
-    filterRecurring !== null
+    filterRecurring !== null ||
+    filterPaid !== null
   );
 
   const periodPaid = useMemo(
@@ -653,6 +665,22 @@ export default function ExpensesHubScreen() {
               />
             </View>
             <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Status</Text>
+              <ThemeAwarePicker
+                selectedValue={filterPaid === null ? '' : filterPaid ? 'paid' : 'unpaid'}
+                onValueChange={(value) => {
+                  if (value === 'paid') setFilterPaid(true);
+                  else if (value === 'unpaid') setFilterPaid(false);
+                  else setFilterPaid(null);
+                }}
+                options={[
+                  { label: 'All', value: '' },
+                  { label: 'Paid', value: 'paid' },
+                  { label: 'Unpaid', value: 'unpaid' },
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
               <Text style={[styles.filterLabel, { color: colors.text }]}>Sort</Text>
               <ThemeAwarePicker
                 selectedValue={`${sortBy}_${sortOrder}`}
@@ -699,6 +727,7 @@ export default function ExpensesHubScreen() {
                 setFilterPaymentMethod(null);
                 setFilterTag(null);
                 setFilterRecurring(null);
+                setFilterPaid(null);
                 setSortBy('date');
                 setSortOrder('desc');
                 setShowCombinedView(false);
@@ -757,12 +786,12 @@ export default function ExpensesHubScreen() {
         )}
         <Text style={[styles.monthSummary, { color: colors.textSecondary }]}>
           <Text style={{ color: colors.primary, fontWeight: '700' }}>
-            {formatCurrency(periodPaid)}
+            {displayMoney(periodPaid)}
           </Text>
           {periodMode !== 'all' ? (
             <>
               {' / '}
-              {formatCurrency(periodBudgetTotal)}
+              {displayMoney(periodBudgetTotal)}
             </>
           ) : null}
           {' · '}
@@ -957,12 +986,7 @@ export default function ExpensesHubScreen() {
           />
         );
       case 'reports':
-        return (
-          <View style={styles.center}>
-            <FontAwesome name="bar-chart" size={48} color={colors.textSecondary} />
-            <Text style={[styles.empty, { color: colors.textSecondary }]}>Reports coming soon</Text>
-          </View>
-        );
+        return <CashflowReport />;
       case 'categories':
         return renderCategoriesTab();
       default:
@@ -980,6 +1004,23 @@ export default function ExpensesHubScreen() {
         ]}
       >
         <Text style={[styles.topTitle, { color: colors.text }]}>Expense Tracker</Text>
+        <TooltipButton
+          tooltip={showAmounts ? 'Hide amounts' : 'Show amounts'}
+          style={styles.amountToggle}
+          onPress={toggleShowAmounts}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: showAmounts }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <FontAwesome
+            name={showAmounts ? 'eye' : 'eye-slash'}
+            size={16}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.amountToggleText, { color: colors.textSecondary }]}>
+            {showAmounts ? 'Hide amounts' : 'Show amounts'}
+          </Text>
+        </TooltipButton>
       </View>
 
       <View
@@ -1169,6 +1210,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   topTitle: { fontSize: 16, fontWeight: '700' },
+  amountToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+  },
+  amountToggleText: { fontSize: 12, fontWeight: '600' },
   tabContainer: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingVertical: 8,

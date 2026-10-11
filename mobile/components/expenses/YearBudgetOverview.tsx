@@ -11,6 +11,7 @@ import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import expenseService from '../../services/expenseService';
 import {
   Budget,
@@ -20,7 +21,6 @@ import {
 } from '../../types/expenses';
 import BudgetForm from './BudgetForm';
 import AlertModal from '../AlertModal';
-import { formatCurrency } from '../../utils/moneyInput';
 
 const MONTH_NAMES = [
   'January',
@@ -58,6 +58,7 @@ export default function YearBudgetOverview({
   compact = false,
 }: YearBudgetOverviewProps) {
   const { colors } = useTheme();
+  const { displayMoney } = useShowAmounts();
   const { selectedFamily } = useFamily();
 
   const now = new Date();
@@ -239,7 +240,7 @@ export default function YearBudgetOverview({
                 />
                 <Text style={[styles.monthName, { color: colors.text }]}>{name}</Text>
                 <Text style={[styles.monthTotal, { color: colors.primary }]}>
-                  {total == null ? (yearLoading ? '…' : '—') : formatCurrency(total)}
+                  {total == null ? (yearLoading ? '…' : '—') : displayMoney(total)}
                 </Text>
               </TouchableOpacity>
 
@@ -276,12 +277,12 @@ export default function YearBudgetOverview({
                             <Text style={[styles.categoryMeta, { color: colors.textSecondary }]}>
                               {budget.period}
                               {toAmt(budget.spent_amount) > 0
-                                ? ` · spent ${formatCurrency(budget.spent_amount)}`
+                                ? ` · spent ${displayMoney(budget.spent_amount)}`
                                 : ''}
                             </Text>
                           </TouchableOpacity>
                           <Text style={[styles.categoryAmt, { color: colors.primary }]}>
-                            {formatCurrency(budget.amount)}
+                            {displayMoney(budget.amount)}
                           </Text>
                           <TouchableOpacity
                             style={styles.iconBtn}
