@@ -10,6 +10,8 @@ export const STORAGE_KEYS = {
   REFRESH_TOKEN: 'refresh_token',
   USER_DATA: 'user_data',
   FAMILY_ID: 'selected_family_id',
+  /** Per-user key prefix: money_demo_portfolio:<email> */
+  MONEY_DEMO_PORTFOLIO: 'money_demo_portfolio',
 } as const;
 
 /**

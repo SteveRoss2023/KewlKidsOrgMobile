@@ -106,6 +106,13 @@ export default function HomeScreen() {
       color: '#22c55e',
     },
     {
+      id: 'money',
+      title: 'Money',
+      description: 'Income, accounts, and growth forecasts',
+      icon: '📈',
+      color: '#0d9488',
+    },
+    {
       id: 'map',
       title: 'Map',
       description: 'Location sharing and tracking',
@@ -462,6 +469,8 @@ export default function HomeScreen() {
       case 'finance':
         router.push('/(tabs)/expenses-hub');
         break;
+      case 'money':
+        router.push('/(tabs)/money');
         break;
       case 'map':
         router.push('/(tabs)/map');

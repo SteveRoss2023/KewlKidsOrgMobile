@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'events',
     'chat',
     'expenses.apps.ExpensesConfig',
+    'money.apps.MoneyConfig',
 
     'django.contrib.staticfiles',
 

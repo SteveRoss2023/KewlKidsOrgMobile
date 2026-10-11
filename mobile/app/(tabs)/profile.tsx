@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Modal,
   Platform,
   Alert,
+  Switch,
 } from 'react-native';
 import { FontAwesome, Ionicons } from '@expo/vector-icons';
 // Conditionally import expo-image-picker only on native platforms to avoid Jimp errors on web
@@ -27,8 +28,10 @@ import { APIError } from '../../services/api';
 import { useTheme } from '../../contexts/ThemeContext';
 import GlobalNavBar from '../../components/GlobalNavBar';
 import AuthenticatedImage from '../../components/AuthenticatedImage';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AuthService from '../../services/authService';
+import { STORAGE_KEYS, storage } from '../../utils/storage';
+import { canUseMoneyDemoPortfolio } from '../../utils/moneyDemoPortfolio';
 
 export default function ProfileScreen() {
   const { colors } = useTheme();
@@ -45,11 +48,43 @@ export default function ProfileScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [photoCacheBuster, setPhotoCacheBuster] = useState<number>(Date.now());
+  const [canDemoPortfolio, setCanDemoPortfolio] = useState(false);
+  const [demoPortfolio, setDemoPortfolio] = useState(false);
+  const [showDemoControl, setShowDemoControl] = useState(false);
 
   useEffect(() => {
     fetchProfile();
     requestImagePickerPermission();
   }, []);
+
+  const loadDemoPref = useCallback(async () => {
+    const user = await AuthService.getUserData();
+    const email = user?.email || profile?.email || null;
+    const allowed = canUseMoneyDemoPortfolio(email);
+    setCanDemoPortfolio(allowed);
+    if (!allowed || !email) {
+      setDemoPortfolio(false);
+      setShowDemoControl(false);
+      return;
+    }
+    const key = `${STORAGE_KEYS.MONEY_DEMO_PORTFOLIO}:${email.toLowerCase()}`;
+    const v = await storage.getItem(key);
+    setDemoPortfolio(v === '1');
+  }, [profile?.email]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadDemoPref();
+    }, [loadDemoPref])
+  );
+
+  const toggleDemoPortfolio = async (next: boolean) => {
+    const email = profile?.email || (await AuthService.getUserData())?.email;
+    if (!canUseMoneyDemoPortfolio(email) || !email) return;
+    setDemoPortfolio(next);
+    const key = `${STORAGE_KEYS.MONEY_DEMO_PORTFOLIO}:${email.toLowerCase()}`;
+    await storage.setItem(key, next ? '1' : '0');
+  };
 
   const requestImagePickerPermission = async () => {
     if (Platform.OS !== 'web' && ImagePicker) {
@@ -577,6 +612,51 @@ export default function ProfileScreen() {
           <Text style={[styles.logoutLabel, { color: colors.error }]}>Logout</Text>
         </TouchableOpacity>
 
+        {/* Personal-only: long-press the quiet footer to reveal demo portfolio overlay */}
+        {canDemoPortfolio ? (
+          <View style={styles.hiddenDemoWrap}>
+            {!showDemoControl ? (
+              <TouchableOpacity
+                onLongPress={() => setShowDemoControl(true)}
+                delayLongPress={800}
+                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
+                accessibilityLabel="Account display options"
+              >
+                <Text style={[styles.hiddenDemoHint, { color: colors.textSecondary }]}>
+                  v{Platform.OS === 'web' ? 'web' : 'app'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={[
+                  styles.hiddenDemoPanel,
+                  { borderColor: colors.border, backgroundColor: colors.surface },
+                ]}
+              >
+                <View style={styles.hiddenDemoRow}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={[styles.hiddenDemoTitle, { color: colors.textSecondary }]}>
+                      Enhanced balances
+                    </Text>
+                    <Text style={[styles.hiddenDemoSub, { color: colors.textSecondary }]}>
+                      Display-only for Money: RRSP +$1.5M, Non-reg +$2M, employment pay +$15k each.
+                      Does not change saved amounts.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={demoPortfolio}
+                    onValueChange={(v) => void toggleDemoPortfolio(v)}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                  />
+                </View>
+                <TouchableOpacity onPress={() => setShowDemoControl(false)}>
+                  <Text style={[styles.hiddenDemoHide, { color: colors.textSecondary }]}>Hide</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         {/* Photo Viewer Modal */}
         {showPhotoViewer && getPhotoUrl() && (
           <Modal
@@ -965,6 +1045,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 8,
+  },
+  hiddenDemoWrap: {
+    marginTop: 28,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  hiddenDemoHint: {
+    fontSize: 11,
+    opacity: 0.35,
+    letterSpacing: 0.5,
+  },
+  hiddenDemoPanel: {
+    width: '100%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+    opacity: 0.92,
+  },
+  hiddenDemoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  hiddenDemoTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  hiddenDemoSub: {
+    fontSize: 11,
+    marginTop: 3,
+    lineHeight: 15,
+    opacity: 0.85,
+  },
+  hiddenDemoHide: {
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 2,
+    opacity: 0.7,
   },
 });
 

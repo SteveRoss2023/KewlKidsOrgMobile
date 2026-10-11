@@ -229,6 +229,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="money"
+        options={{
+          href: null, // Hide from tab bar - Money (income / accounts / forecast)
+        }}
+      />
+      <Tabs.Screen
         name="bills-budgets"
         options={{
           href: null, // Hide from tab bar - Bills & Budgets hub
