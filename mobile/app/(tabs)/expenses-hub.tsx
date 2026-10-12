@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  useWindowDimensions,
-  TextInput,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -22,8 +20,6 @@ import {
   Expense,
   ExpenseCategory,
   ExpenseTag,
-  PaymentMethod,
-  RecurringExpense,
   CreateExpenseData,
   UpdateExpenseData,
   CreateExpenseCategoryData,
@@ -35,74 +31,29 @@ import {
 } from '../../types/expenses';
 import BudgetDashboard from '../../components/expenses/BudgetDashboard';
 import ExpenseDashboard from '../../components/expenses/ExpenseDashboard';
-import BillsBudgetsHub from '../../components/expenses/BillsBudgetsHub';
-import BudgetCard from '../../components/expenses/BudgetCard';
+import BillsDashboard from '../../components/expenses/BillsDashboard';
 import ExpenseForm from '../../components/expenses/ExpenseForm';
 import BudgetForm from '../../components/expenses/BudgetForm';
 import CategoryForm from '../../components/expenses/CategoryForm';
 import TagForm from '../../components/expenses/TagForm';
 import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
 import CashflowDashboard from '../../components/expenses/CashflowDashboard';
-import RecurringExpenseRow, {
-  formatOccurrenceDate,
-} from '../../components/expenses/RecurringExpenseRow';
 import AlertModal from '../../components/AlertModal';
-import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
-import {
-  PeriodMode,
-  PeriodModeOrAll,
-  PERIOD_OPTIONS,
-  formatPeriodLabel,
-  periodDateRange,
-  shiftPeriod,
-  startOfPeriod,
-} from '../../utils/expensePeriods';
 import { forFamily } from '../../utils/familyScope';
 
-type HubTab = 'overview' | 'budgets' | 'expense-board' | 'expenses' | 'bills' | 'categories';
-type SortBy = 'date' | 'amount' | 'category';
-type SortOrder = 'asc' | 'desc';
-
-function toAmt(v: number | string | null | undefined): number {
-  const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0));
-  return Number.isNaN(n) ? 0 : n;
-}
-
-function parseExpenseDate(dateString: string): Date {
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
+type HubTab = 'overview' | 'budgets' | 'expenses' | 'bills' | 'categories';
 
 export default function ExpensesHubScreen() {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
-  const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
-  const { width: windowWidth } = useWindowDimensions();
+  const { showAmounts, toggleShowAmounts } = useShowAmounts();
 
   const [activeTab, setActiveTab] = useState<HubTab>('overview');
-  const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>('month');
-  const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
-  const [showPeriodPicker, setShowPeriodPicker] = useState(false);
 
   const [loading, setLoading] = useState(true);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [tags, setTags] = useState<ExpenseTag[]>([]);
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [error, setError] = useState('');
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [filterCategory, setFilterCategory] = useState<number | null>(null);
-  const [filterPaymentMethod, setFilterPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [filterTag, setFilterTag] = useState<number | null>(null);
-  const [filterRecurring, setFilterRecurring] = useState<boolean | null>(null);
-  /** null = all, true = paid, false = unpaid */
-  const [filterPaid, setFilterPaid] = useState<boolean | null>(null);
-  const [showCombinedView, setShowCombinedView] = useState(false);
-  const [sortBy, setSortBy] = useState<SortBy>('date');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -118,38 +69,19 @@ export default function ExpensesHubScreen() {
   const [editingTag, setEditingTag] = useState<ExpenseTag | null>(null);
   const [showReceiptWizard, setShowReceiptWizard] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [paidToggleId, setPaidToggleId] = useState<number | null>(null);
-  const [expensePendingDelete, setExpensePendingDelete] = useState<Expense | null>(null);
   const [categoryPendingDelete, setCategoryPendingDelete] = useState<ExpenseCategory | null>(null);
   const [tagPendingDelete, setTagPendingDelete] = useState<ExpenseTag | null>(null);
   const [budgetsRefreshKey, setBudgetsRefreshKey] = useState(0);
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (periodMode === 'all') {
-      setShowPeriodPicker(false);
-      return;
-    }
-    setViewDate(startOfPeriod(new Date(), periodMode));
-    setShowPeriodPicker(false);
-  }, [periodMode]);
+  const tabsScrollRef = useRef<ScrollView>(null);
+  const tabLayoutsRef = useRef<Record<string, { x: number; width: number }>>({});
+  const tabsViewportWidthRef = useRef(0);
 
   const clearExpenseState = useCallback(() => {
     fetchGenerationRef.current += 1;
-    setExpenses([]);
-    setBudgets([]);
     setCategories([]);
     setTags([]);
-    setRecurringExpenses([]);
     setError('');
-    setSearchQuery('');
-    setFilterCategory(null);
-    setFilterPaymentMethod(null);
-    setFilterTag(null);
-    setFilterRecurring(null);
-    setFilterPaid(null);
-    setShowCombinedView(false);
-    setShowFilters(false);
     setShowExpenseForm(false);
     editingExpenseRef.current = null;
     setEditingExpense(null);
@@ -160,7 +92,6 @@ export default function ExpensesHubScreen() {
     setShowTagForm(false);
     setEditingTag(null);
     setShowReceiptWizard(false);
-    setExpensePendingDelete(null);
     setCategoryPendingDelete(null);
     setTagPendingDelete(null);
     setDataFamilyId(null);
@@ -181,21 +112,9 @@ export default function ExpensesHubScreen() {
       if (!soft) setLoading(true);
       setError('');
       try {
-        const range = periodDateRange(viewDate, periodMode);
-        const budgetPeriod = periodMode === 'year' ? 'year' : 'month';
-        const expenseFilters: { start_date?: string; end_date?: string } = {};
-        if (range.start_date) expenseFilters.start_date = range.start_date;
-        if (range.end_date) expenseFilters.end_date = range.end_date;
-
-        const [cats, tagList, expList, budgetList, recurringList] = await Promise.all([
+        const [cats, tagList] = await Promise.all([
           expenseService.getCategories(familyId),
           expenseService.getTags(familyId),
-          expenseService.getExpenses(familyId, expenseFilters),
-          expenseService.getBudgets(familyId, true, {
-            asOf: range.asOf,
-            budgetPeriod,
-          }),
-          expenseService.getRecurringExpenses(familyId),
         ]);
 
         if (
@@ -205,11 +124,8 @@ export default function ExpensesHubScreen() {
           return;
         }
 
-        setCategories(cats);
-        setTags(tagList);
-        setExpenses(expList);
-        setBudgets(budgetList);
-        setRecurringExpenses(recurringList);
+        setCategories(forFamily(cats, familyId));
+        setTags(forFamily(tagList, familyId));
         setDataFamilyId(familyId);
       } catch (err: any) {
         if (
@@ -219,11 +135,8 @@ export default function ExpensesHubScreen() {
           return;
         }
         setError(err.message || 'Failed to load');
-        setExpenses([]);
-        setBudgets([]);
         setCategories([]);
         setTags([]);
-        setRecurringExpenses([]);
         setDataFamilyId(null);
       } finally {
         if (
@@ -234,7 +147,7 @@ export default function ExpensesHubScreen() {
         }
       }
     },
-    [selectedFamily, viewDate, periodMode, clearExpenseState]
+    [selectedFamily, clearExpenseState]
   );
 
   useEffect(() => {
@@ -252,95 +165,9 @@ export default function ExpensesHubScreen() {
       }
       // After a family switch dataFamilyId is null → hard load (no soft paint of prior family).
       const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && (expenses.length > 0 || categories.length > 0) });
-    }, [selectedFamily?.id, activeTab, load, dataFamilyId, expenses.length, categories.length])
+      void load({ soft: sameFamily && categories.length > 0 });
+    }, [selectedFamily?.id, activeTab, load, dataFamilyId, categories.length])
   );
-
-  const activePeriodMode: PeriodMode | null = periodMode === 'all' ? null : periodMode;
-  const todayPeriod = activePeriodMode ? startOfPeriod(new Date(), activePeriodMode) : null;
-  const onTodayPeriod = !!(
-    todayPeriod &&
-    activePeriodMode &&
-    startOfPeriod(viewDate, activePeriodMode).getTime() === todayPeriod.getTime()
-  );
-  const periodLabel =
-    periodMode === 'all' ? 'All expenses' : formatPeriodLabel(viewDate, periodMode);
-
-  const filteredExpenses = useMemo(() => {
-    let list = selectedFamily ? forFamily(expenses, selectedFamily.id) : [];
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (exp) =>
-          exp.description.toLowerCase().includes(q) ||
-          (exp.category_name && exp.category_name.toLowerCase().includes(q)) ||
-          (exp.notes && exp.notes.toLowerCase().includes(q)) ||
-          (exp.tag_names || []).some((tag) => tag.toLowerCase().includes(q))
-      );
-    }
-    if (filterCategory) {
-      list = list.filter((exp) => exp.category === filterCategory);
-    }
-    if (filterPaymentMethod) {
-      list = list.filter((exp) => exp.payment_method === filterPaymentMethod);
-    }
-    if (filterTag) {
-      list = list.filter((exp) => exp.tags.includes(filterTag));
-    }
-    if (filterRecurring !== null) {
-      list = filterRecurring
-        ? list.filter((exp) => exp.is_recurring && exp.recurring_expense !== null)
-        : list.filter((exp) => !exp.is_recurring || exp.recurring_expense === null);
-    }
-    if (filterPaid !== null) {
-      list = filterPaid
-        ? list.filter((exp) => exp.is_paid !== false)
-        : list.filter((exp) => exp.is_paid === false);
-    }
-    list.sort((a, b) => {
-      let comparison = 0;
-      if (sortBy === 'date') {
-        comparison =
-          parseExpenseDate(a.expense_date).getTime() - parseExpenseDate(b.expense_date).getTime();
-      } else if (sortBy === 'amount') {
-        comparison = toAmt(a.amount) - toAmt(b.amount);
-      } else {
-        comparison = (a.category_name || '').localeCompare(b.category_name || '');
-      }
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-    return list;
-  }, [
-    expenses,
-    selectedFamily,
-    searchQuery,
-    filterCategory,
-    filterPaymentMethod,
-    filterTag,
-    filterRecurring,
-    filterPaid,
-    sortBy,
-    sortOrder,
-  ]);
-
-  const hasActiveFilters = !!(
-    filterCategory ||
-    filterPaymentMethod ||
-    filterTag ||
-    filterRecurring !== null ||
-    filterPaid !== null
-  );
-
-  const periodPaid = useMemo(
-    () => filteredExpenses.reduce((s, e) => s + (e.is_paid !== false ? toAmt(e.amount) : 0), 0),
-    [filteredExpenses]
-  );
-  const periodBudgetTotal = useMemo(
-    () => budgets.reduce((s, b) => s + toAmt(b.amount), 0),
-    [budgets]
-  );
-
-  const expenseColumns = windowWidth < 700 ? 2 : windowWidth < 1100 ? 3 : 4;
 
   const closeExpenseForm = () => {
     setShowExpenseForm(false);
@@ -396,27 +223,23 @@ export default function ExpensesHubScreen() {
   };
 
   const handleTogglePaid = async (expense: Expense, nextPaid: boolean) => {
-    setPaidToggleId(expense.id);
     try {
-      const updated = await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
-      setExpenses((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
       setBudgetsRefreshKey((k) => k + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update paid status');
-    } finally {
-      setPaidToggleId(null);
+      throw err;
     }
   };
 
   const handleDeleteExpense = async (expense: Expense) => {
     try {
       await expenseService.deleteExpense(expense.id);
-      setExpensePendingDelete(null);
       setBudgetsRefreshKey((k) => k + 1);
       await load({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete expense');
-      setExpensePendingDelete(null);
+      throw err;
     }
   };
 
@@ -513,443 +336,19 @@ export default function ExpensesHubScreen() {
 
   const handlePlanApplied = useCallback(() => {
     setBudgetsRefreshKey((k) => k + 1);
-    if (activeTab === 'expenses' || activeTab === 'expense-board' || activeTab === 'categories') {
+    if (activeTab === 'expenses' || activeTab === 'bills' || activeTab === 'categories') {
       void load({ soft: true });
     }
   }, [activeTab, load]);
 
-  const upcomingRecurring = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return recurringExpenses.filter((re) => {
-      if (!re.is_active) return false;
-      const nextDate = new Date(re.next_due_date);
-      nextDate.setHours(0, 0, 0, 0);
-      return nextDate >= today;
-    });
-  }, [recurringExpenses]);
-
-  const renderExpensesTab = () => {
-    if (loading) {
-      return (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      );
-    }
-
-    const groups = new Map<
-      number,
-      { name: string; expenses: Expense[]; budget: Budget | null }
-    >();
-    const budgetByCategory = new Map(budgets.map((b) => [b.category, b]));
-    for (const expense of filteredExpenses) {
-      const categoryId = expense.category ?? 0;
-      const existing = groups.get(categoryId);
-      if (existing) {
-        existing.expenses.push(expense);
-      } else {
-        groups.set(categoryId, {
-          name: expense.category_name || 'Uncategorized',
-          expenses: [expense],
-          budget: budgetByCategory.get(categoryId) || null,
-        });
-      }
-    }
-    // When filters/search active, only show categories that still have matching expenses
-    if (!searchQuery.trim() && !hasActiveFilters) {
-      for (const budget of budgets) {
-        if (!groups.has(budget.category)) {
-          groups.set(budget.category, {
-            name: budget.category_name || 'Category',
-            expenses: [],
-            budget,
-          });
-        }
-      }
-    }
-
-    const cards = Array.from(groups.entries()).sort((a, b) =>
-      a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' })
-    );
-
-    const rangeAsOf = periodDateRange(viewDate, periodMode).asOf;
-
-    return (
-      <View style={styles.flex}>
-        <View style={styles.toolbar}>
-          <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <FontAwesome name="search" size={12} color={colors.textSecondary} />
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Search..."
-              placeholderTextColor={colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 ? (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <FontAwesome name="times" size={12} color={colors.textSecondary} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.iconBtn,
-              {
-                backgroundColor: showFilters || hasActiveFilters ? colors.primary : colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => setShowFilters((v) => !v)}
-            accessibilityLabel="Filters"
-          >
-            <FontAwesome
-              name="filter"
-              size={13}
-              color={showFilters || hasActiveFilters ? '#fff' : colors.text}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.iconBtn,
-              {
-                backgroundColor: showPeriodPicker ? colors.primary : colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => setShowPeriodPicker((v) => !v)}
-            accessibilityLabel="Period"
-          >
-            <FontAwesome
-              name="calendar"
-              size={13}
-              color={showPeriodPicker ? '#fff' : colors.text}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.iconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => setShowReceiptWizard(true)}
-            accessibilityLabel="Scan receipt"
-          >
-            <FontAwesome name="camera" size={13} color={colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.addExpenseBtn, { backgroundColor: colors.primary }]}
-            onPress={() => {
-              setEditingExpense(null);
-              setShowExpenseForm(true);
-            }}
-          >
-            <FontAwesome name="plus" size={12} color="#fff" />
-            <Text style={styles.addExpenseText}>Add</Text>
-          </TouchableOpacity>
-        </View>
-
-        {showPeriodPicker ? (
-          <View style={[styles.chipRow, { borderBottomColor: colors.border }]}>
-            {PERIOD_OPTIONS.map((opt) => {
-              const active = periodMode === opt.value;
-              return (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? colors.primary : colors.card,
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setPeriodMode(opt.value)}
-                >
-                  <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {showFilters ? (
-          <View
-            style={[
-              styles.filterPanel,
-              { backgroundColor: colors.card, borderBottomColor: colors.border },
-            ]}
-          >
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Category</Text>
-              <ThemeAwarePicker
-                selectedValue={filterCategory?.toString() || ''}
-                onValueChange={(value) => setFilterCategory(value ? parseInt(value, 10) : null)}
-                options={[
-                  { label: 'All', value: '' },
-                  ...categories.map((cat) => ({ label: cat.name, value: cat.id.toString() })),
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Payment</Text>
-              <ThemeAwarePicker
-                selectedValue={filterPaymentMethod || ''}
-                onValueChange={(value) =>
-                  setFilterPaymentMethod((value || null) as PaymentMethod | null)
-                }
-                options={[
-                  { label: 'All', value: '' },
-                  { label: 'Cash', value: 'cash' },
-                  { label: 'Credit Card', value: 'credit_card' },
-                  { label: 'Debit Card', value: 'debit_card' },
-                  { label: 'Bank Transfer', value: 'bank_transfer' },
-                  { label: 'E-Transfer', value: 'e_transfer' },
-                  { label: 'Check', value: 'check' },
-                  { label: 'Other', value: 'other' },
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Tag</Text>
-              <ThemeAwarePicker
-                selectedValue={filterTag?.toString() || ''}
-                onValueChange={(value) => setFilterTag(value ? parseInt(value, 10) : null)}
-                options={[
-                  { label: 'All', value: '' },
-                  ...tags.map((tag) => ({ label: tag.name, value: tag.id.toString() })),
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Type</Text>
-              <ThemeAwarePicker
-                selectedValue={
-                  filterRecurring === null ? '' : filterRecurring ? 'recurring' : 'one_time'
-                }
-                onValueChange={(value) => {
-                  if (value === 'recurring') setFilterRecurring(true);
-                  else if (value === 'one_time') setFilterRecurring(false);
-                  else setFilterRecurring(null);
-                }}
-                options={[
-                  { label: 'All', value: '' },
-                  { label: 'Recurring', value: 'recurring' },
-                  { label: 'One-time', value: 'one_time' },
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Status</Text>
-              <ThemeAwarePicker
-                selectedValue={filterPaid === null ? '' : filterPaid ? 'paid' : 'unpaid'}
-                onValueChange={(value) => {
-                  if (value === 'paid') setFilterPaid(true);
-                  else if (value === 'unpaid') setFilterPaid(false);
-                  else setFilterPaid(null);
-                }}
-                options={[
-                  { label: 'All', value: '' },
-                  { label: 'Paid', value: 'paid' },
-                  { label: 'Unpaid', value: 'unpaid' },
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Sort</Text>
-              <ThemeAwarePicker
-                selectedValue={`${sortBy}_${sortOrder}`}
-                onValueChange={(value) => {
-                  const [by, order] = String(value ?? 'date_desc').split('_') as [
-                    SortBy,
-                    SortOrder,
-                  ];
-                  setSortBy(by);
-                  setSortOrder(order);
-                }}
-                options={[
-                  { label: 'Date (newest)', value: 'date_desc' },
-                  { label: 'Date (oldest)', value: 'date_asc' },
-                  { label: 'Amount (high)', value: 'amount_desc' },
-                  { label: 'Amount (low)', value: 'amount_asc' },
-                  { label: 'Category A–Z', value: 'category_asc' },
-                  { label: 'Category Z–A', value: 'category_desc' },
-                ]}
-              />
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Upcoming bills</Text>
-              <TouchableOpacity
-                style={[
-                  styles.chip,
-                  {
-                    alignSelf: 'flex-start',
-                    backgroundColor: showCombinedView ? colors.primary : colors.background,
-                    borderColor: showCombinedView ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setShowCombinedView((v) => !v)}
-              >
-                <Text style={[styles.chipText, { color: showCombinedView ? '#fff' : colors.text }]}>
-                  {showCombinedView ? 'On' : 'Off'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.clearFiltersBtn, { backgroundColor: colors.border }]}
-              onPress={() => {
-                setFilterCategory(null);
-                setFilterPaymentMethod(null);
-                setFilterTag(null);
-                setFilterRecurring(null);
-                setFilterPaid(null);
-                setSortBy('date');
-                setSortOrder('desc');
-                setShowCombinedView(false);
-              }}
-            >
-              <Text style={[styles.clearFiltersText, { color: colors.text }]}>Clear filters</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {activePeriodMode ? (
-          <View style={styles.monthNav}>
-            <TouchableOpacity
-              onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, -1))}
-              style={styles.monthNavBtn}
-            >
-              <FontAwesome name="chevron-left" size={14} color={colors.text} />
-            </TouchableOpacity>
-            <Text style={[styles.monthNavLabel, { color: colors.text }]} numberOfLines={1}>
-              {periodLabel}
-            </Text>
-            <TouchableOpacity
-              onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, 1))}
-              style={styles.monthNavBtn}
-            >
-              <FontAwesome name="chevron-right" size={14} color={colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.todayBtn,
-                {
-                  backgroundColor: onTodayPeriod ? colors.card : colors.primary,
-                  borderColor: onTodayPeriod ? colors.border : colors.primary,
-                },
-              ]}
-              onPress={() => todayPeriod && setViewDate(todayPeriod)}
-              disabled={onTodayPeriod}
-              accessibilityLabel="Go to today"
-            >
-              <Text
-                style={[
-                  styles.todayBtnText,
-                  { color: onTodayPeriod ? colors.textSecondary : '#fff' },
-                ]}
-              >
-                Today
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.monthNav}>
-            <Text style={[styles.monthNavLabel, { color: colors.text }]} numberOfLines={1}>
-              {periodLabel}
-            </Text>
-          </View>
-        )}
-        <Text style={[styles.monthSummary, { color: colors.textSecondary }]}>
-          <Text style={{ color: colors.primary, fontWeight: '700' }}>
-            {displayMoney(periodPaid)}
-          </Text>
-          {periodMode !== 'all' ? (
-            <>
-              {' / '}
-              {displayMoney(periodBudgetTotal)}
-            </>
-          ) : null}
-          {' · '}
-          {filteredExpenses.length} expenses
-        </Text>
-        <ScrollView contentContainerStyle={styles.expenseGrid}>
-          {showCombinedView && upcomingRecurring.length > 0 ? (
-            <View style={styles.combinedBlock}>
-              <Text style={[styles.combinedTitle, { color: colors.text }]}>Upcoming bills</Text>
-              {upcomingRecurring.map((recurring) => {
-                const nextDate = new Date(recurring.next_due_date);
-                nextDate.setHours(0, 0, 0, 0);
-                return (
-                  <RecurringExpenseRow
-                    key={`upcoming-${recurring.id}`}
-                    recurring={recurring}
-                    dateLabel={formatOccurrenceDate(nextDate)}
-                    badge={{ label: 'Upcoming', color: colors.primary }}
-                  />
-                );
-              })}
-              <Text style={[styles.combinedTitle, { color: colors.text, marginTop: 12 }]}>
-                Expenses
-              </Text>
-            </View>
-          ) : null}
-          {cards.length === 0 ? (
-            <Text style={[styles.empty, { color: colors.textSecondary }]}>
-              No expenses or budgets this period
-            </Text>
-          ) : (
-            cards.map(([catId, group]) => {
-              const budget =
-                group.budget ||
-                ({
-                  id: -catId,
-                  family: selectedFamily!.id,
-                  category: catId,
-                  category_name: group.name,
-                  amount: 0,
-                  period: periodMode === 'year' ? ('yearly' as const) : ('monthly' as const),
-                  start_date: rangeAsOf,
-                  end_date: null,
-                  alert_threshold: 80,
-                  is_active: true,
-                  spent_amount: 0,
-                  remaining_amount: 0,
-                  percentage_used: 0,
-                  base_amount: 0,
-                  created_at: '',
-                  updated_at: '',
-                } as Budget);
-              return (
-                <View
-                  key={catId}
-                  style={[styles.gridItem, { width: `${100 / expenseColumns}%` as any }]}
-                >
-                  <BudgetCard
-                    budget={budget}
-                    items={group.expenses}
-                    showBudgetLimit={!!group.budget && periodMode !== 'all'}
-                    useItemsForSpent
-                    onPress={
-                      group.budget
-                        ? () => {
-                            setEditingBudget(group.budget);
-                            setShowBudgetForm(true);
-                          }
-                        : undefined
-                    }
-                    onItemPress={(exp) => {
-                      void openExpenseEditor(exp);
-                    }}
-                    onItemDelete={(exp) => setExpensePendingDelete(exp)}
-                    onToggleItemPaid={handleTogglePaid}
-                    paidToggleExpenseId={paidToggleId}
-                  />
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
-      </View>
-    );
-  };
+  useEffect(() => {
+    const layout = tabLayoutsRef.current[activeTab];
+    const viewport = tabsViewportWidthRef.current;
+    if (!layout || !viewport || !tabsScrollRef.current) return;
+    const padding = 12;
+    const targetX = Math.max(0, layout.x - padding);
+    tabsScrollRef.current.scrollTo({ x: targetX, animated: true });
+  }, [activeTab]);
 
   const renderCategoriesTab = () => {
     if (loading) {
@@ -1060,7 +459,7 @@ export default function ExpensesHubScreen() {
             onBudgetDelete={handleDeleteBudget}
           />
         );
-      case 'expense-board':
+      case 'expenses':
         return (
           <ExpenseDashboard
             key={familyKey}
@@ -1082,14 +481,11 @@ export default function ExpensesHubScreen() {
             }}
           />
         );
-      case 'expenses':
-        return renderExpensesTab();
       case 'bills':
         return (
-          <BillsBudgetsHub
+          <BillsDashboard
             key={familyKey}
-            embedded
-            yearTabEnabled={false}
+            refreshKey={budgetsRefreshKey}
             onPlanApplied={handlePlanApplied}
           />
         );
@@ -1138,16 +534,21 @@ export default function ExpensesHubScreen() {
         ]}
       >
         <ScrollView
+          ref={tabsScrollRef}
           horizontal
-          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          style={styles.tabsScrollView}
           contentContainerStyle={styles.tabsScroll}
+          onLayout={(e) => {
+            tabsViewportWidthRef.current = e.nativeEvent.layout.width;
+          }}
         >
           {(
             [
               { id: 'overview' as const, label: 'Overview', icon: 'tachometer' as const },
               { id: 'budgets' as const, label: 'Budgets', icon: 'pie-chart' as const },
-              { id: 'expense-board' as const, label: 'Expense board', icon: 'th-list' as const },
-              { id: 'expenses' as const, label: 'Expenses', icon: 'file-text-o' as const },
+              { id: 'expenses' as const, label: 'Expenses', icon: 'th-list' as const },
               { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
               { id: 'categories' as const, label: 'Categories', icon: 'folder-o' as const },
             ] as const
@@ -1162,11 +563,17 @@ export default function ExpensesHubScreen() {
                   { borderColor: colors.border },
                 ]}
                 onPress={() => setActiveTab(tab.id)}
+                onLayout={(e) => {
+                  const { x, width } = e.nativeEvent.layout;
+                  tabLayoutsRef.current[tab.id] = { x, width };
+                }}
                 activeOpacity={0.7}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
               >
                 <FontAwesome
                   name={tab.icon}
-                  size={14}
+                  size={12}
                   color={selected ? '#fff' : colors.textSecondary}
                 />
                 <Text
@@ -1254,23 +661,6 @@ export default function ExpensesHubScreen() {
       )}
 
       <AlertModal
-        visible={!!expensePendingDelete}
-        title="Delete expense?"
-        message={
-          expensePendingDelete
-            ? `Delete "${expensePendingDelete.description}"? This cannot be undone.`
-            : ''
-        }
-        type="warning"
-        showCancel
-        cancelText="Cancel"
-        confirmText="Delete"
-        onConfirm={() => {
-          if (expensePendingDelete) void handleDeleteExpense(expensePendingDelete);
-        }}
-        onClose={() => setExpensePendingDelete(null)}
-      />
-      <AlertModal
         visible={!!categoryPendingDelete}
         title="Delete category?"
         message={
@@ -1308,7 +698,6 @@ export default function ExpensesHubScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
   topBar: {
     flexDirection: 'row',
@@ -1329,114 +718,34 @@ const styles = StyleSheet.create({
   amountToggleText: { fontSize: 12, fontWeight: '600' },
   tabContainer: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 8,
+    paddingVertical: 6,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  tabsScrollView: {
+    flexGrow: 0,
+    width: '100%',
   },
   tabsScroll: {
-    paddingHorizontal: 10,
-    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    gap: 6,
     flexDirection: 'row',
     alignItems: 'center',
+    flexGrow: 0,
   },
   tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  tabText: { fontSize: 13, fontWeight: '700' },
-  errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
-  toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    gap: 6,
-  },
-  searchBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    height: 36,
-  },
-  searchInput: { flex: 1, fontSize: 13, paddingVertical: 0 },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  chipText: { fontSize: 12, fontWeight: '700' },
-  filterPanel: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  filterRow: { gap: 4 },
-  filterLabel: { fontSize: 12, fontWeight: '600' },
-  monthNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    gap: 8,
-  },
-  monthNavBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  monthNavLabel: { flex: 1, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  todayBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  todayBtnText: { fontSize: 12, fontWeight: '700' },
-  clearFiltersBtn: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    marginTop: 4,
-  },
-  clearFiltersText: { fontSize: 12, fontWeight: '600' },
-  combinedBlock: { width: '100%', paddingHorizontal: 8, paddingTop: 4, gap: 4 },
-  combinedTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  addExpenseBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 8,
-    height: 36,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexShrink: 0,
   },
-  addExpenseText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  monthSummary: { paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },
-  expenseGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, paddingBottom: 40 },
-  gridItem: { padding: 4 },
-  empty: { fontSize: 14, textAlign: 'center', marginTop: 24 },
+  tabText: { fontSize: 12, fontWeight: '700' },
+  errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   catHeader: {
     flexDirection: 'row',
     alignItems: 'center',

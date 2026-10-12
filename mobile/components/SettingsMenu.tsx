@@ -84,12 +84,6 @@ const SettingsMenu = () => {
         icon: 'list',
         route: '/(tabs)/grocery-categories',
       },
-      {
-        id: 'budgets',
-        label: 'Bills & Budgets',
-        icon: 'credit-card',
-        route: '/(tabs)/bills-budgets',
-      },
     ];
 
     const serviceItems = [
