@@ -204,3 +204,122 @@ export function portfolioTargetAtRate(rows: YearReturnRow[], annualPct: number):
     return sum + yearEndTarget(row.startBalance, annualPct, row.isCash);
   }, 0);
 }
+
+/** Latest balances split (demo-aware) — year 0 for forward forecasts. */
+export type PortfolioProjectionBase = {
+  invest: number;
+  cash: number;
+  portfolio: number;
+  hasBalances: boolean;
+};
+
+export type PortfolioProjectionPoint = {
+  yearsAhead: number;
+  calendarYear: number;
+  /** Invested value at start of this forecast year (end of prior / now for year 1). */
+  investStart: number;
+  /** Invested growth during this year only. */
+  investGrowth: number;
+  /** Invested value at end of this calendar year. */
+  invest: number;
+  cash: number;
+  portfolio: number;
+  /** Cumulative portfolio growth vs now. */
+  growth: number;
+};
+
+export function latestPortfolioBase(
+  accounts: MoneyAccount[],
+  demoEnabled: boolean
+): PortfolioProjectionBase {
+  let invest = 0;
+  let cash = 0;
+  let hasBalances = false;
+  for (const a of accounts) {
+    const bal = withDemoBalance(a.latest_balance, a.account_type, demoEnabled);
+    if (bal == null) continue;
+    hasBalances = true;
+    if (a.account_type === 'cash') cash += bal;
+    else invest += bal;
+  }
+  return { invest, cash, portfolio: invest + cash, hasBalances };
+}
+
+/**
+ * Forward projection from latest balances: invest compounds annually, cash flat.
+ * Points for yearsAhead 1…maxYearsAhead labeled currentYear+n.
+ */
+export function projectPortfolioAtYears(
+  accounts: MoneyAccount[],
+  ratePct: number,
+  maxYearsAhead: number,
+  demoEnabled: boolean,
+  currentYear = new Date().getFullYear()
+): { base: PortfolioProjectionBase; points: PortfolioProjectionPoint[] } {
+  const base = latestPortfolioBase(accounts, demoEnabled);
+  const factor = 1 + ratePct / 100;
+  const points: PortfolioProjectionPoint[] = [];
+  for (let n = 1; n <= maxYearsAhead; n++) {
+    const investStart = base.invest * Math.pow(factor, n - 1);
+    const invest = base.invest * Math.pow(factor, n);
+    const investGrowth = invest - investStart;
+    const cash = base.cash;
+    const portfolio = invest + cash;
+    points.push({
+      yearsAhead: n,
+      calendarYear: currentYear + n,
+      investStart,
+      investGrowth,
+      invest,
+      cash,
+      portfolio,
+      growth: portfolio - base.portfolio,
+    });
+  }
+  return { base, points };
+}
+
+export type AccountProjectionRow = {
+  id: number;
+  name: string;
+  isCash: boolean;
+  start: number;
+  growth: number;
+  end: number;
+};
+
+/** Per-account projection for one forecast year ahead (latest base, invest compounds, cash flat). */
+export function projectAccountsAtYearsAhead(
+  accounts: MoneyAccount[],
+  ratePct: number,
+  yearsAhead: number,
+  demoEnabled: boolean
+): AccountProjectionRow[] {
+  const n = Math.max(1, yearsAhead);
+  const factor = 1 + ratePct / 100;
+  const ordered = [
+    ...accounts.filter((a) => a.account_type !== 'cash'),
+    ...accounts.filter((a) => a.account_type === 'cash'),
+  ];
+  const rows: AccountProjectionRow[] = [];
+  for (const a of ordered) {
+    const base = withDemoBalance(a.latest_balance, a.account_type, demoEnabled);
+    if (base == null) continue;
+    const isCash = a.account_type === 'cash';
+    if (isCash) {
+      rows.push({ id: a.id, name: a.name, isCash, start: base, growth: 0, end: base });
+      continue;
+    }
+    const start = base * Math.pow(factor, n - 1);
+    const end = base * Math.pow(factor, n);
+    rows.push({
+      id: a.id,
+      name: a.name,
+      isCash,
+      start,
+      growth: end - start,
+      end,
+    });
+  }
+  return rows;
+}

@@ -34,6 +34,7 @@ import UpdateBalancesWizard, {
 import YtdDashboard from '../../components/money/YtdDashboard';
 import IncomeDashboard from '../../components/money/IncomeDashboard';
 import AccountsDashboard from '../../components/money/AccountsDashboard';
+import TargetDashboard from '../../components/money/TargetDashboard';
 import TooltipButton from '../../components/TooltipButton';
 import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 import AuthService from '../../services/authService';
@@ -42,17 +43,7 @@ import {
   canUseMoneyDemoPortfolio,
   withDemoIncome,
 } from '../../utils/moneyDemoPortfolio';
-import {
-  buildYearReturnRows,
-  portfolioTargetAtRate,
-  sumReturnRows,
-  yearEndTarget,
-} from '../../utils/moneyReturns';
-
-type MoneyTab = 'income' | 'accounts' | 'ytd' | 'target';
-
-/** Year-end what-if rates shown on the Target tab. */
-const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
+type MoneyTab = 'income' | 'accounts' | 'ytd' | 'forecast';
 
 const STREAM_TYPES: { label: string; value: IncomeStreamType }[] = [
   { label: 'Employment', value: 'employment' },
@@ -98,9 +89,6 @@ export default function MoneyScreen() {
   const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
   const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [returnsYear, setReturnsYear] = useState(() => new Date().getFullYear());
-  /** Which Target rate rows are expanded to show per-account lists. */
-  const [expandedTargetRates, setExpandedTargetRates] = useState<number[]>([]);
 
   const [showStreamForm, setShowStreamForm] = useState(false);
   const [editingStream, setEditingStream] = useState<IncomeStream | null>(null);
@@ -143,6 +131,7 @@ export default function MoneyScreen() {
   const [ytdBoardRefreshKey, setYtdBoardRefreshKey] = useState(0);
   const [incomeBoardRefreshKey, setIncomeBoardRefreshKey] = useState(0);
   const [accountsBoardRefreshKey, setAccountsBoardRefreshKey] = useState(0);
+  const [targetBoardRefreshKey, setTargetBoardRefreshKey] = useState(0);
 
   const loadDemoPortfolioPref = useCallback(async () => {
     const user = await AuthService.getUserData();
@@ -160,7 +149,6 @@ export default function MoneyScreen() {
   useFocusEffect(
     useCallback(() => {
       setShowAmounts(false);
-      setExpandedTargetRates([]);
       void loadDemoPortfolioPref();
     }, [loadDemoPortfolioPref])
   );
@@ -175,15 +163,18 @@ export default function MoneyScreen() {
       t === 'calendar' ||
       t === 'ytd' ||
       t === 'target' ||
+      t === 'target-board' ||
       t === 'returns' ||
       t === 'forecast'
     ) {
-      if (t === 'forecast' || t === 'returns') {
+      if (t === 'returns') {
         setTab('ytd');
       } else if (t === 'calendar' || t === 'income-board') {
         setTab('income');
       } else if (t === 'accounts-board') {
         setTab('accounts');
+      } else if (t === 'target' || t === 'target-board') {
+        setTab('forecast');
       } else {
         setTab(t as MoneyTab);
       }
@@ -222,7 +213,6 @@ export default function MoneyScreen() {
     setAccounts([]);
     setSnapshots([]);
     setSelectedAccountId(null);
-    setExpandedTargetRates([]);
     setShowStreamForm(false);
     setEditingStream(null);
     setEditingOcc(null);
@@ -271,6 +261,7 @@ export default function MoneyScreen() {
       setYtdBoardRefreshKey((k) => k + 1);
       setIncomeBoardRefreshKey((k) => k + 1);
       setAccountsBoardRefreshKey((k) => k + 1);
+      setTargetBoardRefreshKey((k) => k + 1);
     } catch (err: any) {
       if (
         generation !== fetchGenerationRef.current ||
@@ -306,29 +297,6 @@ export default function MoneyScreen() {
       else setLoading(false);
     }, [load, selectedFamily])
   );
-
-  const returnsYearOptions = useMemo(() => {
-    const years = new Set<number>([new Date().getFullYear()]);
-    for (const s of snapshots) {
-      const y = parseInt(s.as_of_date.slice(0, 4), 10);
-      if (!Number.isNaN(y)) years.add(y);
-    }
-    return Array.from(years).sort((a, b) => b - a);
-  }, [snapshots]);
-
-  const yearReturnRows = useMemo(
-    () => buildYearReturnRows(accounts, snapshots, returnsYear, demoPortfolio),
-    [accounts, snapshots, returnsYear, demoPortfolio]
-  );
-
-  const toggleTargetRateExpanded = (rate: number) => {
-    setExpandedTargetRates((prev) =>
-      prev.includes(rate) ? prev.filter((r) => r !== rate) : [...prev, rate]
-    );
-  };
-
-  /** Target tab totals (boosted starts). */
-  const yearReturnTotals = useMemo(() => sumReturnRows(yearReturnRows), [yearReturnRows]);
 
   const openNewStream = () => {
     setEditingStream(null);
@@ -518,229 +486,6 @@ export default function MoneyScreen() {
     }
   };
 
-  const returnsDeltaColor = (n: number | null) => {
-    if (n == null || n === 0) return colors.textSecondary;
-    return n > 0 ? colors.success : colors.error;
-  };
-
-  const fmtReturnPct = (n: number | null) => {
-    if (n == null || Number.isNaN(n)) return '—';
-    const sign = n > 0 ? '+' : '';
-    return `${sign}${n.toFixed(1)}%`;
-  };
-
-  const fmtSignedMoney = (n: number | null) => {
-    if (n == null) return '—';
-    if (n === 0) return displayMoney(0);
-    const sign = n > 0 ? '+' : '-';
-    return `${sign}${displayMoney(Math.abs(n))}`;
-  };
-
-  const renderYearChips = () => (
-    <View style={styles.chipWrap}>
-      {returnsYearOptions.map((y) => {
-        const active = y === returnsYear;
-        return (
-          <TouchableOpacity
-            key={y}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: active ? colors.primary : colors.card,
-                borderColor: active ? colors.primary : colors.border,
-              },
-            ]}
-            onPress={() => setReturnsYear(y)}
-          >
-            <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>{y}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-
-  const renderTarget = () => {
-    const hasRows = yearReturnRows.some((r) => r.startBalance != null && r.startBalance > 0);
-    const startTotal = yearReturnTotals.start;
-    const investedRows = yearReturnRows.filter((r) => !r.isCash);
-    const cashRows = yearReturnRows.filter((r) => r.isCash);
-    const cashYearEnd = portfolioTargetAtRate(cashRows, 0);
-
-    return (
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 10 }}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Year-end target</Text>
-        <Text style={[styles.meta, { color: colors.textSecondary }]}>
-          Investments grow at the rate; cash stays flat. Expand a rate for accounts.
-        </Text>
-        {renderYearChips()}
-
-        {startTotal > 0 ? (
-          <Text style={[styles.meta, { color: colors.text }]}>
-            Year start {displayMoney(startTotal)}
-          </Text>
-        ) : null}
-
-        {!hasRows ? (
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add accounts and a year-start balance to see targets.
-          </Text>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={[
-              styles.monthList,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <View style={{ minWidth: '100%' }}>
-            <View
-              style={[
-                styles.targetTableHeader,
-                { borderBottomColor: colors.border, backgroundColor: colors.surface },
-              ]}
-            >
-              <Text style={[styles.targetTableHeaderText, { color: colors.textSecondary, width: 52 }]}>
-                Return
-              </Text>
-              <Text style={[styles.targetTableHeaderText, { color: colors.textSecondary, width: 88 }]}>
-                Invest
-              </Text>
-              <Text style={[styles.targetTableHeaderText, { color: colors.textSecondary, width: 80 }]}>
-                Cash
-              </Text>
-              <Text style={[styles.targetTableHeaderText, { color: colors.textSecondary, width: 88 }]}>
-                Portfolio
-              </Text>
-              <Text
-                style={[
-                  styles.targetTableHeaderText,
-                  { color: colors.textSecondary, width: 72, textAlign: 'right' },
-                ]}
-              >
-                Growth
-              </Text>
-            </View>
-            {TARGET_RATES.map((rate) => {
-              const expanded = expandedTargetRates.includes(rate);
-              const investYearEnd = portfolioTargetAtRate(investedRows, rate);
-              const portfolioTotal = investYearEnd + cashYearEnd;
-              const growth = portfolioTotal - startTotal;
-              return (
-                <View key={rate}>
-                  <TouchableOpacity
-                    style={[styles.targetRateRow, { borderTopColor: colors.border }]}
-                    onPress={() => toggleTargetRateExpanded(rate)}
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded }}
-                    accessibilityLabel={`${rate}% year-end target`}
-                  >
-                    <FontAwesome
-                      name={expanded ? 'chevron-down' : 'chevron-right'}
-                      size={12}
-                      color={colors.textSecondary}
-                      style={{ width: 16 }}
-                    />
-                    <Text style={[styles.targetRatePct, { color: colors.text, width: 36 }]}>
-                      {rate}%
-                    </Text>
-                    <Text style={[styles.targetRateValue, { color: colors.text, width: 88 }]}>
-                      {displayMoney(investYearEnd)}
-                    </Text>
-                    <Text style={[styles.targetRateValue, { color: colors.textSecondary, width: 80 }]}>
-                      {displayMoney(cashYearEnd)}
-                    </Text>
-                    <Text style={[styles.targetRateValue, { color: colors.primary, width: 88 }]}>
-                      {displayMoney(portfolioTotal)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.targetRateGrowth,
-                        { color: colors.success, width: 72, textAlign: 'right' },
-                      ]}
-                    >
-                      {fmtSignedMoney(growth)}
-                    </Text>
-                  </TouchableOpacity>
-                  {expanded
-                    ? yearReturnRows.map((row) => {
-                        const acctTarget =
-                          row.startBalance != null && row.startBalance > 0
-                            ? yearEndTarget(row.startBalance, rate, row.isCash)
-                            : null;
-                        const acctGrowth =
-                          acctTarget != null && row.startBalance != null
-                            ? acctTarget - row.startBalance
-                            : null;
-                        return (
-                          <View
-                            key={`tgt-${rate}-${row.id}`}
-                            style={[
-                              styles.forecastAccountCompact,
-                              {
-                                backgroundColor: colors.surface,
-                                borderColor: colors.border,
-                                borderWidth: 0,
-                                borderTopWidth: StyleSheet.hairlineWidth,
-                                borderRadius: 0,
-                                paddingLeft: 28,
-                              },
-                            ]}
-                          >
-                            <View style={styles.forecastAccountCompactTop}>
-                              <View style={{ flex: 1, minWidth: 0 }}>
-                                <Text
-                                  style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}
-                                  numberOfLines={1}
-                                >
-                                  {row.name}
-                                </Text>
-                                <Text
-                                  style={[styles.meta, { color: colors.textSecondary }]}
-                                  numberOfLines={1}
-                                >
-                                  {row.isCash ? 'Cash · no growth' : `${rate}% full year`}
-                                </Text>
-                              </View>
-                              <Text
-                                style={{
-                                  color:
-                                    acctGrowth != null && acctGrowth > 0
-                                      ? colors.success
-                                      : colors.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: '800',
-                                  fontVariant: ['tabular-nums'],
-                                }}
-                              >
-                                {fmtSignedMoney(acctGrowth)}
-                              </Text>
-                            </View>
-                            <View style={styles.forecastAccountCompactAmounts}>
-                              <Text style={[styles.forecastCompactNow, { color: colors.text }]}>
-                                {displayMoney(row.startBalance)}
-                              </Text>
-                              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>→</Text>
-                              <Text
-                                style={[styles.forecastCompactProjected, { color: colors.primary }]}
-                              >
-                                {displayMoney(acctTarget)}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })
-                    : null}
-                </View>
-              );
-            })}
-            </View>
-          </ScrollView>
-        )}
-      </ScrollView>
-    );
-  };
-
   const formModal = (
     title: string,
     visible: boolean,
@@ -800,7 +545,7 @@ export default function MoneyScreen() {
               { id: 'ytd' as const, label: 'YTD', icon: 'pie-chart' as const },
               { id: 'income' as const, label: 'Income', icon: 'usd' as const },
               { id: 'accounts' as const, label: 'Accounts', icon: 'university' as const },
-              { id: 'target' as const, label: 'Target', icon: 'bullseye' as const },
+              { id: 'forecast' as const, label: 'Forecast', icon: 'line-chart' as const },
             ] as const
           ).map((t) => {
             const selected = tab === t.id;
@@ -860,7 +605,10 @@ export default function MoneyScreen() {
       ) : tab === 'ytd' ? (
         <YtdDashboard key={selectedFamily?.id ?? 'none'} refreshKey={ytdBoardRefreshKey} />
       ) : (
-        renderTarget()
+        <TargetDashboard
+          key={selectedFamily?.id ?? 'none'}
+          refreshKey={targetBoardRefreshKey}
+        />
       )}
 
       {formModal('Income stream', showStreamForm, () => setShowStreamForm(false), () => void saveStream(), (
@@ -1232,15 +980,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipRow: { paddingHorizontal: 12, paddingVertical: 8, gap: 6, flexDirection: 'row' },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  chipText: { fontSize: 12, fontWeight: '700' },
   streamCollapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1285,11 +1024,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 56,
     justifyContent: 'flex-end',
-  },
-  monthList: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    overflow: 'hidden',
   },
   streamCard: {
     flexDirection: 'row',
@@ -1387,79 +1121,6 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 14, fontWeight: '700' },
   meta: { fontSize: 12 },
   amount: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  forecastCompareLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  targetTableHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    paddingLeft: 28,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  targetTableHeaderText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.2,
-  },
-  targetRateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  targetRatePct: {
-    fontSize: 14,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  targetRateValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  targetRateGrowth: {
-    fontSize: 12,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  forecastAccountCompact: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  forecastAccountCompactTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  forecastAccountCompactAmounts: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  forecastCompactNow: {
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  forecastCompactProjected: {
-    fontSize: 15,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  empty: { textAlign: 'center', marginTop: 32, paddingHorizontal: 24, fontSize: 14 },
   primaryBtn: {
     paddingHorizontal: 14,
     paddingVertical: 10,

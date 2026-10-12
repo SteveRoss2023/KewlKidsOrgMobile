@@ -336,61 +336,107 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
               >
                 <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
                   Year to date · {returnsYear}
+                  {ytdHeroTotals.invested.returnPct != null
+                    ? ` · ${fmtReturnPct(ytdHeroTotals.invested.returnPct)} invest return`
+                    : ''}
                 </Text>
-                <View style={styles.heroGrid}>
-                  {(
-                    [
-                      { key: 'invested', label: 'Investments', totals: ytdHeroTotals.invested },
-                      { key: 'cash', label: 'Cash', totals: ytdHeroTotals.cash },
-                      { key: 'all', label: 'Total', totals: ytdHeroTotals.all },
-                    ] as const
-                  ).map((cell) => (
-                    <View key={cell.key} style={styles.heroCell}>
-                      <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                        {cell.label}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.heroValue,
-                          { color: returnsDeltaColor(cell.totals.delta) },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {fmtSignedMoney(cell.totals.delta)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.heroMeta,
-                          { color: returnsDeltaColor(cell.totals.returnPct) },
-                        ]}
-                      >
-                        {fmtReturnPct(cell.totals.returnPct)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={[styles.balancePath, { borderTopColor: colors.border }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.pathLabel, { color: colors.textSecondary }]}>
-                      Year start
+                <Text
+                  style={[
+                    styles.heroPortfolio,
+                    { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {fmtSignedMoney(ytdHeroTotals.invested.delta)}
+                </Text>
+                <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
+                  Investment growth
+                </Text>
+
+                <View style={styles.heroInvestPath}>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+                      Invest start
                     </Text>
-                    <Text style={[styles.pathValue, { color: colors.text }]}>
-                      {displayMoney(ytdHeroTotals.all.start)}
+                    <Text
+                      style={[styles.heroValue, { color: investedColor }]}
+                      numberOfLines={1}
+                    >
+                      {displayMoney(ytdHeroTotals.invested.start)}
                     </Text>
                   </View>
-                  <FontAwesome
-                    name="long-arrow-right"
-                    size={14}
-                    color={colors.textSecondary}
-                    style={{ marginTop: 14 }}
-                  />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={[styles.pathLabel, { color: colors.textSecondary }]}>Latest</Text>
-                    <Text style={[styles.pathValue, { color: colors.text }]}>
+                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+                      Growth
+                    </Text>
+                    <Text
+                      style={[
+                        styles.heroValue,
+                        { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {fmtSignedMoney(ytdHeroTotals.invested.delta)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.heroMeta,
+                        { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
+                      ]}
+                    >
+                      {fmtReturnPct(ytdHeroTotals.invested.returnPct)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+                      Invest now
+                    </Text>
+                    <Text
+                      style={[styles.heroValue, { color: investedColor }]}
+                      numberOfLines={1}
+                    >
+                      {displayMoney(ytdHeroTotals.invested.latest)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={[styles.heroPortfolioRow, { borderTopColor: colors.border }]}>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+                      Invest now
+                    </Text>
+                    <Text
+                      style={[styles.heroValue, { color: investedColor }]}
+                      numberOfLines={1}
+                    >
+                      {displayMoney(ytdHeroTotals.invested.latest)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
+                    <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+                      {displayMoney(ytdHeroTotals.cash.latest)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
+                  <View style={styles.heroBreakCell}>
+                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+                      Portfolio
+                    </Text>
+                    <Text
+                      style={[styles.heroValue, { color: colors.primary }]}
+                      numberOfLines={1}
+                    >
                       {displayMoney(ytdHeroTotals.all.latest)}
                     </Text>
                   </View>
                 </View>
+                <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
+                  Investment growth · cash added to portfolio total
+                </Text>
               </View>
 
               <View
@@ -564,21 +610,35 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
   sectionHint: { fontSize: 12, fontWeight: '500', marginTop: -4 },
-  heroGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  heroCell: { flexGrow: 1, flexBasis: '28%', minWidth: 88, gap: 2 },
-  heroCaption: { fontSize: 11, fontWeight: '600' },
-  heroValue: { fontSize: 16, fontWeight: '800' },
-  heroMeta: { fontSize: 12, fontWeight: '700' },
-  balancePath: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 10,
+  heroPortfolio: {
+    fontSize: 28,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
     marginTop: 2,
   },
-  pathLabel: { fontSize: 11, fontWeight: '600' },
-  pathValue: { fontSize: 15, fontWeight: '700', marginTop: 2 },
+  heroPortfolioHint: { fontSize: 12, fontWeight: '600', marginTop: -4 },
+  heroInvestPath: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  heroPortfolioRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+    marginTop: 4,
+  },
+  heroBreakCell: { flexGrow: 1, flexBasis: '22%', minWidth: 88, gap: 2 },
+  heroOp: { fontSize: 16, fontWeight: '700', paddingTop: 16 },
+  heroFormulaHint: { fontSize: 11, fontWeight: '500' },
+  heroCaption: { fontSize: 11, fontWeight: '600' },
+  heroValue: { fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  heroMeta: { fontSize: 12, fontWeight: '700' },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     paddingHorizontal: 10,
