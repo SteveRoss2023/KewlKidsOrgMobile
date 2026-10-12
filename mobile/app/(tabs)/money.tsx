@@ -32,6 +32,7 @@ import UpdateBalancesWizard, {
   firstOfMonthYmd,
 } from '../../components/money/UpdateBalancesWizard';
 import YtdDashboard from '../../components/money/YtdDashboard';
+import IncomeDashboard from '../../components/money/IncomeDashboard';
 import TooltipButton from '../../components/TooltipButton';
 import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 import AuthService from '../../services/authService';
@@ -50,25 +51,9 @@ import {
 import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 
 type MoneyTab = 'income' | 'accounts' | 'ytd' | 'target';
-type IncomeSubTab = 'streams' | 'calendar';
 
 /** Year-end what-if rates shown on the Target tab. */
 const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
-
-const STREAM_COLORS = [
-  '#2563eb',
-  '#059669',
-  '#d97706',
-  '#db2777',
-  '#7c3aed',
-  '#0891b2',
-  '#ea580c',
-  '#4f46e5',
-];
-
-function streamColor(streamId: number): string {
-  return STREAM_COLORS[Math.abs(streamId) % STREAM_COLORS.length];
-}
 
 const STREAM_TYPES: { label: string; value: IncomeStreamType }[] = [
   { label: 'Employment', value: 'employment' },
@@ -108,19 +93,12 @@ export default function MoneyScreen() {
   const { selectedFamily } = useFamily();
   const params = useLocalSearchParams<{ tab?: string; updateBalances?: string }>();
   const [tab, setTab] = useState<MoneyTab>('ytd');
-  const [incomeSubTab, setIncomeSubTab] = useState<IncomeSubTab>('calendar');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [streams, setStreams] = useState<IncomeStream[]>([]);
-  const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>([]);
   const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
   const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
-  const [selectedStreamId, setSelectedStreamId] = useState<number | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [incomeViewMonth, setIncomeViewMonth] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
   const [returnsYear, setReturnsYear] = useState(() => new Date().getFullYear());
   /** Which Target rate rows are expanded to show per-account lists. */
   const [expandedTargetRates, setExpandedTargetRates] = useState<number[]>([]);
@@ -136,7 +114,6 @@ export default function MoneyScreen() {
   const [saving, setSaving] = useState(false);
 
   const [editingOcc, setEditingOcc] = useState<IncomeOccurrence | null>(null);
-  const [occEstimate, setOccEstimate] = useState('');
   const [occActual, setOccActual] = useState('');
 
   const [showAccountForm, setShowAccountForm] = useState(false);
@@ -159,16 +136,14 @@ export default function MoneyScreen() {
   const [pendingDeleteOcc, setPendingDeleteOcc] = useState<IncomeOccurrence | null>(null);
   const { showAmounts, setShowAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const [demoPortfolio, setDemoPortfolio] = useState(false);
-  const [expandedStreamIds, setExpandedStreamIds] = useState<number[]>([]);
-  const [expandedIncomeMonth, setExpandedIncomeMonth] = useState<string | null>(null);
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
-  const ensuredYearRef = useRef('');
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   /** Family id whose money data is currently in state (null while clearing / loading). */
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
   const [ytdBoardRefreshKey, setYtdBoardRefreshKey] = useState(0);
+  const [incomeBoardRefreshKey, setIncomeBoardRefreshKey] = useState(0);
 
   const loadDemoPortfolioPref = useCallback(async () => {
     const user = await AuthService.getUserData();
@@ -186,8 +161,6 @@ export default function MoneyScreen() {
   useFocusEffect(
     useCallback(() => {
       setShowAmounts(false);
-      setExpandedStreamIds([]);
-      setExpandedIncomeMonth(null);
       setExpandedAccountId(null);
       setExpandedTargetRates([]);
       void loadDemoPortfolioPref();
@@ -199,6 +172,7 @@ export default function MoneyScreen() {
     if (
       t === 'accounts' ||
       t === 'income' ||
+      t === 'income-board' ||
       t === 'calendar' ||
       t === 'ytd' ||
       t === 'target' ||
@@ -207,12 +181,10 @@ export default function MoneyScreen() {
     ) {
       if (t === 'forecast' || t === 'returns') {
         setTab('ytd');
-      } else if (t === 'calendar') {
+      } else if (t === 'calendar' || t === 'income-board') {
         setTab('income');
-        setIncomeSubTab('calendar');
       } else {
-        setTab(t);
-        if (t === 'income') setIncomeSubTab('calendar');
+        setTab(t as MoneyTab);
       }
     }
     if (params.updateBalances === '1' || params.updateBalances === 'true') {
@@ -256,13 +228,9 @@ export default function MoneyScreen() {
   const clearMoneyState = useCallback(() => {
     fetchGenerationRef.current += 1;
     setStreams([]);
-    setOccurrences([]);
     setAccounts([]);
     setSnapshots([]);
-    setSelectedStreamId(null);
     setSelectedAccountId(null);
-    setExpandedStreamIds([]);
-    setExpandedIncomeMonth(null);
     setExpandedAccountId(null);
     setExpandedTargetRates([]);
     setShowStreamForm(false);
@@ -277,7 +245,6 @@ export default function MoneyScreen() {
     setPendingDeleteAccount(null);
     setPendingDeleteSnapshot(null);
     setPendingDeleteOcc(null);
-    ensuredYearRef.current = '';
     setError('');
     setDataFamilyId(null);
     setLoading(true);
@@ -294,9 +261,9 @@ export default function MoneyScreen() {
     setLoading(true);
     setError('');
     try {
-      const [s, o, a, sn] = await Promise.all([
+      // Streams kept for payment-form stream type; Income board loads its own occs.
+      const [s, a, sn] = await Promise.all([
         moneyService.getStreams(familyId),
-        moneyService.getOccurrences(familyId),
         moneyService.getAccounts(familyId),
         moneyService.getSnapshots(familyId),
       ]);
@@ -307,13 +274,12 @@ export default function MoneyScreen() {
         return;
       }
       setStreams(s);
-      setOccurrences(o);
       setAccounts(a);
       setSnapshots(sn);
-      setSelectedStreamId(s[0]?.id ?? null);
       setSelectedAccountId(a[0]?.id ?? null);
       setDataFamilyId(familyId);
       setYtdBoardRefreshKey((k) => k + 1);
+      setIncomeBoardRefreshKey((k) => k + 1);
     } catch (err: any) {
       if (
         generation !== fetchGenerationRef.current ||
@@ -323,10 +289,8 @@ export default function MoneyScreen() {
       }
       setError(err.message || 'Failed to load money data');
       setStreams([]);
-      setOccurrences([]);
       setAccounts([]);
       setSnapshots([]);
-      setSelectedStreamId(null);
       setSelectedAccountId(null);
       setDataFamilyId(null);
     } finally {
@@ -352,63 +316,6 @@ export default function MoneyScreen() {
     }, [load, selectedFamily])
   );
 
-  const incomeViewYear = incomeViewMonth.getFullYear();
-
-  const yearMonthRows = useMemo(() => {
-    const y = incomeViewYear;
-    const rows: {
-      key: string;
-      label: string;
-      occs: IncomeOccurrence[];
-      total: number;
-    }[] = [];
-    for (let m = 0; m < 12; m++) {
-      const key = `${y}-${String(m + 1).padStart(2, '0')}`;
-      const prefix = `${key}-`;
-      const occs = occurrences
-        .filter((o) => o.due_date.startsWith(prefix))
-        .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.stream - b.stream);
-      let total = 0;
-      for (const o of occs) {
-        const raw = o.actual_amount ?? o.estimated_amount;
-        const boosted = withDemoIncome(raw, streamTypeById.get(o.stream), demoPortfolio);
-        total += boosted ?? 0;
-      }
-      rows.push({
-        key,
-        label: new Date(y, m, 1).toLocaleDateString('en-US', { month: 'long' }),
-        occs,
-        total,
-      });
-    }
-    return rows;
-  }, [occurrences, incomeViewYear, streamTypeById, demoPortfolio]);
-
-  const yearIncomeTotal = useMemo(
-    () => yearMonthRows.reduce((sum, row) => sum + row.total, 0),
-    [yearMonthRows]
-  );
-
-  const occsByStream = useMemo(() => {
-    const map = new Map<number, IncomeOccurrence[]>();
-    const sorted = [...occurrences].sort(
-      (a, b) => a.due_date.localeCompare(b.due_date) || a.stream - b.stream
-    );
-    for (const o of sorted) {
-      const list = map.get(o.stream) || [];
-      list.push(o);
-      map.set(o.stream, list);
-    }
-    return map;
-  }, [occurrences]);
-
-  const toggleStreamExpanded = (streamId: number) => {
-    setSelectedStreamId(streamId);
-    setExpandedStreamIds((prev) =>
-      prev.includes(streamId) ? prev.filter((id) => id !== streamId) : [...prev, streamId]
-    );
-  };
-
   const toggleAccountExpanded = (accountId: number) => {
     setExpandedAccountId((prev) => (prev === accountId ? null : accountId));
   };
@@ -430,7 +337,7 @@ export default function MoneyScreen() {
       .filter((d): d is string => !!d)
       .sort();
     const last = dates.length ? dates[dates.length - 1] : null;
-    if (!last) return 'Never updated · as of the 1st';
+    if (!last) return 'Never updated Â· as of the 1st';
     try {
       const [y, m, d] = last.split('-').map(Number);
       const label = new Date(y, m - 1, d).toLocaleDateString(undefined, {
@@ -525,16 +432,11 @@ export default function MoneyScreen() {
       } else {
         stream = await moneyService.createStream(payload);
       }
-      const startYear = parseInt(stream.start_date.slice(0, 4), 10);
-      const startMonth = parseInt(stream.start_date.slice(5, 7), 10) - 1;
-      const viewYearEnd = `${Math.max(incomeViewMonth.getFullYear(), startYear)}-12-31`;
-      const until = stream.end_date || viewYearEnd;
+      const startYear = parseInt(stream.start_date.slice(0, 4), 10) || new Date().getFullYear();
+      const horizonYear = Math.max(new Date().getFullYear() + 1, startYear);
+      const until = stream.end_date || `${horizonYear}-12-31`;
       await moneyService.generateOccurrences(stream.id, until);
-      ensuredYearRef.current = '';
-      // Jump calendar to the stream's start month so future pensions are visible.
-      setIncomeViewMonth(new Date(startYear, startMonth, 1));
       setShowStreamForm(false);
-      setSelectedStreamId(stream.id);
       await load();
     } catch (err: any) {
       setError(err.message || 'Failed to save stream');
@@ -543,59 +445,18 @@ export default function MoneyScreen() {
     }
   };
 
-  const ensureYearSchedule = useCallback(
-    async (month: Date, streamList: IncomeStream[]) => {
-      if (!selectedFamily || streamList.length === 0) return;
-      if (dataFamilyId !== selectedFamily.id) return;
-      if (streamList.some((s) => s.family !== selectedFamily.id)) return;
-      const y = month.getFullYear();
-      const key = `${selectedFamily.id}:${y}:${streamList.map((s) => s.id).join(',')}`;
-      if (ensuredYearRef.current === key) return;
-      const yearStart = `${y}-01-01`;
-      const yearEnd = `${y}-12-31`;
-      let createdAny = false;
-      try {
-        for (const s of streamList) {
-          if (s.start_date > yearEnd) continue;
-          if (s.end_date && s.end_date < yearStart) continue;
-          let until = yearEnd;
-          if (s.end_date && s.end_date < until) until = s.end_date;
-          const res = await moneyService.generateOccurrences(s.id, until);
-          if (res.created > 0) createdAny = true;
-        }
-        ensuredYearRef.current = key;
-        if (createdAny) await load();
-      } catch {
-        // ignore auto-fill errors; user can navigate again
-      }
-    },
-    [selectedFamily, dataFamilyId, load]
-  );
-
-  useEffect(() => {
-    if (tab !== 'income' || streams.length === 0) return;
-    if (!selectedFamily || dataFamilyId !== selectedFamily.id) return;
-    void ensureYearSchedule(incomeViewMonth, streams);
-  }, [tab, incomeSubTab, streams, incomeViewMonth, ensureYearSchedule, selectedFamily, dataFamilyId]);
-
   const openOcc = (o: IncomeOccurrence) => {
     setEditingOcc(o);
-    setOccEstimate(formatMoneyDisplay(o.estimated_amount));
     setOccActual(o.actual_amount != null ? formatMoneyDisplay(o.actual_amount) : '');
   };
 
   const saveOcc = async () => {
     if (!editingOcc) return;
-    const est = parseMoneyDisplay(occEstimate);
     const act = occActual.trim() ? parseMoneyDisplay(occActual) : null;
-    if (est == null) {
-      setError('Estimate required');
-      return;
-    }
     setSaving(true);
     try {
+      // Estimate is owned by the stream; payments only set actual deposited amount.
       await moneyService.updateOccurrence(editingOcc.id, {
-        estimated_amount: est,
         actual_amount: act,
         status: act != null ? 'received' : 'estimated',
       });
@@ -712,500 +573,6 @@ export default function MoneyScreen() {
       setSaving(false);
     }
   };
-
-  const freqLabel = (f: IncomeFrequency) =>
-    FREQUENCIES.find((x) => x.value === f)?.label || f;
-  const typeLabel = (t: IncomeStreamType) =>
-    STREAM_TYPES.find((x) => x.value === t)?.label || t;
-
-  const goToThisYear = () => {
-    const next = new Date();
-    next.setDate(1);
-    setIncomeViewMonth(next);
-    setExpandedIncomeMonth(null);
-  };
-
-  const shiftYear = (deltaYears: number) => {
-    setIncomeViewMonth((d) => new Date(d.getFullYear() + deltaYears, d.getMonth(), 1));
-    setExpandedIncomeMonth(null);
-  };
-
-  const renderYearNav = () => (
-    <>
-      <View style={styles.calNav}>
-        <TouchableOpacity
-          style={styles.calNavBtn}
-          onPress={() => shiftYear(-1)}
-          accessibilityLabel="Previous year"
-        >
-          <FontAwesome name="chevron-left" size={14} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.calNavLabel, { color: colors.text, fontSize: 16 }]} numberOfLines={1}>
-          {incomeViewYear}
-        </Text>
-        <TouchableOpacity
-          style={styles.calNavBtn}
-          onPress={() => shiftYear(1)}
-          accessibilityLabel="Next year"
-        >
-          <FontAwesome name="chevron-right" size={14} color={colors.text} />
-        </TouchableOpacity>
-      </View>
-      <View style={styles.calNavSecondary}>
-        <TouchableOpacity
-          style={[styles.todayBtn, { borderColor: colors.primary }]}
-          onPress={goToThisYear}
-          accessibilityLabel="Go to this year"
-        >
-          <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>This year</Text>
-        </TouchableOpacity>
-      </View>
-    </>
-  );
-
-  const renderIncomeStreams = () => {
-    if (streams.length === 0) {
-      return (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Income streams</Text>
-            <TooltipButton tooltip="Add income stream" onPress={openNewStream}>
-              <Text style={{ color: colors.primary, fontWeight: '700' }}>Add</Text>
-            </TooltipButton>
-          </View>
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add a paycheck or pension stream with start/end dates (e.g. work until Apr 2027, pensions from
-            Dec 2027).
-          </Text>
-        </>
-      );
-    }
-
-    return (
-      <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 12, gap: 10 }}>
-        <View style={styles.sectionHeaderInline}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Streams ({streams.length})
-          </Text>
-          <TooltipButton tooltip="Add income stream" onPress={openNewStream}>
-            <Text style={{ color: colors.primary, fontWeight: '700' }}>Add</Text>
-          </TooltipButton>
-        </View>
-        <Text style={[styles.meta, { color: colors.textSecondary }]}>
-          All streams listed below. Expand one to see every payment; edit the stream or mark
-          actuals on each item.
-        </Text>
-
-        {streams.map((s) => {
-          const expanded = expandedStreamIds.includes(s.id);
-          const color = streamColor(s.id);
-          const items = occsByStream.get(s.id) || [];
-          return (
-            <View
-              key={s.id}
-              style={[
-                styles.streamList,
-                { borderColor: colors.border, backgroundColor: colors.card },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.streamCollapseHeader}
-                onPress={() => toggleStreamExpanded(s.id)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded }}
-                accessibilityLabel={expanded ? `Collapse ${s.name}` : `Expand ${s.name}`}
-              >
-                <FontAwesome
-                  name={expanded ? 'chevron-down' : 'chevron-right'}
-                  size={12}
-                  color={colors.textSecondary}
-                />
-                <View style={[styles.colorBar, { backgroundColor: color }]} />
-                <View style={styles.flex}>
-                  <View style={styles.streamCardTop}>
-                    <Text
-                      style={[styles.streamCardName, { color: colors.text, fontWeight: '600' }]}
-                      numberOfLines={1}
-                    >
-                      {s.name}
-                    </Text>
-                    <Text style={[styles.streamCardAmt, { color: colors.text }]}>
-                      {displayIncomeMoney(s.default_estimate, s.stream_type)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {typeLabel(s.stream_type)} · {freqLabel(s.frequency)} · {items.length} payments
-                  </Text>
-                  <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {formatShortDate(s.start_date)}
-                    {' → '}
-                    {s.end_date ? formatShortDate(s.end_date) : 'open'}
-                  </Text>
-                </View>
-                <View style={styles.streamCardActions}>
-                  <TooltipButton
-                    tooltip={`Edit ${s.name}`}
-                    style={styles.iconAction}
-                    onPress={() => openEditStream(s)}
-                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  >
-                    <FontAwesome name="pencil" size={13} color={colors.primary} />
-                  </TooltipButton>
-                  <TooltipButton
-                    tooltip={`Delete ${s.name}`}
-                    style={styles.iconAction}
-                    onPress={() => setPendingDeleteStream(s)}
-                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  >
-                    <FontAwesome name="trash" size={13} color={colors.error || '#ef4444'} />
-                  </TooltipButton>
-                </View>
-              </TouchableOpacity>
-
-              {expanded ? (
-                items.length === 0 ? (
-                  <Text
-                    style={[
-                      styles.meta,
-                      {
-                        color: colors.textSecondary,
-                        paddingHorizontal: 12,
-                        paddingBottom: 12,
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: colors.border,
-                        paddingTop: 10,
-                      },
-                    ]}
-                  >
-                    No payments yet. Check the stream start/end dates, or open Calendar to generate
-                    the schedule.
-                  </Text>
-                ) : (
-                  <>
-                    <View
-                      style={[
-                        styles.itemTableHeader,
-                        {
-                          borderTopColor: colors.border,
-                          backgroundColor: colors.surface,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.itemTableColDate, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        Date
-                      </Text>
-                      <Text
-                        style={[styles.itemTableColAmt, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        Est
-                      </Text>
-                      <Text
-                        style={[styles.itemTableColAmt, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        Actual
-                      </Text>
-                      <Text
-                        style={[styles.itemTableColStatus, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        Status
-                      </Text>
-                      <View style={styles.itemTableColActions} />
-                    </View>
-                    {items.map((o) => (
-                      <View
-                        key={o.id}
-                        style={[
-                          styles.itemTableRow,
-                          {
-                            borderTopColor: colors.border,
-                            backgroundColor: colors.card,
-                          },
-                        ]}
-                      >
-                        <TouchableOpacity
-                          style={styles.itemTableColDate}
-                          onPress={() => openOcc(o)}
-                          accessibilityLabel={`Edit payment on ${formatShortDate(o.due_date)}`}
-                        >
-                          <Text style={[styles.rowTitle, { color: colors.text, fontSize: 13 }]} numberOfLines={1}>
-                            {formatShortDate(o.due_date)}
-                          </Text>
-                        </TouchableOpacity>
-                        <Text
-                          style={[styles.itemTableColAmt, { color: colors.text }]}
-                          numberOfLines={1}
-                        >
-                          {displayIncomeMoney(o.estimated_amount, s.stream_type)}
-                        </Text>
-                        <Text
-                          style={[styles.itemTableColAmt, { color: colors.text }]}
-                          numberOfLines={1}
-                        >
-                          {o.actual_amount != null
-                            ? displayIncomeMoney(o.actual_amount, s.stream_type)
-                            : '—'}
-                        </Text>
-                        <View style={styles.itemTableColStatus}>
-                          <View
-                            style={[
-                              styles.badge,
-                              {
-                                backgroundColor:
-                                  o.status === 'received'
-                                    ? '#10b98133'
-                                    : o.status === 'skipped'
-                                      ? '#94a3b833'
-                                      : '#f59e0b33',
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                fontWeight: '700',
-                                color:
-                                  o.status === 'received'
-                                    ? '#10b981'
-                                    : o.status === 'skipped'
-                                      ? '#64748b'
-                                      : '#f59e0b',
-                              }}
-                            >
-                              {o.status}
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.itemTableColActions}>
-                          <TooltipButton
-                            tooltip="Edit payment"
-                            style={styles.iconAction}
-                            onPress={() => openOcc(o)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          >
-                            <FontAwesome name="pencil" size={13} color={colors.primary} />
-                          </TooltipButton>
-                          <TooltipButton
-                            tooltip="Delete payment"
-                            style={styles.iconAction}
-                            onPress={() => setPendingDeleteOcc(o)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          >
-                            <FontAwesome
-                              name="trash"
-                              size={13}
-                              color={colors.error || '#ef4444'}
-                            />
-                          </TooltipButton>
-                        </View>
-                      </View>
-                    ))}
-                  </>
-                )
-              ) : null}
-            </View>
-          );
-        })}
-      </ScrollView>
-    );
-  };
-
-  const renderCalendar = () => {
-    if (streams.length === 0) {
-      return (
-        <View style={styles.center}>
-          <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
-            Add an income stream first, then monthly income will show here.
-          </Text>
-        </View>
-      );
-    }
-    return (
-      <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 12, gap: 8 }}>
-        {renderYearNav()}
-
-        <View
-          style={[styles.streamList, { borderColor: colors.border, backgroundColor: colors.card }]}
-        >
-          <View style={styles.portfolioHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 15 }]}>
-                {incomeViewYear} income
-              </Text>
-              <Text style={[styles.amount, { color: colors.primary, fontSize: 15, marginTop: 2 }]}>
-                {displayMoney(yearIncomeTotal)}
-              </Text>
-            </View>
-          </View>
-
-          {yearMonthRows.map((row) => {
-            const expanded = expandedIncomeMonth === row.key;
-            return (
-              <View key={row.key}>
-                <TouchableOpacity
-                  style={[styles.monthListRow, { borderTopColor: colors.border }]}
-                  onPress={() =>
-                    setExpandedIncomeMonth((prev) => (prev === row.key ? null : row.key))
-                  }
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded }}
-                  accessibilityLabel={
-                    expanded ? `Collapse ${row.label}` : `Expand ${row.label}`
-                  }
-                >
-                  <FontAwesome
-                    name={expanded ? 'chevron-down' : 'chevron-right'}
-                    size={12}
-                    color={colors.textSecondary}
-                    style={{ marginRight: 4 }}
-                  />
-                  <View style={styles.flex}>
-                    <Text style={[styles.rowTitle, { color: colors.text }]}>
-                      {row.label} ({row.occs.length})
-                    </Text>
-                  </View>
-                  <Text style={[styles.amount, { color: colors.primary }]}>
-                    {displayMoney(row.total)}
-                  </Text>
-                </TouchableOpacity>
-
-                {expanded ? (
-                  <View
-                    style={[
-                      styles.yearMonthPanel,
-                      { borderTopColor: colors.border, backgroundColor: colors.surface },
-                    ]}
-                  >
-                    {row.occs.length === 0 ? (
-                      <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                        No payments this month.
-                      </Text>
-                    ) : (
-                      row.occs.map((o) => {
-                        const color = streamColor(o.stream);
-                        const st = streamTypeById.get(o.stream);
-                        return (
-                          <View
-                            key={o.id}
-                            style={[
-                              styles.yearPayRow,
-                              {
-                                borderColor: colors.border,
-                                backgroundColor: colors.card,
-                              },
-                            ]}
-                          >
-                            <View style={[styles.yearPayBar, { backgroundColor: color }]} />
-                            <TouchableOpacity style={styles.flex} onPress={() => openOcc(o)}>
-                              <Text
-                                style={[styles.yearPayName, { color: colors.text }]}
-                                numberOfLines={1}
-                              >
-                                {o.stream_name ||
-                                  streams.find((s) => s.id === o.stream)?.name ||
-                                  'Stream'}
-                              </Text>
-                              <Text
-                                style={[styles.yearPayMeta, { color: colors.textSecondary }]}
-                                numberOfLines={1}
-                              >
-                                {formatShortDate(o.due_date)} · Est{' '}
-                                {displayIncomeMoney(o.estimated_amount, st)}
-                                {o.actual_amount != null ? (
-                                  <>
-                                    {' · Act '}
-                                    <Text style={{ color: colors.success || '#10b981', fontWeight: '700' }}>
-                                      {displayIncomeMoney(o.actual_amount, st)}
-                                    </Text>
-                                  </>
-                                ) : null}
-                              </Text>
-                            </TouchableOpacity>
-                            <TooltipButton
-                              tooltip="Edit payment"
-                              style={styles.iconActionCompact}
-                              onPress={() => openOcc(o)}
-                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            >
-                              <FontAwesome name="pencil" size={12} color={colors.primary} />
-                            </TooltipButton>
-                            <TooltipButton
-                              tooltip="Delete payment"
-                              style={styles.iconActionCompact}
-                              onPress={() => setPendingDeleteOcc(o)}
-                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            >
-                              <FontAwesome
-                                name="trash"
-                                size={12}
-                                color={colors.error || '#ef4444'}
-                              />
-                            </TooltipButton>
-                          </View>
-                        );
-                      })
-                    )}
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      </ScrollView>
-    );
-  };
-
-  const renderIncome = () => (
-    <View style={styles.flex}>
-      <View
-        style={[
-          styles.incomeSubTabBar,
-          { borderBottomColor: colors.border, backgroundColor: colors.surface },
-        ]}
-      >
-        {(
-          [
-            { id: 'calendar' as const, label: 'Year', icon: 'calendar' as const },
-            { id: 'streams' as const, label: 'Streams', icon: 'list' as const },
-          ] as const
-        ).map((t) => {
-          const selected = incomeSubTab === t.id;
-          return (
-            <TouchableOpacity
-              key={t.id}
-              style={[
-                styles.incomeSubTab,
-                selected && { borderBottomColor: colors.primary },
-              ]}
-              onPress={() => setIncomeSubTab(t.id)}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
-            >
-              <FontAwesome
-                name={t.icon}
-                size={13}
-                color={selected ? colors.primary : colors.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.incomeSubTabText,
-                  { color: selected ? colors.primary : colors.textSecondary },
-                ]}
-              >
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {incomeSubTab === 'streams' ? renderIncomeStreams() : renderCalendar()}
-    </View>
-  );
 
   const renderAccounts = () => (
     <View style={styles.flex}>
@@ -1698,10 +1065,7 @@ export default function MoneyScreen() {
                   selected && { backgroundColor: colors.primary },
                   { borderColor: colors.border },
                 ]}
-                onPress={() => {
-                  setTab(t.id);
-                  if (t.id === 'income') setIncomeSubTab('calendar');
-                }}
+                onPress={() => setTab(t.id)}
               >
                 <FontAwesome name={t.icon} size={14} color={selected ? '#fff' : colors.textSecondary} />
                 <Text style={[styles.tabText, { color: selected ? '#fff' : colors.textSecondary }]}>
@@ -1726,7 +1090,15 @@ export default function MoneyScreen() {
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : tab === 'income' ? (
-        renderIncome()
+        <IncomeDashboard
+          key={selectedFamily?.id ?? 'none'}
+          refreshKey={incomeBoardRefreshKey}
+          onAddStream={openNewStream}
+          onEditStream={openEditStream}
+          onEditOccurrence={openOcc}
+          onDeleteStream={setPendingDeleteStream}
+          onDeleteOccurrence={setPendingDeleteOcc}
+        />
       ) : tab === 'accounts' ? (
         renderAccounts()
       ) : tab === 'ytd' ? (
@@ -1808,12 +1180,17 @@ export default function MoneyScreen() {
             {editingOcc?.due_date} · {editingOcc?.stream_name}
           </Text>
           <Text style={[styles.label, { color: colors.text }]}>Estimate</Text>
-          <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-            value={occEstimate}
-            onChangeText={(t) => setOccEstimate(onMoneyChange(t))}
-            keyboardType="decimal-pad"
-          />
+          <Text style={[styles.input, styles.readOnlyValue, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}>
+            {editingOcc
+              ? displayIncomeMoney(
+                  editingOcc.estimated_amount,
+                  streamTypeById.get(editingOcc.stream)
+                )
+              : '—'}
+          </Text>
+          <Text style={[styles.meta, { color: colors.textSecondary, marginTop: -4 }]}>
+            To change the estimate, edit the stream.
+          </Text>
           <Text style={[styles.label, { color: colors.text }]}>Actual (when deposited)</Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
@@ -1822,6 +1199,7 @@ export default function MoneyScreen() {
             keyboardType="decimal-pad"
             placeholder="Leave blank until deposited"
             placeholderTextColor={colors.textSecondary}
+            autoFocus
           />
         </>
       ))}
@@ -1936,8 +1314,7 @@ export default function MoneyScreen() {
           try {
             await moneyService.deleteStream(pendingDeleteStream.id);
             setPendingDeleteStream(null);
-            setSelectedStreamId(null);
-            await load();
+                  await load();
           } catch (err: any) {
             setError(err.message || 'Delete failed');
             setPendingDeleteStream(null);
@@ -2156,24 +1533,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 8,
-  },
-  incomeSubTabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 8,
-  },
-  incomeSubTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  incomeSubTabText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   streamList: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -2446,5 +1805,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
+  },
+  readOnlyValue: {
+    fontWeight: '600',
+    overflow: 'hidden',
   },
 });

@@ -24,10 +24,16 @@ async function fetchAllPages<T>(
   let items: T[] = [...response.data.results];
   let nextUrl: string | null = response.data.next || null;
   while (nextUrl) {
+    // DRF `next` is absolute and includes /api; baseURL already ends with /api.
     let path = nextUrl;
     if (nextUrl.startsWith('http://') || nextUrl.startsWith('https://')) {
       const url = new URL(nextUrl);
       path = url.pathname + url.search;
+      if (path.startsWith('/api')) path = path.substring(4);
+    } else if (nextUrl.startsWith('/api')) {
+      path = nextUrl.substring(4);
+    } else if (!nextUrl.startsWith('/')) {
+      path = '/' + nextUrl;
     }
     const next = await apiClient.get(path);
     if (Array.isArray(next.data?.results)) {
