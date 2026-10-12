@@ -33,7 +33,8 @@ import {
   CreateExpenseTagData,
   UpdateExpenseTagData,
 } from '../../types/expenses';
-import MonthBudgetCards from '../../components/expenses/MonthBudgetCards';
+import BudgetDashboard from '../../components/expenses/BudgetDashboard';
+import ExpenseDashboard from '../../components/expenses/ExpenseDashboard';
 import BillsBudgetsHub from '../../components/expenses/BillsBudgetsHub';
 import BudgetCard from '../../components/expenses/BudgetCard';
 import ExpenseForm from '../../components/expenses/ExpenseForm';
@@ -58,7 +59,7 @@ import {
 } from '../../utils/expensePeriods';
 import { forFamily } from '../../utils/familyScope';
 
-type HubTab = 'dashboard' | 'budgets' | 'expenses' | 'bills' | 'categories';
+type HubTab = 'overview' | 'budgets' | 'expense-board' | 'expenses' | 'bills' | 'categories';
 type SortBy = 'date' | 'amount' | 'category';
 type SortOrder = 'asc' | 'desc';
 
@@ -78,7 +79,7 @@ export default function ExpensesHubScreen() {
   const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const { width: windowWidth } = useWindowDimensions();
 
-  const [activeTab, setActiveTab] = useState<HubTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<HubTab>('overview');
   const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>('month');
   const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
@@ -399,6 +400,7 @@ export default function ExpensesHubScreen() {
     try {
       const updated = await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
       setExpenses((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      setBudgetsRefreshKey((k) => k + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update paid status');
     } finally {
@@ -410,6 +412,7 @@ export default function ExpensesHubScreen() {
     try {
       await expenseService.deleteExpense(expense.id);
       setExpensePendingDelete(null);
+      setBudgetsRefreshKey((k) => k + 1);
       await load({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete expense');
@@ -510,7 +513,7 @@ export default function ExpensesHubScreen() {
 
   const handlePlanApplied = useCallback(() => {
     setBudgetsRefreshKey((k) => k + 1);
-    if (activeTab === 'expenses' || activeTab === 'categories') {
+    if (activeTab === 'expenses' || activeTab === 'expense-board' || activeTab === 'categories') {
       void load({ soft: true });
     }
   }, [activeTab, load]);
@@ -1044,7 +1047,7 @@ export default function ExpensesHubScreen() {
     switch (activeTab) {
       case 'budgets':
         return (
-          <MonthBudgetCards
+          <BudgetDashboard
             key={familyKey}
             refreshKey={budgetsRefreshKey}
             onExpensePress={(exp) => {
@@ -1055,6 +1058,28 @@ export default function ExpensesHubScreen() {
               setShowBudgetForm(true);
             }}
             onBudgetDelete={handleDeleteBudget}
+          />
+        );
+      case 'expense-board':
+        return (
+          <ExpenseDashboard
+            key={familyKey}
+            refreshKey={budgetsRefreshKey}
+            onAdd={() => {
+              editingExpenseRef.current = null;
+              setEditingExpense(null);
+              setShowExpenseForm(true);
+            }}
+            onScan={() => setShowReceiptWizard(true)}
+            onExpensePress={(exp) => {
+              void openExpenseEditor(exp);
+            }}
+            onExpenseDelete={handleDeleteExpense}
+            onTogglePaid={handleTogglePaid}
+            onBudgetPress={(budget) => {
+              setEditingBudget(budget);
+              setShowBudgetForm(true);
+            }}
           />
         );
       case 'expenses':
@@ -1068,7 +1093,7 @@ export default function ExpensesHubScreen() {
             onPlanApplied={handlePlanApplied}
           />
         );
-      case 'dashboard':
+      case 'overview':
         return <CashflowDashboard key={familyKey} />;
       case 'categories':
         return renderCategoriesTab();
@@ -1119,8 +1144,9 @@ export default function ExpensesHubScreen() {
         >
           {(
             [
-              { id: 'dashboard' as const, label: 'Dashboard', icon: 'tachometer' as const },
+              { id: 'overview' as const, label: 'Overview', icon: 'tachometer' as const },
               { id: 'budgets' as const, label: 'Budgets', icon: 'pie-chart' as const },
+              { id: 'expense-board' as const, label: 'Expense board', icon: 'th-list' as const },
               { id: 'expenses' as const, label: 'Expenses', icon: 'file-text-o' as const },
               { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
               { id: 'categories' as const, label: 'Categories', icon: 'folder-o' as const },
