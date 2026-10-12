@@ -123,3 +123,118 @@ export function buildCashflowSummary(
     unpaidByCategory: sortBreakdown([...unpaidByCategoryMap.values()]),
   };
 }
+
+export type CashflowMonthPoint = CashflowMonthSummary & {
+  monthIndex: number;
+  year: number;
+  startDate: string;
+  endDate: string;
+  label: string;
+};
+
+function lastDayOfMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+const MONTH_SHORT = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** Twelve monthly cashflow summaries for a calendar year (0 = Jan … 11 = Dec). */
+export function buildMonthlyCashflowSeries(
+  occurrences: IncomeOccurrence[],
+  expenses: Expense[],
+  year: number
+): CashflowMonthPoint[] {
+  return Array.from({ length: 12 }, (_, monthIndex) => {
+    const startDate = `${year}-${pad2(monthIndex + 1)}-01`;
+    const endDate = `${year}-${pad2(monthIndex + 1)}-${pad2(lastDayOfMonth(year, monthIndex))}`;
+    const summary = buildCashflowSummary(occurrences, expenses, startDate, endDate);
+    return {
+      ...summary,
+      monthIndex,
+      year,
+      startDate,
+      endDate,
+      label: MONTH_SHORT[monthIndex],
+    };
+  });
+}
+
+/** Sum monthly points into a year-level summary (breakdowns merged). */
+export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMonthSummary {
+  const incomeByStreamMap = new Map<string, CashflowBreakdownRow>();
+  const spentByCategoryMap = new Map<string, CashflowBreakdownRow>();
+  const unpaidByCategoryMap = new Map<string, CashflowBreakdownRow>();
+  let incomeTotal = 0;
+  let spentTotal = 0;
+  let unpaidTotal = 0;
+  let paidCount = 0;
+  let unpaidCount = 0;
+
+  for (const m of months) {
+    incomeTotal += m.incomeTotal;
+    spentTotal += m.spentTotal;
+    unpaidTotal += m.unpaidTotal;
+    paidCount += m.paidCount;
+    unpaidCount += m.unpaidCount;
+    for (const row of m.incomeByStream) {
+      addToBreakdown(incomeByStreamMap, row.key, row.label, row.amount);
+    }
+    for (const row of m.spentByCategory) {
+      addToBreakdown(spentByCategoryMap, row.key, row.label, row.amount);
+    }
+    for (const row of m.unpaidByCategory) {
+      addToBreakdown(unpaidByCategoryMap, row.key, row.label, row.amount);
+    }
+  }
+
+  const net = incomeTotal - spentTotal;
+  return {
+    incomeTotal,
+    spentTotal,
+    unpaidTotal,
+    paidCount,
+    unpaidCount,
+    expenseCount: paidCount + unpaidCount,
+    net,
+    netAfterUnpaid: net - unpaidTotal,
+    incomeByStream: sortBreakdown([...incomeByStreamMap.values()]),
+    spentByCategory: sortBreakdown([...spentByCategoryMap.values()]),
+    unpaidByCategory: sortBreakdown([...unpaidByCategoryMap.values()]),
+  };
+}
+
+/** Default month index for dashboard: current month in current year, else latest with activity, else Dec. */
+export function defaultDashboardMonthIndex(
+  year: number,
+  months: CashflowMonthPoint[],
+  now = new Date()
+): number {
+  if (year === now.getFullYear()) return now.getMonth();
+  for (let i = 11; i >= 0; i--) {
+    const m = months[i];
+    if (
+      m &&
+      (m.incomeTotal > 0 || m.spentTotal > 0 || m.unpaidTotal > 0 || m.expenseCount > 0)
+    ) {
+      return i;
+    }
+  }
+  return 11;
+}

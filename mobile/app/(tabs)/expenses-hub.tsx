@@ -41,7 +41,7 @@ import BudgetForm from '../../components/expenses/BudgetForm';
 import CategoryForm from '../../components/expenses/CategoryForm';
 import TagForm from '../../components/expenses/TagForm';
 import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
-import CashflowReport from '../../components/expenses/CashflowReport';
+import CashflowDashboard from '../../components/expenses/CashflowDashboard';
 import RecurringExpenseRow, {
   formatOccurrenceDate,
 } from '../../components/expenses/RecurringExpenseRow';
@@ -58,7 +58,7 @@ import {
 } from '../../utils/expensePeriods';
 import { forFamily } from '../../utils/familyScope';
 
-type HubTab = 'budgets' | 'expenses' | 'bills' | 'reports' | 'categories';
+type HubTab = 'dashboard' | 'budgets' | 'expenses' | 'bills' | 'categories';
 type SortBy = 'date' | 'amount' | 'category';
 type SortOrder = 'asc' | 'desc';
 
@@ -78,7 +78,7 @@ export default function ExpensesHubScreen() {
   const { showAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const { width: windowWidth } = useWindowDimensions();
 
-  const [activeTab, setActiveTab] = useState<HubTab>('budgets');
+  const [activeTab, setActiveTab] = useState<HubTab>('dashboard');
   const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>('month');
   const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
@@ -1068,8 +1068,8 @@ export default function ExpensesHubScreen() {
             onPlanApplied={handlePlanApplied}
           />
         );
-      case 'reports':
-        return <CashflowReport key={familyKey} />;
+      case 'dashboard':
+        return <CashflowDashboard key={familyKey} />;
       case 'categories':
         return renderCategoriesTab();
       default:
@@ -1119,10 +1119,10 @@ export default function ExpensesHubScreen() {
         >
           {(
             [
+              { id: 'dashboard' as const, label: 'Dashboard', icon: 'tachometer' as const },
               { id: 'budgets' as const, label: 'Budgets', icon: 'pie-chart' as const },
               { id: 'expenses' as const, label: 'Expenses', icon: 'file-text-o' as const },
               { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
-              { id: 'reports' as const, label: 'Reports', icon: 'bar-chart' as const },
               { id: 'categories' as const, label: 'Categories', icon: 'folder-o' as const },
             ] as const
           ).map((tab) => {
