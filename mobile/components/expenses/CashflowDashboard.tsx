@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -14,12 +15,18 @@ import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import expenseService from '../../services/expenseService';
 import moneyService from '../../services/moneyService';
 import { Expense } from '../../types/expenses';
-import { IncomeOccurrence, IncomeStream } from '../../types/money';
+import { IncomeOccurrence, IncomeStream, IncomeStreamType } from '../../types/money';
 import {
   buildMonthlyCashflowSeries,
   defaultDashboardMonthIndex,
   rollupCashflowSeries,
 } from '../../utils/cashflow';
+import AuthService from '../../services/authService';
+import { STORAGE_KEYS, storage } from '../../utils/storage';
+import {
+  canUseMoneyDemoPortfolio,
+  withDemoIncome,
+} from '../../utils/moneyDemoPortfolio';
 import DonutChart from './charts/DonutChart';
 import MonthCashflowBars from './charts/MonthCashflowBars';
 import CategoryHBars from './charts/CategoryHBars';
@@ -43,8 +50,10 @@ export default function CashflowDashboard() {
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [streams, setStreams] = useState<IncomeStream[]>([]);
   const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [demoPortfolio, setDemoPortfolio] = useState(false);
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
@@ -55,12 +64,22 @@ export default function CashflowDashboard() {
 
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
+    setStreams([]);
     setOccurrences([]);
     setExpenses([]);
     setError('');
     ensuredYearRef.current = '';
     monthInitYearRef.current = null;
     setLoading(true);
+  }, []);
+
+  const readDemoPortfolioPref = useCallback(async (): Promise<boolean> => {
+    const user = await AuthService.getUserData();
+    const email = user?.email || null;
+    if (!canUseMoneyDemoPortfolio(email) || !email) return false;
+    const key = `${STORAGE_KEYS.MONEY_DEMO_PORTFOLIO}:${email.toLowerCase()}`;
+    const v = await storage.getItem(key);
+    return v === '1';
   }, []);
 
   const ensureYearSchedule = useCallback(
@@ -98,14 +117,15 @@ export default function CashflowDashboard() {
     setLoading(true);
     setError('');
     try {
-      const streams = await moneyService.getStreams(familyId);
+      const demoEnabled = await readDemoPortfolioPref();
+      const streamList = await moneyService.getStreams(familyId);
       if (
         generation !== fetchGenerationRef.current ||
         selectedFamilyIdRef.current !== familyId
       ) {
         return;
       }
-      await ensureYearSchedule(year, streams, familyId);
+      await ensureYearSchedule(year, streamList, familyId);
       if (
         generation !== fetchGenerationRef.current ||
         selectedFamilyIdRef.current !== familyId
@@ -124,6 +144,8 @@ export default function CashflowDashboard() {
       ) {
         return;
       }
+      setDemoPortfolio(demoEnabled);
+      setStreams(streamList);
       setOccurrences(occs);
       setExpenses(expList);
     } catch (err: any) {
@@ -134,6 +156,7 @@ export default function CashflowDashboard() {
         return;
       }
       setError(err.message || 'Failed to load dashboard');
+      setStreams([]);
       setOccurrences([]);
       setExpenses([]);
     } finally {
@@ -144,20 +167,45 @@ export default function CashflowDashboard() {
         setLoading(false);
       }
     }
-  }, [selectedFamily, year, clearState, ensureYearSchedule]);
+  }, [selectedFamily, year, clearState, ensureYearSchedule, readDemoPortfolioPref]);
 
   useEffect(() => {
     clearState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
+
+  const streamTypeById = useMemo(() => {
+    const map = new Map<number, IncomeStreamType>();
+    for (const s of streams) map.set(s.id, s.stream_type);
+    return map;
+  }, [streams]);
+
+  const displayOccurrences = useMemo(() => {
+    if (!demoPortfolio) return occurrences;
+    return occurrences.map((o) => {
+      const streamType = streamTypeById.get(o.stream);
+      const estimated = withDemoIncome(o.estimated_amount, streamType, true);
+      const actual =
+        o.actual_amount == null
+          ? null
+          : withDemoIncome(o.actual_amount, streamType, true);
+      return {
+        ...o,
+        estimated_amount: estimated ?? o.estimated_amount,
+        actual_amount: actual,
+      };
+    });
+  }, [occurrences, demoPortfolio, streamTypeById]);
 
   const months = useMemo(
-    () => buildMonthlyCashflowSeries(occurrences, expenses, year),
-    [occurrences, expenses, year]
+    () => buildMonthlyCashflowSeries(displayOccurrences, expenses, year),
+    [displayOccurrences, expenses, year]
   );
 
   const yearSummary = useMemo(() => rollupCashflowSeries(months), [months]);

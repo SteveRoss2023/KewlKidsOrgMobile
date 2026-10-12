@@ -5,6 +5,7 @@ export type YearReturnRow = {
   id: number;
   name: string;
   accountType: AccountType;
+  institution: string | null;
   isCash: boolean;
   startDate: string | null;
   startBalance: number | null;
@@ -103,6 +104,7 @@ export function buildYearReturnRows(
       id: a.id,
       name: a.name,
       accountType: a.account_type,
+      institution: a.institution?.trim() || null,
       isCash,
       startDate: startSnap?.as_of_date ?? null,
       startBalance,

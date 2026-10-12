@@ -31,6 +31,7 @@ import AlertModal from '../../components/AlertModal';
 import UpdateBalancesWizard, {
   firstOfMonthYmd,
 } from '../../components/money/UpdateBalancesWizard';
+import YtdDashboard from '../../components/money/YtdDashboard';
 import TooltipButton from '../../components/TooltipButton';
 import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 import AuthService from '../../services/authService';
@@ -45,7 +46,6 @@ import {
   portfolioTargetAtRate,
   sumReturnRows,
   yearEndTarget,
-  ytdPortfolioTotals,
 } from '../../utils/moneyReturns';
 import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 
@@ -162,13 +162,13 @@ export default function MoneyScreen() {
   const [expandedStreamIds, setExpandedStreamIds] = useState<number[]>([]);
   const [expandedIncomeMonth, setExpandedIncomeMonth] = useState<string | null>(null);
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
-  const [ytdAccountsExpanded, setYtdAccountsExpanded] = useState(false);
   const ensuredYearRef = useRef('');
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   /** Family id whose money data is currently in state (null while clearing / loading). */
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [ytdBoardRefreshKey, setYtdBoardRefreshKey] = useState(0);
 
   const loadDemoPortfolioPref = useCallback(async () => {
     const user = await AuthService.getUserData();
@@ -189,7 +189,6 @@ export default function MoneyScreen() {
       setExpandedStreamIds([]);
       setExpandedIncomeMonth(null);
       setExpandedAccountId(null);
-      setYtdAccountsExpanded(false);
       setExpandedTargetRates([]);
       void loadDemoPortfolioPref();
     }, [loadDemoPortfolioPref])
@@ -265,7 +264,6 @@ export default function MoneyScreen() {
     setExpandedStreamIds([]);
     setExpandedIncomeMonth(null);
     setExpandedAccountId(null);
-    setYtdAccountsExpanded(false);
     setExpandedTargetRates([]);
     setShowStreamForm(false);
     setEditingStream(null);
@@ -315,6 +313,7 @@ export default function MoneyScreen() {
       setSelectedStreamId(s[0]?.id ?? null);
       setSelectedAccountId(a[0]?.id ?? null);
       setDataFamilyId(familyId);
+      setYtdBoardRefreshKey((k) => k + 1);
     } catch (err: any) {
       if (
         generation !== fetchGenerationRef.current ||
@@ -466,11 +465,6 @@ export default function MoneyScreen() {
     return Array.from(years).sort((a, b) => b - a);
   }, [snapshots]);
 
-  // By account on YTD stays collapsed whenever you land on that tab.
-  useEffect(() => {
-    if (tab === 'ytd') setYtdAccountsExpanded(false);
-  }, [tab]);
-
   const yearReturnRows = useMemo(
     () => buildYearReturnRows(accounts, snapshots, returnsYear, demoPortfolio),
     [accounts, snapshots, returnsYear, demoPortfolio]
@@ -482,13 +476,8 @@ export default function MoneyScreen() {
     );
   };
 
-  /** Target tab totals (boosted starts); YTD hero uses ytdHeroTotals for correct demo %. */
+  /** Target tab totals (boosted starts). */
   const yearReturnTotals = useMemo(() => sumReturnRows(yearReturnRows), [yearReturnRows]);
-
-  const ytdHeroTotals = useMemo(
-    () => ytdPortfolioTotals(accounts, snapshots, returnsYear, demoPortfolio),
-    [accounts, snapshots, returnsYear, demoPortfolio]
-  );
 
   const openNewStream = () => {
     setEditingStream(null);
@@ -1456,281 +1445,6 @@ export default function MoneyScreen() {
     </View>
   );
 
-  const renderYtd = () => {
-    const hasRows = yearReturnRows.length > 0;
-    const ytdLines: { key: string; label: string; totals: typeof ytdHeroTotals.invested }[] = [
-      { key: 'invested', label: 'Investments', totals: ytdHeroTotals.invested },
-      { key: 'cash', label: 'Cash', totals: ytdHeroTotals.cash },
-    ];
-
-    return (
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 10 }}>
-        {renderYearChips()}
-
-        {!hasRows ? (
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add accounts and balance snapshots to see YTD returns.
-          </Text>
-        ) : (
-          <>
-            <View
-              style={[
-                styles.portfolioHeroCard,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.ytdCardTitle, { color: colors.primary }]} numberOfLines={1}>
-                {returnsYear} Performance{' '}
-                <Text style={styles.ytdCardTitleSuffix}>(YEAR TO DATE)</Text>
-              </Text>
-              {ytdLines.map((line, idx) => (
-                <View
-                  key={line.key}
-                  style={[
-                    styles.ytdSplitBlock,
-                    idx > 0
-                      ? {
-                          borderTopWidth: StyleSheet.hairlineWidth,
-                          borderTopColor: colors.border,
-                          marginTop: 12,
-                          paddingTop: 12,
-                        }
-                      : { marginTop: 8 },
-                  ]}
-                >
-                  <Text style={[styles.ytdSplitLabel, { color: colors.text }]}>{line.label}</Text>
-                  <View style={styles.ytdTotalsRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                        Amount
-                      </Text>
-                      <Text
-                        style={[
-                          styles.ytdTotalValue,
-                          { color: returnsDeltaColor(line.totals.delta), fontSize: 22 },
-                        ]}
-                      >
-                        {fmtSignedMoney(line.totals.delta)}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                      <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                        Return
-                      </Text>
-                      <Text
-                        style={[
-                          styles.ytdTotalValue,
-                          { color: returnsDeltaColor(line.totals.returnPct), fontSize: 22 },
-                        ]}
-                      >
-                        {fmtReturnPct(line.totals.returnPct)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={[styles.portfolioHeroMetrics, { marginTop: 4 }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                        Year start
-                      </Text>
-                      <Text style={[styles.portfolioHeroNow, { color: colors.text, fontSize: 15 }]}>
-                        {displayMoney(line.totals.start)}
-                      </Text>
-                    </View>
-                    <FontAwesome
-                      name="long-arrow-right"
-                      size={14}
-                      color={colors.textSecondary}
-                      style={{ marginTop: 16, marginHorizontal: 6 }}
-                    />
-                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                      <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                        Latest
-                      </Text>
-                      <Text
-                        style={[styles.portfolioHeroProjected, { color: colors.text, fontSize: 16 }]}
-                      >
-                        {displayMoney(line.totals.latest)}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-              <View
-                style={[
-                  styles.ytdSplitBlock,
-                  {
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                    borderTopColor: colors.border,
-                    marginTop: 12,
-                    paddingTop: 12,
-                  },
-                ]}
-              >
-                <Text style={[styles.ytdSplitLabel, { color: colors.text }]}>Total</Text>
-                <View style={styles.ytdTotalsRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                      Amount
-                    </Text>
-                    <Text
-                      style={[
-                        styles.ytdTotalValue,
-                        {
-                          color: returnsDeltaColor(ytdHeroTotals.all.delta),
-                          fontSize: 22,
-                          fontWeight: '800',
-                        },
-                      ]}
-                    >
-                      {fmtSignedMoney(ytdHeroTotals.all.delta)}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                      Return
-                    </Text>
-                    <Text
-                      style={[
-                        styles.ytdTotalValue,
-                        {
-                          color: returnsDeltaColor(ytdHeroTotals.all.returnPct),
-                          fontSize: 22,
-                          fontWeight: '800',
-                        },
-                      ]}
-                    >
-                      {fmtReturnPct(ytdHeroTotals.all.returnPct)}
-                    </Text>
-                  </View>
-                </View>
-                <View style={[styles.portfolioHeroMetrics, { marginTop: 4 }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                      Year start
-                    </Text>
-                    <Text style={[styles.portfolioHeroNow, { color: colors.text, fontSize: 15 }]}>
-                      {displayMoney(ytdHeroTotals.all.start)}
-                    </Text>
-                  </View>
-                  <FontAwesome
-                    name="long-arrow-right"
-                    size={14}
-                    color={colors.textSecondary}
-                    style={{ marginTop: 16, marginHorizontal: 6 }}
-                  />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={[styles.forecastCompareLabel, { color: colors.textSecondary }]}>
-                      Latest
-                    </Text>
-                    <Text
-                      style={[styles.portfolioHeroProjected, { color: colors.text, fontSize: 16 }]}
-                    >
-                      {displayMoney(ytdHeroTotals.all.latest)}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.monthList,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.streamCollapseHeader}
-                onPress={() => setYtdAccountsExpanded((v) => !v)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: ytdAccountsExpanded }}
-                accessibilityLabel={
-                  ytdAccountsExpanded ? 'Collapse YTD by account' : 'Expand YTD by account'
-                }
-              >
-                <FontAwesome
-                  name={ytdAccountsExpanded ? 'chevron-down' : 'chevron-right'}
-                  size={14}
-                  color={colors.textSecondary}
-                />
-                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1, fontSize: 15 }]}>
-                  By account ({yearReturnRows.length})
-                </Text>
-              </TouchableOpacity>
-              {ytdAccountsExpanded
-                ? yearReturnRows.map((row) => (
-                    <View
-                      key={`ytd-${row.id}`}
-                      style={[
-                        styles.forecastAccountCompact,
-                        {
-                          backgroundColor: colors.card,
-                          borderColor: colors.border,
-                          borderWidth: 0,
-                          borderTopWidth: StyleSheet.hairlineWidth,
-                          borderRadius: 0,
-                        },
-                      ]}
-                    >
-                      <View style={styles.forecastAccountCompactTop}>
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text
-                            style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}
-                            numberOfLines={1}
-                          >
-                            {row.name}
-                          </Text>
-                          <Text
-                            style={[styles.meta, { color: colors.textSecondary }]}
-                            numberOfLines={1}
-                          >
-                            {ACCOUNT_TYPES.find((t) => t.value === row.accountType)?.label ||
-                              row.accountType}
-                            {row.startDate
-                              ? ` · from ${formatShortDate(row.startDate)}`
-                              : ' · no start'}
-                            {row.latestDate ? ` → ${formatShortDate(row.latestDate)}` : ''}
-                          </Text>
-                        </View>
-                        <Text
-                          style={{
-                            color: returnsDeltaColor(row.returnPct),
-                            fontSize: 12,
-                            fontWeight: '800',
-                          }}
-                        >
-                          {fmtReturnPct(row.returnPct)}
-                        </Text>
-                      </View>
-                      <View style={styles.forecastAccountCompactAmounts}>
-                        <Text style={[styles.forecastCompactNow, { color: colors.text }]}>
-                          {displayMoney(row.startBalance)}
-                        </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>→</Text>
-                        <Text style={[styles.forecastCompactProjected, { color: colors.text }]}>
-                          {displayMoney(row.latestBalance)}
-                        </Text>
-                        <Text
-                          style={{
-                            marginLeft: 'auto',
-                            color: returnsDeltaColor(row.delta),
-                            fontSize: 12,
-                            fontWeight: '700',
-                            fontVariant: ['tabular-nums'],
-                          }}
-                        >
-                          {fmtSignedMoney(row.delta)}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
-                : null}
-            </View>
-          </>
-        )}
-      </ScrollView>
-    );
-  };
-
   const renderTarget = () => {
     const hasRows = yearReturnRows.some((r) => r.startBalance != null && r.startBalance > 0);
     const startTotal = yearReturnTotals.start;
@@ -1969,7 +1683,7 @@ export default function MoneyScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
           {(
             [
-              { id: 'ytd' as const, label: 'YTD', icon: 'line-chart' as const },
+              { id: 'ytd' as const, label: 'YTD', icon: 'pie-chart' as const },
               { id: 'income' as const, label: 'Income', icon: 'usd' as const },
               { id: 'accounts' as const, label: 'Accounts', icon: 'university' as const },
               { id: 'target' as const, label: 'Target', icon: 'bullseye' as const },
@@ -2016,7 +1730,7 @@ export default function MoneyScreen() {
       ) : tab === 'accounts' ? (
         renderAccounts()
       ) : tab === 'ytd' ? (
-        renderYtd()
+        <YtdDashboard key={selectedFamily?.id ?? 'none'} refreshKey={ytdBoardRefreshKey} />
       ) : (
         renderTarget()
       )}
@@ -2633,35 +2347,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  ytdTotalsRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  ytdCardTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  ytdCardTitleSuffix: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  ytdSplitBlock: {
-    gap: 2,
-  },
-  ytdSplitLabel: {
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  ytdTotalValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-    marginTop: 2,
-  },
   targetTableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2699,79 +2384,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
-  },
-  portfolioHeroCard: {
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 14,
-    marginTop: 4,
-  },
-  portfolioHeroTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  portfolioHeroEyebrow: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 2,
-  },
-  portfolioHeroTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  portfolioGainPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  portfolioGainPillText: {
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  portfolioHeroMetrics: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  portfolioHeroNow: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-    marginTop: 2,
-  },
-  portfolioHeroProjected: {
-    fontSize: 22,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-    marginTop: 2,
-  },
-  portfolioTrack: {
-    height: 12,
-    borderRadius: 99,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  portfolioTrackFill: {
-    height: '100%',
-  },
-  portfolioTrackGrowth: {
-    height: '100%',
-  },
-  portfolioTrackLegend: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: -4,
-  },
-  portfolioTrackCompact: {
-    height: 5,
-    borderRadius: 99,
-    overflow: 'hidden',
-    marginTop: 6,
   },
   forecastAccountCompact: {
     paddingVertical: 10,
