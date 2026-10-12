@@ -38,7 +38,7 @@ export default function MonthCashflowBars({
   selectedBorderColor,
 }: MonthCashflowBarsProps) {
   const { width: windowWidth } = useWindowDimensions();
-  const chartWidth = Math.max(280, Math.min(windowWidth - 48, 720));
+  const chartWidth = Math.max(280, Math.min(windowWidth - 48, 900));
 
   const maxVal = useMemo(() => {
     let m = 1;
@@ -170,8 +170,8 @@ export default function MonthCashflowBars({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 8 },
-  legend: { flexDirection: 'row', gap: 14, alignItems: 'center' },
+  wrap: { gap: 8, alignItems: 'center', alignSelf: 'stretch' },
+  legend: { flexDirection: 'row', gap: 14, alignItems: 'center', alignSelf: 'stretch' },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 2 },
   legendText: { fontSize: 11, fontWeight: '600' },
@@ -194,5 +194,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   hitSlot: { height: '100%' },
-  trackHint: { height: StyleSheet.hairlineWidth, marginTop: 4, opacity: 0.6 },
+  trackHint: {
+    height: StyleSheet.hairlineWidth,
+    marginTop: 4,
+    opacity: 0.6,
+    alignSelf: 'stretch',
+  },
 });
