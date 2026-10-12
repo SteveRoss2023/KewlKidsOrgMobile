@@ -40,7 +40,6 @@ import AuthService from '../../services/authService';
 import { STORAGE_KEYS, storage } from '../../utils/storage';
 import {
   canUseMoneyDemoPortfolio,
-  withDemoBalance,
   withDemoIncome,
 } from '../../utils/moneyDemoPortfolio';
 import {
@@ -49,9 +48,8 @@ import {
   sumReturnRows,
   yearEndTarget,
 } from '../../utils/moneyReturns';
-import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 
-type MoneyTab = 'income' | 'accounts' | 'accounts-board' | 'ytd' | 'target';
+type MoneyTab = 'income' | 'accounts' | 'ytd' | 'target';
 
 /** Year-end what-if rates shown on the Target tab. */
 const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -137,7 +135,6 @@ export default function MoneyScreen() {
   const [pendingDeleteOcc, setPendingDeleteOcc] = useState<IncomeOccurrence | null>(null);
   const { showAmounts, setShowAmounts, toggleShowAmounts, displayMoney } = useShowAmounts();
   const [demoPortfolio, setDemoPortfolio] = useState(false);
-  const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
@@ -163,7 +160,6 @@ export default function MoneyScreen() {
   useFocusEffect(
     useCallback(() => {
       setShowAmounts(false);
-      setExpandedAccountId(null);
       setExpandedTargetRates([]);
       void loadDemoPortfolioPref();
     }, [loadDemoPortfolioPref])
@@ -186,6 +182,8 @@ export default function MoneyScreen() {
         setTab('ytd');
       } else if (t === 'calendar' || t === 'income-board') {
         setTab('income');
+      } else if (t === 'accounts-board') {
+        setTab('accounts');
       } else {
         setTab(t as MoneyTab);
       }
@@ -195,16 +193,6 @@ export default function MoneyScreen() {
       setShowBalancesWizard(true);
     }
   }, [params.tab, params.updateBalances]);
-
-  /** Account balances only — optional personal demo overlay (never written to the server). */
-  const displayAccountMoney = (
-    balance: number | null | undefined,
-    accountType: AccountType | string,
-    empty = '—'
-  ) => {
-    const boosted = withDemoBalance(balance, accountType, demoPortfolio);
-    return displayMoney(boosted, empty);
-  };
 
   /** Income amounts — employment gets +$15k per pay when demo overlay is on. */
   const displayIncomeMoney = (
@@ -234,7 +222,6 @@ export default function MoneyScreen() {
     setAccounts([]);
     setSnapshots([]);
     setSelectedAccountId(null);
-    setExpandedAccountId(null);
     setExpandedTargetRates([]);
     setShowStreamForm(false);
     setEditingStream(null);
@@ -318,53 +305,6 @@ export default function MoneyScreen() {
       if (selectedFamily) void load();
       else setLoading(false);
     }, [load, selectedFamily])
-  );
-
-  const toggleAccountExpanded = (accountId: number) => {
-    setExpandedAccountId((prev) => (prev === accountId ? null : accountId));
-  };
-
-  const institutionGroupTotal = (groupAccounts: MoneyAccount[]) =>
-    groupAccounts.reduce((sum, a) => {
-      const bal = withDemoBalance(a.latest_balance, a.account_type, demoPortfolio);
-      return sum + (bal ?? 0);
-    }, 0);
-
-  const snapshotsForAccount = (accountId: number) =>
-    snapshots
-      .filter((s) => s.account === accountId)
-      .sort((a, b) => b.as_of_date.localeCompare(a.as_of_date));
-
-  const lastBalancesUpdatedLabel = useMemo(() => {
-    const dates = accounts
-      .map((a) => a.latest_as_of)
-      .filter((d): d is string => !!d)
-      .sort();
-    const last = dates.length ? dates[dates.length - 1] : null;
-    if (!last) return 'Never updated Â· as of the 1st';
-    try {
-      const [y, m, d] = last.split('-').map(Number);
-      const label = new Date(y, m - 1, d).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      });
-      return `Last updated ${label}`;
-    } catch {
-      return `Last updated ${last}`;
-    }
-  }, [accounts]);
-
-  const accountsTotal = useMemo(() => {
-    return accounts.reduce((sum, a) => {
-      const bal = withDemoBalance(a.latest_balance, a.account_type, demoPortfolio);
-      return sum + (bal ?? 0);
-    }, 0);
-  }, [accounts, demoPortfolio]);
-
-  const accountInstitutionGroups = useMemo(
-    () => groupAccountsByInstitution(accounts),
-    [accounts]
   );
 
   const returnsYearOptions = useMemo(() => {
@@ -577,203 +517,6 @@ export default function MoneyScreen() {
       setSaving(false);
     }
   };
-
-  const renderAccounts = () => (
-    <View style={styles.flex}>
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 8 }}>
-        {accounts.length > 0 ? (
-          <TooltipButton
-            tooltip="Update all account balances for the 1st of the month"
-            style={[styles.wizardBtn, { backgroundColor: colors.primary }]}
-            onPress={() => setShowBalancesWizard(true)}
-          >
-            <FontAwesome name="calendar-check-o" size={16} color="#fff" />
-            <View style={styles.flex}>
-              <Text style={styles.wizardBtnTitle}>Update balances</Text>
-              <Text style={styles.wizardBtnSub}>{lastBalancesUpdatedLabel}</Text>
-            </View>
-            <FontAwesome name="chevron-right" size={14} color="rgba(255,255,255,0.85)" />
-          </TooltipButton>
-        ) : null}
-
-        {accounts.length === 0 ? (
-          <>
-            <View style={styles.sectionHeaderInline}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Accounts</Text>
-              <TooltipButton tooltip="Add account" onPress={openNewAccount}>
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>Add</Text>
-              </TooltipButton>
-            </View>
-            <Text style={[styles.empty, { color: colors.textSecondary }]}>
-              Add RRSP, TFSA, Non-reg, or Cash — then update balances monthly.
-            </Text>
-          </>
-        ) : (
-          <View
-            style={[styles.streamList, { borderColor: colors.border, backgroundColor: colors.card }]}
-          >
-            <View style={styles.portfolioHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 15 }]}>
-                  Portfolio ({accounts.length})
-                </Text>
-                <Text style={[styles.amount, { color: colors.primary, fontSize: 15, marginTop: 2 }]}>
-                  {displayMoney(accountsTotal)}
-                </Text>
-              </View>
-              <TooltipButton
-                tooltip="Add account"
-                onPress={openNewAccount}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>Add</Text>
-              </TooltipButton>
-            </View>
-
-            {accountInstitutionGroups.map((group) => {
-              const groupKey = group.key || '__other';
-              const groupTotal = institutionGroupTotal(group.accounts);
-              return (
-                <View key={groupKey}>
-                  <View
-                    style={[styles.institutionHeaderRow, { borderTopColor: colors.border }]}
-                  >
-                    <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 14, flex: 1 }]}>
-                      {group.label} ({group.accounts.length})
-                    </Text>
-                    <Text style={[styles.amount, { color: colors.primary, fontSize: 14 }]}>
-                      {displayMoney(groupTotal)}
-                    </Text>
-                  </View>
-
-                  {group.accounts.map((a) => {
-                    const expanded = expandedAccountId === a.id;
-                    const history = expanded ? snapshotsForAccount(a.id) : [];
-                    return (
-                      <View key={a.id}>
-                        <TouchableOpacity
-                          style={[
-                            styles.monthListRow,
-                            {
-                              borderTopColor: colors.border,
-                              backgroundColor: colors.card,
-                            },
-                          ]}
-                          onPress={() => toggleAccountExpanded(a.id)}
-                          accessibilityRole="button"
-                          accessibilityState={{ expanded }}
-                          accessibilityLabel={
-                            expanded
-                              ? `Collapse ${a.name} history`
-                              : `Expand ${a.name} history`
-                          }
-                        >
-                          <FontAwesome
-                            name={expanded ? 'chevron-down' : 'chevron-right'}
-                            size={12}
-                            color={colors.textSecondary}
-                            style={{ marginRight: 4 }}
-                          />
-                          <View style={styles.flex}>
-                            <Text style={[styles.rowTitle, { color: colors.text }]}>{a.name}</Text>
-                            <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                              {ACCOUNT_TYPES.find((t) => t.value === a.account_type)?.label ||
-                                a.account_type}
-                              {a.latest_as_of ? ` · as of ${a.latest_as_of}` : ''}
-                            </Text>
-                          </View>
-                          <Text style={[styles.amount, { color: colors.primary }]}>
-                            {displayAccountMoney(a.latest_balance, a.account_type)}
-                          </Text>
-                          <TooltipButton
-                            tooltip={`Edit ${a.name}`}
-                            onPress={() => openEditAccount(a)}
-                            style={styles.iconAction}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <FontAwesome name="pencil" size={14} color={colors.primary} />
-                          </TooltipButton>
-                          <TooltipButton
-                            tooltip={`Delete ${a.name}`}
-                            onPress={() => setPendingDeleteAccount(a)}
-                            style={styles.iconAction}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <FontAwesome
-                              name="trash"
-                              size={13}
-                              color={colors.error || '#ef4444'}
-                            />
-                          </TooltipButton>
-                        </TouchableOpacity>
-
-                        {expanded ? (
-                          <View
-                            style={[
-                              styles.accountHistoryPanel,
-                              { borderTopColor: colors.border, backgroundColor: colors.surface },
-                            ]}
-                          >
-                            <Text style={[styles.historyTitle, { color: colors.text }]}>
-                              History ({history.length})
-                            </Text>
-                            {history.length === 0 ? (
-                              <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                                No balances yet. Use Update balances above.
-                              </Text>
-                            ) : (
-                              history.map((s) => (
-                                <View
-                                  key={s.id}
-                                  style={[
-                                    styles.historyRow,
-                                    { borderColor: colors.border, backgroundColor: colors.card },
-                                  ]}
-                                >
-                                  <View style={styles.flex}>
-                                    <Text style={[styles.meta, { color: colors.text }]}>
-                                      {formatShortDate(s.as_of_date)}
-                                    </Text>
-                                    <Text style={[styles.amount, { color: colors.text, fontSize: 14 }]}>
-                                      {displayAccountMoney(s.balance, a.account_type)}
-                                    </Text>
-                                  </View>
-                                  <TooltipButton
-                                    tooltip="Edit this balance"
-                                    onPress={() => openSnapForm(a, s)}
-                                    style={styles.iconAction}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                  >
-                                    <FontAwesome name="pencil" size={14} color={colors.primary} />
-                                  </TooltipButton>
-                                  <TooltipButton
-                                    tooltip="Delete this balance"
-                                    onPress={() => setPendingDeleteSnapshot(s)}
-                                    style={styles.iconAction}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                  >
-                                    <FontAwesome
-                                      name="trash"
-                                      size={13}
-                                      color={colors.error || '#ef4444'}
-                                    />
-                                  </TooltipButton>
-                                </View>
-                              ))
-                            )}
-                          </View>
-                        ) : null}
-                      </View>
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
-        )}
-      </ScrollView>
-    </View>
-  );
 
   const returnsDeltaColor = (n: number | null) => {
     if (n == null || n === 0) return colors.textSecondary;
@@ -1056,7 +799,6 @@ export default function MoneyScreen() {
             [
               { id: 'ytd' as const, label: 'YTD', icon: 'pie-chart' as const },
               { id: 'income' as const, label: 'Income', icon: 'usd' as const },
-              { id: 'accounts-board' as const, label: 'Accounts board', icon: 'line-chart' as const },
               { id: 'accounts' as const, label: 'Accounts', icon: 'university' as const },
               { id: 'target' as const, label: 'Target', icon: 'bullseye' as const },
             ] as const
@@ -1104,7 +846,7 @@ export default function MoneyScreen() {
           onDeleteStream={setPendingDeleteStream}
           onDeleteOccurrence={setPendingDeleteOcc}
         />
-      ) : tab === 'accounts-board' ? (
+      ) : tab === 'accounts' ? (
         <AccountsDashboard
           key={selectedFamily?.id ?? 'none'}
           refreshKey={accountsBoardRefreshKey}
@@ -1115,8 +857,6 @@ export default function MoneyScreen() {
           onEditSnapshot={openSnapForm}
           onDeleteSnapshot={setPendingDeleteSnapshot}
         />
-      ) : tab === 'accounts' ? (
-        renderAccounts()
       ) : tab === 'ytd' ? (
         <YtdDashboard key={selectedFamily?.id ?? 'none'} refreshKey={ytdBoardRefreshKey} />
       ) : (
@@ -1381,7 +1121,6 @@ export default function MoneyScreen() {
             await moneyService.deleteAccount(pendingDeleteAccount.id);
             setPendingDeleteAccount(null);
             setSelectedAccountId(null);
-            setExpandedAccountId(null);
             await load();
           } catch (err: any) {
             setError(err.message || 'Delete failed');
@@ -1463,28 +1202,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700' },
-  portfolioHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  institutionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  accountHistoryPanel: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 12,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
   yearMonthPanel: {
     paddingHorizontal: 10,
     paddingTop: 6,
@@ -1515,26 +1232,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  historyTitle: { fontSize: 13, fontWeight: '700' },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  wizardBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-  },
-  wizardBtnTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  wizardBtnSub: { color: 'rgba(255,255,255,0.88)', fontSize: 12, marginTop: 2 },
   chipRow: { paddingHorizontal: 12, paddingVertical: 8, gap: 6, flexDirection: 'row' },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
@@ -1544,18 +1241,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   chipText: { fontSize: 12, fontWeight: '700' },
-  sectionHeaderInline: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  streamList: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
   streamCollapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1606,14 +1291,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
-  monthListRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
   streamCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1637,12 +1314,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   colorBar: { width: 4, alignSelf: 'stretch', borderRadius: 2, minHeight: 36 },
-  iconAction: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   calNav: {
     flexDirection: 'row',
     alignItems: 'center',
