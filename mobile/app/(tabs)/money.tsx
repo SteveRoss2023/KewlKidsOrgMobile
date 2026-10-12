@@ -33,6 +33,7 @@ import UpdateBalancesWizard, {
 } from '../../components/money/UpdateBalancesWizard';
 import YtdDashboard from '../../components/money/YtdDashboard';
 import IncomeDashboard from '../../components/money/IncomeDashboard';
+import AccountsDashboard from '../../components/money/AccountsDashboard';
 import TooltipButton from '../../components/TooltipButton';
 import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 import AuthService from '../../services/authService';
@@ -50,7 +51,7 @@ import {
 } from '../../utils/moneyReturns';
 import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 
-type MoneyTab = 'income' | 'accounts' | 'ytd' | 'target';
+type MoneyTab = 'income' | 'accounts' | 'accounts-board' | 'ytd' | 'target';
 
 /** Year-end what-if rates shown on the Target tab. */
 const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -144,6 +145,7 @@ export default function MoneyScreen() {
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
   const [ytdBoardRefreshKey, setYtdBoardRefreshKey] = useState(0);
   const [incomeBoardRefreshKey, setIncomeBoardRefreshKey] = useState(0);
+  const [accountsBoardRefreshKey, setAccountsBoardRefreshKey] = useState(0);
 
   const loadDemoPortfolioPref = useCallback(async () => {
     const user = await AuthService.getUserData();
@@ -171,6 +173,7 @@ export default function MoneyScreen() {
     const t = String(params.tab || '');
     if (
       t === 'accounts' ||
+      t === 'accounts-board' ||
       t === 'income' ||
       t === 'income-board' ||
       t === 'calendar' ||
@@ -280,6 +283,7 @@ export default function MoneyScreen() {
       setDataFamilyId(familyId);
       setYtdBoardRefreshKey((k) => k + 1);
       setIncomeBoardRefreshKey((k) => k + 1);
+      setAccountsBoardRefreshKey((k) => k + 1);
     } catch (err: any) {
       if (
         generation !== fetchGenerationRef.current ||
@@ -1052,6 +1056,7 @@ export default function MoneyScreen() {
             [
               { id: 'ytd' as const, label: 'YTD', icon: 'pie-chart' as const },
               { id: 'income' as const, label: 'Income', icon: 'usd' as const },
+              { id: 'accounts-board' as const, label: 'Accounts board', icon: 'line-chart' as const },
               { id: 'accounts' as const, label: 'Accounts', icon: 'university' as const },
               { id: 'target' as const, label: 'Target', icon: 'bullseye' as const },
             ] as const
@@ -1098,6 +1103,17 @@ export default function MoneyScreen() {
           onEditOccurrence={openOcc}
           onDeleteStream={setPendingDeleteStream}
           onDeleteOccurrence={setPendingDeleteOcc}
+        />
+      ) : tab === 'accounts-board' ? (
+        <AccountsDashboard
+          key={selectedFamily?.id ?? 'none'}
+          refreshKey={accountsBoardRefreshKey}
+          onUpdateBalances={() => setShowBalancesWizard(true)}
+          onAddAccount={openNewAccount}
+          onEditAccount={openEditAccount}
+          onDeleteAccount={setPendingDeleteAccount}
+          onEditSnapshot={openSnapForm}
+          onDeleteSnapshot={setPendingDeleteSnapshot}
         />
       ) : tab === 'accounts' ? (
         renderAccounts()
