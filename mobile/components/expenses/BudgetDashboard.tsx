@@ -12,6 +12,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import expenseService from '../../services/expenseService';
 import { Budget, Expense } from '../../types/expenses';
 import BudgetCategoryRow from './BudgetCategoryRow';
@@ -58,6 +59,7 @@ export default function BudgetDashboard({
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
@@ -302,6 +304,247 @@ export default function BudgetDashboard({
     );
   }
 
+  const yearHero = (
+    <View
+      style={[
+        styles.heroCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+        Year overview
+      </Text>
+      <View style={styles.heroGrid}>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Budgeted
+          </Text>
+          <Text style={[styles.heroValue, { color: colors.primary }]}>
+            {displayMoney(yearSummary.budgeted)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.monthsWithBudgets} months
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Spent</Text>
+          <Text style={[styles.heroValue, { color: spentColor }]}>
+            {displayMoney(yearSummary.spent)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {Math.round(yearSummary.percentageUsed)}% of limits
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Left</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: toneRemaining(yearSummary.remaining) },
+            ]}
+          >
+            {displayMoney(yearSummary.remaining)}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const monthlyBars = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly budgets</Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Tap a month · dots highlight near / over limit
+      </Text>
+      <MonthBudgetBars
+        points={barPoints}
+        selectedMonthIndex={selectedMonthIndex}
+        onSelectMonth={handleSelectMonth}
+        budgetColor={colors.primary}
+        spentColor={spentColor}
+        overColor={colors.warning || '#f59e0b'}
+        trackColor={colors.border}
+        textColor={colors.text}
+        mutedColor={colors.textSecondary}
+        selectedBorderColor={colors.primary}
+      />
+    </View>
+  );
+
+  const selectedMonthCard = selectedMonth ? (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        {MONTH_NAMES[selectedMonth.monthIndex]} {year}
+      </Text>
+
+      <View style={styles.monthKpis}>
+        <Kpi
+          label="Budgeted"
+          value={displayMoney(selectedMonth.budgeted)}
+          color={colors.primary}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Spent"
+          value={displayMoney(selectedMonth.spent)}
+          color={spentColor}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Left"
+          value={displayMoney(selectedMonth.remaining)}
+          color={toneRemaining(selectedMonth.remaining)}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Used"
+          value={`${Math.round(selectedMonth.percentageUsed)}%`}
+          color={
+            selectedMonth.percentageUsed > 100
+              ? spentColor
+              : selectedMonth.percentageUsed >= 80
+                ? colors.warning || '#f59e0b'
+                : okColor
+          }
+          muted={colors.textSecondary}
+        />
+      </View>
+
+      <View style={styles.donutBlock}>
+        <DonutChart
+          slices={donutSlices}
+          textColor={colors.text}
+          mutedColor={colors.textSecondary}
+          trackColor={colors.border}
+          centerLabel={
+            selectedMonth.budgeted > 0
+              ? `${Math.round(selectedMonth.percentageUsed)}%`
+              : displayMoney(selectedMonth.spent)
+          }
+          centerSubLabel={
+            selectedMonth.remaining < 0 ? 'Over budget' : 'Of limit'
+          }
+        />
+        <View style={styles.donutLegend}>
+          {donutSlices.map((s) => (
+            <View key={s.key} style={styles.donutLegendRow}>
+              <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+              <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                {s.label}
+              </Text>
+              <Text
+                style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
+              >
+                {displayMoney(s.amount)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <Text style={[styles.subSectionTitle, { color: colors.text }]}>
+        Categories
+      </Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Tap a category to see items · pencil / trash to edit
+      </Text>
+
+      {loadingMonth === selectedMonthIndex && !expensesReady ? (
+        <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
+      ) : sortedBudgets.length === 0 ? (
+        <Text style={[styles.empty, { color: colors.textSecondary }]}>
+          No budgets for this month
+        </Text>
+      ) : (
+        <View style={styles.categoryList}>
+          {sortedBudgets.map((budget) => {
+            const catExpenses = expensesForCategory(
+              selectedExpenses,
+              budget.category
+            );
+            return (
+              <BudgetCategoryRow
+                key={budget.id}
+                budget={budget}
+                items={catExpenses}
+                useItemsForSpent={expensesReady}
+                onEditBudget={
+                  onBudgetPress ? () => onBudgetPress(budget) : undefined
+                }
+                onDeleteBudget={
+                  onBudgetDelete
+                    ? () => setBudgetPendingDelete(budget)
+                    : undefined
+                }
+                onItemPress={onExpensePress}
+                onToggleItemPaid={(exp, next) => void handleTogglePaid(exp, next)}
+                paidToggleExpenseId={paidToggleId}
+              />
+            );
+          })}
+        </View>
+      )}
+    </View>
+  ) : null;
+
+  const help = (
+    <>
+      <TouchableOpacity
+        style={[
+          styles.helpHeader,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+        onPress={() => setHelpOpen((o) => !o)}
+        activeOpacity={0.7}
+      >
+        <FontAwesome
+          name={helpOpen ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.helpTitle, { color: colors.text }]}>How this works</Text>
+      </TouchableOpacity>
+      {helpOpen ? (
+        <View
+          style={[
+            styles.helpBody,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            1. These are monthly category limits for the year/month you select. Spent
+            only counts paid expenses.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            2. Limits come from active bills on the Bills tab. This tab does not
+            create budgets — use pencil to edit a limit or trash to delete one.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            3. When you add or change a bill, the app already generates that bill’s
+            unpaid expenses and refreshes that category’s budget for you.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            4. Use Update plan on Bills for a full refresh across all bills (first
+            setup, lots of changes) or to preview what will be created/updated before
+            applying. Yearly or irregular dues only affect the months they fall due.
+            Edits you make here can be overwritten the next time that category is
+            synced from bills.
+          </Text>
+        </View>
+      ) : null}
+    </>
+  );
+
   return (
     <>
       <View style={styles.flex}>
@@ -345,238 +588,23 @@ export default function BudgetDashboard({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View
-              style={[
-                styles.heroCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-                Year overview
-              </Text>
-              <View style={styles.heroGrid}>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    Budgeted
-                  </Text>
-                  <Text style={[styles.heroValue, { color: colors.primary }]}>
-                    {displayMoney(yearSummary.budgeted)}
-                  </Text>
-                  <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-                    {yearSummary.monthsWithBudgets} months
-                  </Text>
+            {isWide ? (
+              <View style={styles.wideRow}>
+                <View style={styles.wideCol}>
+                  {yearHero}
+                  {monthlyBars}
+                  {help}
                 </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Spent</Text>
-                  <Text style={[styles.heroValue, { color: spentColor }]}>
-                    {displayMoney(yearSummary.spent)}
-                  </Text>
-                  <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-                    {Math.round(yearSummary.percentageUsed)}% of limits
-                  </Text>
-                </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Left</Text>
-                  <Text
-                    style={[
-                      styles.heroValue,
-                      { color: toneRemaining(yearSummary.remaining) },
-                    ]}
-                  >
-                    {displayMoney(yearSummary.remaining)}
-                  </Text>
-                </View>
+                <View style={styles.wideCol}>{selectedMonthCard}</View>
               </View>
-            </View>
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly budgets</Text>
-              <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                Tap a month · dots highlight near / over limit
-              </Text>
-              <MonthBudgetBars
-                points={barPoints}
-                selectedMonthIndex={selectedMonthIndex}
-                onSelectMonth={handleSelectMonth}
-                budgetColor={colors.primary}
-                spentColor={spentColor}
-                overColor={colors.warning || '#f59e0b'}
-                trackColor={colors.border}
-                textColor={colors.text}
-                mutedColor={colors.textSecondary}
-                selectedBorderColor={colors.primary}
-              />
-            </View>
-
-            {selectedMonth ? (
-              <View
-                style={[
-                  styles.sectionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {MONTH_NAMES[selectedMonth.monthIndex]} {year}
-                </Text>
-
-                <View style={styles.monthKpis}>
-                  <Kpi
-                    label="Budgeted"
-                    value={displayMoney(selectedMonth.budgeted)}
-                    color={colors.primary}
-                    muted={colors.textSecondary}
-                  />
-                  <Kpi
-                    label="Spent"
-                    value={displayMoney(selectedMonth.spent)}
-                    color={spentColor}
-                    muted={colors.textSecondary}
-                  />
-                  <Kpi
-                    label="Left"
-                    value={displayMoney(selectedMonth.remaining)}
-                    color={toneRemaining(selectedMonth.remaining)}
-                    muted={colors.textSecondary}
-                  />
-                  <Kpi
-                    label="Used"
-                    value={`${Math.round(selectedMonth.percentageUsed)}%`}
-                    color={
-                      selectedMonth.percentageUsed > 100
-                        ? spentColor
-                        : selectedMonth.percentageUsed >= 80
-                          ? colors.warning || '#f59e0b'
-                          : okColor
-                    }
-                    muted={colors.textSecondary}
-                  />
-                </View>
-
-                <View style={styles.donutBlock}>
-                  <DonutChart
-                    slices={donutSlices}
-                    textColor={colors.text}
-                    mutedColor={colors.textSecondary}
-                    trackColor={colors.border}
-                    centerLabel={
-                      selectedMonth.budgeted > 0
-                        ? `${Math.round(selectedMonth.percentageUsed)}%`
-                        : displayMoney(selectedMonth.spent)
-                    }
-                    centerSubLabel={
-                      selectedMonth.remaining < 0 ? 'Over budget' : 'Of limit'
-                    }
-                  />
-                  <View style={styles.donutLegend}>
-                    {donutSlices.map((s) => (
-                      <View key={s.key} style={styles.donutLegendRow}>
-                        <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                        <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                          {s.label}
-                        </Text>
-                        <Text
-                          style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
-                        >
-                          {displayMoney(s.amount)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-
-                <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                  Categories
-                </Text>
-                <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                  Tap a category to see items · pencil / trash to edit
-                </Text>
-
-                {loadingMonth === selectedMonthIndex && !expensesReady ? (
-                  <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
-                ) : sortedBudgets.length === 0 ? (
-                  <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                    No budgets for this month
-                  </Text>
-                ) : (
-                  <View style={styles.categoryList}>
-                    {sortedBudgets.map((budget) => {
-                      const catExpenses = expensesForCategory(
-                        selectedExpenses,
-                        budget.category
-                      );
-                      return (
-                        <BudgetCategoryRow
-                          key={budget.id}
-                          budget={budget}
-                          items={catExpenses}
-                          useItemsForSpent={expensesReady}
-                          onEditBudget={
-                            onBudgetPress ? () => onBudgetPress(budget) : undefined
-                          }
-                          onDeleteBudget={
-                            onBudgetDelete
-                              ? () => setBudgetPendingDelete(budget)
-                              : undefined
-                          }
-                          onItemPress={onExpensePress}
-                          onToggleItemPaid={(exp, next) => void handleTogglePaid(exp, next)}
-                          paidToggleExpenseId={paidToggleId}
-                        />
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[
-                styles.helpHeader,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-              onPress={() => setHelpOpen((o) => !o)}
-              activeOpacity={0.7}
-            >
-              <FontAwesome
-                name={helpOpen ? 'chevron-down' : 'chevron-right'}
-                size={12}
-                color={colors.textSecondary}
-              />
-              <Text style={[styles.helpTitle, { color: colors.text }]}>How this works</Text>
-            </TouchableOpacity>
-            {helpOpen ? (
-              <View
-                style={[
-                  styles.helpBody,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  1. These are monthly category limits for the year/month you select. Spent
-                  only counts paid expenses.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  2. Limits come from active bills on the Bills tab. This tab does not
-                  create budgets — use pencil to edit a limit or trash to delete one.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  3. When you add or change a bill, the app already generates that bill’s
-                  unpaid expenses and refreshes that category’s budget for you.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  4. Use Update plan on Bills for a full refresh across all bills (first
-                  setup, lots of changes) or to preview what will be created/updated before
-                  applying. Yearly or irregular dues only affect the months they fall due.
-                  Edits you make here can be overwritten the next time that category is
-                  synced from bills.
-                </Text>
-              </View>
-            ) : null}
+            ) : (
+              <>
+                {yearHero}
+                {monthlyBars}
+                {selectedMonthCard}
+                {help}
+              </>
+            )}
           </ScrollView>
         )}
       </View>
@@ -653,6 +681,16 @@ const styles = StyleSheet.create({
   todayBtnText: { fontSize: 12, fontWeight: '700' },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   heroCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

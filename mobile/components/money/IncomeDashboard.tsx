@@ -29,6 +29,7 @@ import {
 import DonutChart from '../expenses/charts/DonutChart';
 import MonthIncomeBars from './charts/MonthIncomeBars';
 import TooltipButton from '../TooltipButton';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 
 function monthTitle(year: number, monthIndex: number): string {
   return new Date(year, monthIndex, 1).toLocaleDateString('en-US', {
@@ -141,6 +142,7 @@ export default function IncomeDashboard({
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
@@ -451,12 +453,8 @@ export default function IncomeDashboard({
     );
   }
 
-  const renderOverview = () => (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
+  const renderOverview = () => {
+    const yearNav = (
       <View style={styles.yearNav}>
         <TouchableOpacity
           style={styles.navBtn}
@@ -482,236 +480,277 @@ export default function IncomeDashboard({
           </TouchableOpacity>
         ) : null}
       </View>
+    );
 
-      {streams.length === 0 ? (
-        <View style={styles.emptyBlock}>
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add an income stream first, then yearly income will show here.
-          </Text>
-          {onAddStream ? (
-            <TouchableOpacity
-              style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                setBoardTab('streams');
-                onAddStream();
-              }}
-            >
-              <FontAwesome name="plus" size={14} color="#fff" />
-              <Text style={styles.primaryActionText}>Add stream</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity onPress={() => setBoardTab('streams')}>
-              <Text style={{ color: colors.primary, fontWeight: '700' }}>Go to Streams</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      ) : (
-        <>
-          <View
-            style={[
-              styles.heroCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-              Income · {year}
+    if (streams.length === 0) {
+      return (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {yearNav}
+          <View style={styles.emptyBlock}>
+            <Text style={[styles.empty, { color: colors.textSecondary }]}>
+              Add an income stream first, then yearly income will show here.
             </Text>
-            <View style={styles.heroGrid}>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                  Year total
-                </Text>
-                <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
-                  {displayMoney(yearIncomeTotal)}
-                </Text>
-              </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                  Received
-                </Text>
-                <Text
-                  style={[styles.heroValue, { color: colors.success || '#10b981' }]}
-                  numberOfLines={1}
-                >
-                  {displayMoney(receivedTotal)}
-                </Text>
-              </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                  Estimated
-                </Text>
-                <Text style={[styles.heroValue, { color: '#f59e0b' }]} numberOfLines={1}>
-                  {displayMoney(estimatedTotal)}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.sectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>By stream</Text>
-            <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-              {year} income mix
-            </Text>
-            {donutSlices.length === 0 ? (
-              <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                No payments to chart
-              </Text>
+            {onAddStream ? (
+              <TouchableOpacity
+                style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  setBoardTab('streams');
+                  onAddStream();
+                }}
+              >
+                <FontAwesome name="plus" size={14} color="#fff" />
+                <Text style={styles.primaryActionText}>Add stream</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={styles.donutBlock}>
-                <DonutChart
-                  slices={donutSlices}
-                  textColor={colors.text}
-                  mutedColor={colors.textSecondary}
-                  trackColor={colors.border}
-                  centerLabel={displayMoney(yearIncomeTotal)}
-                  centerSubLabel="Year"
-                />
-                <View style={styles.donutLegend}>
-                  {donutSlices.map((s) => (
-                    <View key={s.key} style={styles.donutLegendRow}>
-                      <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                      <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                        {s.label}
-                      </Text>
-                      <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                        {displayMoney(s.amount)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              <TouchableOpacity onPress={() => setBoardTab('streams')}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>Go to Streams</Text>
+              </TouchableOpacity>
             )}
           </View>
+        </ScrollView>
+      );
+    }
 
-          <View
-            style={[
-              styles.sectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly income</Text>
-            <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-              Tap a month to see payments
+    const hero = (
+      <View
+        style={[
+          styles.heroCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+          Income · {year}
+        </Text>
+        <View style={styles.heroGrid}>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+              Year total
             </Text>
-            <MonthIncomeBars
-              points={barPoints}
-              selectedMonthIndex={selectedMonthIndex}
-              onSelectMonth={setSelectedMonthIndex}
-              incomeColor={colors.success || '#10b981'}
-              trackColor={colors.border}
+            <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+              {displayMoney(yearIncomeTotal)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Received</Text>
+            <Text
+              style={[styles.heroValue, { color: colors.success || '#10b981' }]}
+              numberOfLines={1}
+            >
+              {displayMoney(receivedTotal)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+              Estimated
+            </Text>
+            <Text style={[styles.heroValue, { color: '#f59e0b' }]} numberOfLines={1}>
+              {displayMoney(estimatedTotal)}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+
+    const byStreamDonut = (
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>By stream</Text>
+        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+          {year} income mix
+        </Text>
+        {donutSlices.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No payments to chart
+          </Text>
+        ) : (
+          <View style={styles.donutBlock}>
+            <DonutChart
+              slices={donutSlices}
               textColor={colors.text}
               mutedColor={colors.textSecondary}
-              selectedBorderColor={colors.primary}
+              trackColor={colors.border}
+              centerLabel={displayMoney(yearIncomeTotal)}
+              centerSubLabel="Year"
             />
-          </View>
-
-          {selectedMonth ? (
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.monthHeader}>
-                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-                  {monthTitle(year, selectedMonth.monthIndex)}
-                </Text>
-                <Text style={[styles.monthAmt, { color: colors.primary }]}>
-                  {displayMoney(selectedMonth.total)}
-                </Text>
-              </View>
-              <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                {selectedMonth.occs.length} payment
-                {selectedMonth.occs.length === 1 ? '' : 's'}
-              </Text>
-              {selectedMonth.occs.length === 0 ? (
-                <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                  No payments this month.
-                </Text>
-              ) : (
-                <View style={styles.monthPays}>
-                  {selectedMonth.occs.map((o) => {
-                    const color = streamColor(o.stream);
-                    return (
-                      <View
-                        key={o.id}
-                        style={[
-                          styles.payRow,
-                          {
-                            borderColor: colors.border,
-                            backgroundColor: colors.card,
-                          },
-                        ]}
-                      >
-                        <View style={[styles.payBar, { backgroundColor: color }]} />
-                        <TouchableOpacity style={styles.flex} onPress={() => editOcc(o)}>
-                          <Text
-                            style={[styles.payName, { color: colors.text }]}
-                            numberOfLines={1}
-                          >
-                            {o.stream_name || streamNameById.get(o.stream) || 'Stream'}
-                          </Text>
-                          <Text
-                            style={[styles.meta, { color: colors.textSecondary }]}
-                            numberOfLines={1}
-                          >
-                            {formatShortDate(o.due_date)} · Est{' '}
-                            {displayMoney(o.estimated_amount)}
-                            {o.actual_amount != null ? (
-                              <>
-                                {' · Act '}
-                                <Text
-                                  style={{
-                                    color: colors.success || '#10b981',
-                                    fontWeight: '700',
-                                  }}
-                                >
-                                  {displayMoney(o.actual_amount)}
-                                </Text>
-                              </>
-                            ) : null}
-                          </Text>
-                        </TouchableOpacity>
-                        {onEditOccurrence ? (
-                          <TooltipButton
-                            tooltip="Edit payment"
-                            style={styles.iconAction}
-                            onPress={() => editOcc(o)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          >
-                            <FontAwesome name="pencil" size={12} color={colors.primary} />
-                          </TooltipButton>
-                        ) : null}
-                        {onDeleteOccurrence ? (
-                          <TooltipButton
-                            tooltip="Delete payment"
-                            style={styles.iconAction}
-                            onPress={() => deleteOcc(o)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          >
-                            <FontAwesome
-                              name="trash"
-                              size={12}
-                              color={colors.error || '#ef4444'}
-                            />
-                          </TooltipButton>
-                        ) : null}
-                      </View>
-                    );
-                  })}
+            <View style={styles.donutLegend}>
+              {donutSlices.map((s) => (
+                <View key={s.key} style={styles.donutLegendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                  <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                    {s.label}
+                  </Text>
+                  <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                    {displayMoney(s.amount)}
+                  </Text>
                 </View>
-              )}
+              ))}
             </View>
-          ) : null}
-        </>
-      )}
-    </ScrollView>
-  );
+          </View>
+        )}
+      </View>
+    );
+
+    const monthlyBars = (
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly income</Text>
+        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+          Tap a month to see payments
+        </Text>
+        <MonthIncomeBars
+          points={barPoints}
+          selectedMonthIndex={selectedMonthIndex}
+          onSelectMonth={setSelectedMonthIndex}
+          incomeColor={colors.success || '#10b981'}
+          trackColor={colors.border}
+          textColor={colors.text}
+          mutedColor={colors.textSecondary}
+          selectedBorderColor={colors.primary}
+        />
+      </View>
+    );
+
+    const monthPayments = selectedMonth ? (
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <View style={styles.monthHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+            {monthTitle(year, selectedMonth.monthIndex)}
+          </Text>
+          <Text style={[styles.monthAmt, { color: colors.primary }]}>
+            {displayMoney(selectedMonth.total)}
+          </Text>
+        </View>
+        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+          {selectedMonth.occs.length} payment
+          {selectedMonth.occs.length === 1 ? '' : 's'}
+        </Text>
+        {selectedMonth.occs.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No payments this month.
+          </Text>
+        ) : (
+          <View style={styles.monthPays}>
+            {selectedMonth.occs.map((o) => {
+              const color = streamColor(o.stream);
+              return (
+                <View
+                  key={o.id}
+                  style={[
+                    styles.payRow,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.card,
+                    },
+                  ]}
+                >
+                  <View style={[styles.payBar, { backgroundColor: color }]} />
+                  <TouchableOpacity style={styles.flex} onPress={() => editOcc(o)}>
+                    <Text style={[styles.payName, { color: colors.text }]} numberOfLines={1}>
+                      {o.stream_name || streamNameById.get(o.stream) || 'Stream'}
+                    </Text>
+                    <Text
+                      style={[styles.meta, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {formatShortDate(o.due_date)} · Est {displayMoney(o.estimated_amount)}
+                      {o.actual_amount != null ? (
+                        <>
+                          {' · Act '}
+                          <Text
+                            style={{
+                              color: colors.success || '#10b981',
+                              fontWeight: '700',
+                            }}
+                          >
+                            {displayMoney(o.actual_amount)}
+                          </Text>
+                        </>
+                      ) : null}
+                    </Text>
+                  </TouchableOpacity>
+                  {onEditOccurrence ? (
+                    <TooltipButton
+                      tooltip="Edit payment"
+                      style={styles.iconAction}
+                      onPress={() => editOcc(o)}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <FontAwesome name="pencil" size={12} color={colors.primary} />
+                    </TooltipButton>
+                  ) : null}
+                  {onDeleteOccurrence ? (
+                    <TooltipButton
+                      tooltip="Delete payment"
+                      style={styles.iconAction}
+                      onPress={() => deleteOcc(o)}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <FontAwesome
+                        name="trash"
+                        size={12}
+                        color={colors.error || '#ef4444'}
+                      />
+                    </TooltipButton>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    ) : null;
+
+    const left = (
+      <>
+        {yearNav}
+        {hero}
+        {byStreamDonut}
+      </>
+    );
+    const right = (
+      <>
+        {monthlyBars}
+        {monthPayments}
+      </>
+    );
+
+    return (
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideCol}>{left}</View>
+            <View style={styles.wideCol}>{right}</View>
+          </View>
+        ) : (
+          <>
+            {left}
+            {right}
+          </>
+        )}
+      </ScrollView>
+    );
+  };
 
   const renderStreams = () => (
     <ScrollView
@@ -1084,6 +1123,16 @@ const styles = StyleSheet.create({
   todayBtnText: { fontSize: 12, fontWeight: '700' },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   emptyBlock: { gap: 12, paddingVertical: 16, alignItems: 'flex-start' },
   streamsHeader: {
     flexDirection: 'row',

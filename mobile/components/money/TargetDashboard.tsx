@@ -22,6 +22,7 @@ import {
   projectAccountsAtYearsAhead,
   projectPortfolioAtYears,
 } from '../../utils/moneyReturns';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 
 const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
 const DEFAULT_FORECAST_RATE = 2.5;
@@ -35,6 +36,7 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -190,6 +192,231 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
   const investEndSelected = horizonPoint?.invest ?? 0;
   const cashSelected = horizonPoint?.cash ?? 0;
 
+  const intro = (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Forward forecast</Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Investment growth compounds each year; cash stays flat and is added to portfolio.
+      </Text>
+    </>
+  );
+
+  const rateChips = (
+    <>
+      <Text style={[styles.chipLabel, { color: colors.textSecondary }]}>
+        Investment return
+      </Text>
+      <View style={styles.chipWrap}>
+        {TARGET_RATES.map((rate) => {
+          const active = rate === forecastRate;
+          return (
+            <TouchableOpacity
+              key={rate}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.primary : colors.card || colors.surface,
+                  borderColor: active ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setForecastRate(rate)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${rate} percent return`}
+            >
+              <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
+                {rate}%
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </>
+  );
+
+  const selectedYearHero = (
+    <View
+      style={[
+        styles.heroCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+        {horizonPoint?.calendarYear ?? currentCalendarYear + 1} · {forecastRate}% investment
+        return
+      </Text>
+      <Text style={[styles.heroPortfolio, { color: growthColor }]} numberOfLines={1}>
+        {fmtSignedMoney(investGrowthSelected)}
+      </Text>
+      <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
+        Investment growth this year
+      </Text>
+      <View style={styles.heroBreakdown}>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Invest start
+          </Text>
+          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            {displayMoney(horizonPoint?.investStart ?? 0)}
+          </Text>
+        </View>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Invest end</Text>
+          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            {displayMoney(investEndSelected)}
+          </Text>
+        </View>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
+          <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+            {displayMoney(cashSelected)}
+          </Text>
+        </View>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Portfolio</Text>
+          <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+            {displayMoney(horizonPoint?.portfolio ?? 0)}
+          </Text>
+        </View>
+      </View>
+      <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
+        Invest end + cash = portfolio (cash flat)
+      </Text>
+    </View>
+  );
+
+  const byYearCards = (
+    <View style={styles.yearStack}>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>By year</Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        At {forecastRate}% · tap to expand accounts
+      </Text>
+      {forecast.points.map((p) => {
+        const selected = p.yearsAhead === horizonYearsAhead;
+        const expanded = expandedForecastYears.includes(p.yearsAhead);
+        const accountRows = expanded
+          ? projectAccountsAtYearsAhead(
+              accounts,
+              forecastRate,
+              p.yearsAhead,
+              demoPortfolio
+            )
+          : [];
+        return (
+          <View
+            key={p.yearsAhead}
+            style={[
+              styles.yearCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: selected ? colors.primary : colors.border,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.yearCardHeader}
+              onPress={() => selectForecastYear(p.yearsAhead)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded, selected }}
+              accessibilityLabel={`${p.calendarYear} forecast`}
+            >
+              <FontAwesome
+                name={expanded ? 'chevron-down' : 'chevron-right'}
+                size={11}
+                color={colors.textSecondary}
+              />
+              <Text style={[styles.yearCardYear, { color: colors.text }]}>
+                {p.calendarYear}
+              </Text>
+              <Text
+                style={[styles.yearCardMeta, { color: colors.textSecondary, flex: 1 }]}
+                numberOfLines={1}
+              >
+                {displayMoney(p.investStart)}→
+                <Text style={{ color: investedColor, fontWeight: '700' }}>
+                  {displayMoney(p.invest)}
+                </Text>
+              </Text>
+              <Text
+                style={[styles.yearCardGrowth, { color: growthColor }]}
+                numberOfLines={1}
+              >
+                {fmtSignedMoney(p.investGrowth)}
+              </Text>
+            </TouchableOpacity>
+
+            {expanded ? (
+              <View
+                style={[
+                  styles.yearAccounts,
+                  {
+                    borderTopColor: colors.border,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+              >
+                {accountRows.length === 0 ? (
+                  <Text style={[styles.meta, { color: colors.textSecondary }]}>
+                    No account balances to project.
+                  </Text>
+                ) : (
+                  accountRows.map((row) => {
+                    const amtColor = row.isCash ? cashColor : investedColor;
+                    return (
+                      <View
+                        key={`${p.yearsAhead}-${row.id}`}
+                        style={[styles.yearAccountRow, { borderTopColor: colors.border }]}
+                      >
+                        <Text
+                          style={[styles.accountName, { color: colors.text, flex: 1 }]}
+                          numberOfLines={1}
+                        >
+                          {row.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.yearAccountPathLine,
+                            { color: colors.textSecondary },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {displayMoney(row.start)}→
+                          <Text style={{ color: amtColor, fontWeight: '700' }}>
+                            {displayMoney(row.end)}
+                          </Text>
+                        </Text>
+                        <Text
+                          style={[
+                            styles.yearAccountGrowth,
+                            {
+                              color: row.growth > 0 ? growthColor : colors.textSecondary,
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {fmtSignedMoney(row.growth)}
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+
+  const left = (
+    <>
+      {intro}
+      {rateChips}
+      {selectedYearHero}
+    </>
+  );
+  const right = byYearCards;
+
   return (
     <View style={styles.flex}>
       {error ? (
@@ -206,240 +433,22 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Forward forecast</Text>
-          <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-            Investment growth compounds each year; cash stays flat and is added to portfolio.
-          </Text>
-
           {!forecast.base.hasBalances ? (
-            <Text style={[styles.empty, { color: colors.textSecondary }]}>
-              Add accounts and update balances to see a forecast.
-            </Text>
+            <>
+              {intro}
+              <Text style={[styles.empty, { color: colors.textSecondary }]}>
+                Add accounts and update balances to see a forecast.
+              </Text>
+            </>
+          ) : isWide ? (
+            <View style={styles.wideRow}>
+              <View style={styles.wideCol}>{left}</View>
+              <View style={styles.wideCol}>{right}</View>
+            </View>
           ) : (
             <>
-              <Text style={[styles.chipLabel, { color: colors.textSecondary }]}>
-                Investment return
-              </Text>
-              <View style={styles.chipWrap}>
-                {TARGET_RATES.map((rate) => {
-                  const active = rate === forecastRate;
-                  return (
-                    <TouchableOpacity
-                      key={rate}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: active
-                            ? colors.primary
-                            : colors.card || colors.surface,
-                          borderColor: active ? colors.primary : colors.border,
-                        },
-                      ]}
-                      onPress={() => setForecastRate(rate)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={`${rate} percent return`}
-                    >
-                      <Text
-                        style={[styles.chipText, { color: active ? '#fff' : colors.text }]}
-                      >
-                        {rate}%
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View
-                style={[
-                  styles.heroCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-                  {horizonPoint?.calendarYear ?? currentCalendarYear + 1} · {forecastRate}%
-                  investment return
-                </Text>
-                <Text style={[styles.heroPortfolio, { color: growthColor }]} numberOfLines={1}>
-                  {fmtSignedMoney(investGrowthSelected)}
-                </Text>
-                <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
-                  Investment growth this year
-                </Text>
-                <View style={styles.heroBreakdown}>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Invest start
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: investedColor }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(horizonPoint?.investStart ?? 0)}
-                    </Text>
-                  </View>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Invest end
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: investedColor }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(investEndSelected)}
-                    </Text>
-                  </View>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Cash
-                    </Text>
-                    <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
-                      {displayMoney(cashSelected)}
-                    </Text>
-                  </View>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Portfolio
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: colors.primary }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(horizonPoint?.portfolio ?? 0)}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
-                  Invest end + cash = portfolio (cash flat)
-                </Text>
-              </View>
-
-              <View style={styles.yearStack}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>By year</Text>
-                <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                  At {forecastRate}% · tap to expand accounts
-                </Text>
-                {forecast.points.map((p) => {
-                  const selected = p.yearsAhead === horizonYearsAhead;
-                  const expanded = expandedForecastYears.includes(p.yearsAhead);
-                  const accountRows = expanded
-                    ? projectAccountsAtYearsAhead(
-                        accounts,
-                        forecastRate,
-                        p.yearsAhead,
-                        demoPortfolio
-                      )
-                    : [];
-                  return (
-                    <View
-                      key={p.yearsAhead}
-                      style={[
-                        styles.yearCard,
-                        {
-                          backgroundColor: colors.surface,
-                          borderColor: selected ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <TouchableOpacity
-                        style={styles.yearCardHeader}
-                        onPress={() => selectForecastYear(p.yearsAhead)}
-                        accessibilityRole="button"
-                        accessibilityState={{ expanded, selected }}
-                        accessibilityLabel={`${p.calendarYear} forecast`}
-                      >
-                        <FontAwesome
-                          name={expanded ? 'chevron-down' : 'chevron-right'}
-                          size={11}
-                          color={colors.textSecondary}
-                        />
-                        <Text style={[styles.yearCardYear, { color: colors.text }]}>
-                          {p.calendarYear}
-                        </Text>
-                        <Text
-                          style={[styles.yearCardMeta, { color: colors.textSecondary, flex: 1 }]}
-                          numberOfLines={1}
-                        >
-                          {displayMoney(p.investStart)}→
-                          <Text style={{ color: investedColor, fontWeight: '700' }}>
-                            {displayMoney(p.invest)}
-                          </Text>
-                        </Text>
-                        <Text
-                          style={[styles.yearCardGrowth, { color: growthColor }]}
-                          numberOfLines={1}
-                        >
-                          {fmtSignedMoney(p.investGrowth)}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {expanded ? (
-                        <View
-                          style={[
-                            styles.yearAccounts,
-                            {
-                              borderTopColor: colors.border,
-                              backgroundColor: colors.background,
-                            },
-                          ]}
-                        >
-                          {accountRows.length === 0 ? (
-                            <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                              No account balances to project.
-                            </Text>
-                          ) : (
-                            accountRows.map((row) => {
-                              const amtColor = row.isCash ? cashColor : investedColor;
-                              return (
-                                <View
-                                  key={`${p.yearsAhead}-${row.id}`}
-                                  style={[
-                                    styles.yearAccountRow,
-                                    { borderTopColor: colors.border },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[styles.accountName, { color: colors.text, flex: 1 }]}
-                                    numberOfLines={1}
-                                  >
-                                    {row.name}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.yearAccountPathLine,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                    numberOfLines={1}
-                                  >
-                                    {displayMoney(row.start)}→
-                                    <Text style={{ color: amtColor, fontWeight: '700' }}>
-                                      {displayMoney(row.end)}
-                                    </Text>
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.yearAccountGrowth,
-                                      {
-                                        color:
-                                          row.growth > 0
-                                            ? growthColor
-                                            : colors.textSecondary,
-                                      },
-                                    ]}
-                                    numberOfLines={1}
-                                  >
-                                    {fmtSignedMoney(row.growth)}
-                                  </Text>
-                                </View>
-                              );
-                            })
-                          )}
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
+              {left}
+              {right}
             </>
           )}
         </ScrollView>
@@ -459,6 +468,16 @@ const styles = StyleSheet.create({
   },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 12 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   empty: { fontSize: 13, paddingVertical: 8 },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
   sectionHint: { fontSize: 12, fontWeight: '500', marginTop: -6 },

@@ -20,6 +20,7 @@ import { STORAGE_KEYS, storage } from '../../utils/storage';
 import { canUseMoneyDemoPortfolio } from '../../utils/moneyDemoPortfolio';
 import { buildYearReturnRows, YearReturnRow, ytdPortfolioTotals } from '../../utils/moneyReturns';
 import DonutChart from '../expenses/charts/DonutChart';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   rrsp: 'RRSP',
@@ -97,6 +98,7 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -275,6 +277,266 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
 
   const hasRows = yearReturnRows.length > 0;
 
+  const yearChips = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Year</Text>
+      <View style={styles.chipWrap}>
+        {returnsYearOptions.map((y) => {
+          const active = y === returnsYear;
+          return (
+            <TouchableOpacity
+              key={y}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.primary : colors.background,
+                  borderColor: active ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setReturnsYear(y)}
+            >
+              <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
+                {y}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const growthHero = (
+    <View
+      style={[
+        styles.heroCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+        Year to date · {returnsYear}
+        {ytdHeroTotals.invested.returnPct != null
+          ? ` · ${fmtReturnPct(ytdHeroTotals.invested.returnPct)} invest return`
+          : ''}
+      </Text>
+      <Text
+        style={[
+          styles.heroPortfolio,
+          { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+        ]}
+        numberOfLines={1}
+      >
+        {fmtSignedMoney(ytdHeroTotals.invested.delta)}
+      </Text>
+      <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
+        Investment growth
+      </Text>
+
+      <View style={styles.heroInvestPath}>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Invest start
+          </Text>
+          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            {displayMoney(ytdHeroTotals.invested.start)}
+          </Text>
+        </View>
+        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Growth</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+            ]}
+            numberOfLines={1}
+          >
+            {fmtSignedMoney(ytdHeroTotals.invested.delta)}
+          </Text>
+          <Text
+            style={[
+              styles.heroMeta,
+              { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
+            ]}
+          >
+            {fmtReturnPct(ytdHeroTotals.invested.returnPct)}
+          </Text>
+        </View>
+        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Invest now
+          </Text>
+          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            {displayMoney(ytdHeroTotals.invested.latest)}
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.heroPortfolioRow, { borderTopColor: colors.border }]}>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Invest now
+          </Text>
+          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            {displayMoney(ytdHeroTotals.invested.latest)}
+          </Text>
+        </View>
+        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
+          <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+            {displayMoney(ytdHeroTotals.cash.latest)}
+          </Text>
+        </View>
+        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
+        <View style={styles.heroBreakCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Portfolio
+          </Text>
+          <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+            {displayMoney(ytdHeroTotals.all.latest)}
+          </Text>
+        </View>
+      </View>
+      <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
+        Investment growth · cash added to portfolio total
+      </Text>
+    </View>
+  );
+
+  const investCashDonut = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Investments vs cash</Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Latest balances for {returnsYear}
+      </Text>
+      {donutSlices.length === 0 ? (
+        <Text style={[styles.empty, { color: colors.textSecondary }]}>No balances to chart</Text>
+      ) : (
+        <View style={styles.donutBlock}>
+          <DonutChart
+            slices={donutSlices}
+            textColor={colors.text}
+            mutedColor={colors.textSecondary}
+            trackColor={colors.border}
+            centerLabel={displayMoney(ytdHeroTotals.all.latest)}
+            centerSubLabel="Latest"
+          />
+          <View style={styles.donutLegend}>
+            {donutSlices.map((s) => (
+              <View key={s.key} style={styles.donutLegendRow}>
+                <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
+                <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                  {displayMoney(s.amount)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  const byAccountList = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.accordionHeader}
+        onPress={() => setAccountsOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: accountsOpen }}
+      >
+        <FontAwesome
+          name={accountsOpen ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>By account</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+          {yearReturnRows.length}
+        </Text>
+      </TouchableOpacity>
+      {accountsOpen
+        ? institutionGroups.map((group) => (
+            <View key={group.key} style={styles.institutionGroup}>
+              <Text
+                style={[styles.institutionHeader, { color: colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {group.label}
+              </Text>
+              {group.rows.map((row) => (
+                <View
+                  key={row.id}
+                  style={[styles.accountRow, { borderTopColor: colors.border }]}
+                >
+                  <View style={styles.accountTop}>
+                    <Text
+                      style={[styles.accountName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {ACCOUNT_TYPE_LABELS[row.accountType] || row.accountType}
+                    </Text>
+                    <Text
+                      style={[styles.accountPct, { color: returnsDeltaColor(row.returnPct) }]}
+                    >
+                      {fmtReturnPct(row.returnPct)}
+                    </Text>
+                    <Text
+                      style={[styles.accountDelta, { color: returnsDeltaColor(row.delta) }]}
+                      numberOfLines={1}
+                    >
+                      {fmtSignedMoney(row.delta)}
+                    </Text>
+                  </View>
+                  <View style={styles.accountAmounts}>
+                    <Text
+                      style={[styles.accountMeta, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {row.startDate ? formatShortDate(row.startDate) : 'no start'}
+                      {row.latestDate ? ` → ${formatShortDate(row.latestDate)}` : ''}
+                    </Text>
+                    <Text style={[styles.accountAmt, { color: colors.text }]}>
+                      {displayMoney(row.startBalance)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>→</Text>
+                    <Text style={[styles.accountAmt, { color: colors.text }]}>
+                      {displayMoney(row.latestBalance)}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ))
+        : null}
+    </View>
+  );
+
+  const left = (
+    <>
+      {yearChips}
+      {growthHero}
+      {investCashDonut}
+    </>
+  );
+  const right = byAccountList;
+
   return (
     <View style={styles.flex}>
       {error ? (
@@ -291,286 +553,22 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View
-            style={[
-              styles.sectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Year</Text>
-            <View style={styles.chipWrap}>
-              {returnsYearOptions.map((y) => {
-                const active = y === returnsYear;
-                return (
-                  <TouchableOpacity
-                    key={y}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: active ? colors.primary : colors.background,
-                        borderColor: active ? colors.primary : colors.border,
-                      },
-                    ]}
-                    onPress={() => setReturnsYear(y)}
-                  >
-                    <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
-                      {y}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
           {!hasRows ? (
-            <Text style={[styles.empty, { color: colors.textSecondary }]}>
-              Add accounts and balance snapshots to see YTD returns.
-            </Text>
+            <>
+              {yearChips}
+              <Text style={[styles.empty, { color: colors.textSecondary }]}>
+                Add accounts and balance snapshots to see YTD returns.
+              </Text>
+            </>
+          ) : isWide ? (
+            <View style={styles.wideRow}>
+              <View style={styles.wideCol}>{left}</View>
+              <View style={styles.wideCol}>{right}</View>
+            </View>
           ) : (
             <>
-              <View
-                style={[
-                  styles.heroCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-                  Year to date · {returnsYear}
-                  {ytdHeroTotals.invested.returnPct != null
-                    ? ` · ${fmtReturnPct(ytdHeroTotals.invested.returnPct)} invest return`
-                    : ''}
-                </Text>
-                <Text
-                  style={[
-                    styles.heroPortfolio,
-                    { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {fmtSignedMoney(ytdHeroTotals.invested.delta)}
-                </Text>
-                <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
-                  Investment growth
-                </Text>
-
-                <View style={styles.heroInvestPath}>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Invest start
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: investedColor }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(ytdHeroTotals.invested.start)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Growth
-                    </Text>
-                    <Text
-                      style={[
-                        styles.heroValue,
-                        { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {fmtSignedMoney(ytdHeroTotals.invested.delta)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.heroMeta,
-                        { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
-                      ]}
-                    >
-                      {fmtReturnPct(ytdHeroTotals.invested.returnPct)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Invest now
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: investedColor }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(ytdHeroTotals.invested.latest)}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={[styles.heroPortfolioRow, { borderTopColor: colors.border }]}>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Invest now
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: investedColor }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(ytdHeroTotals.invested.latest)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
-                    <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
-                      {displayMoney(ytdHeroTotals.cash.latest)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-                  <View style={styles.heroBreakCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Portfolio
-                    </Text>
-                    <Text
-                      style={[styles.heroValue, { color: colors.primary }]}
-                      numberOfLines={1}
-                    >
-                      {displayMoney(ytdHeroTotals.all.latest)}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
-                  Investment growth · cash added to portfolio total
-                </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.sectionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Investments vs cash
-                </Text>
-                <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                  Latest balances for {returnsYear}
-                </Text>
-                {donutSlices.length === 0 ? (
-                  <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                    No balances to chart
-                  </Text>
-                ) : (
-                  <View style={styles.donutBlock}>
-                    <DonutChart
-                      slices={donutSlices}
-                      textColor={colors.text}
-                      mutedColor={colors.textSecondary}
-                      trackColor={colors.border}
-                      centerLabel={displayMoney(ytdHeroTotals.all.latest)}
-                      centerSubLabel="Latest"
-                    />
-                    <View style={styles.donutLegend}>
-                      {donutSlices.map((s) => (
-                        <View key={s.key} style={styles.donutLegendRow}>
-                          <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                          <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                            {s.label}
-                          </Text>
-                          <Text
-                            style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
-                          >
-                            {displayMoney(s.amount)}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </View>
-
-              <View
-                style={[
-                  styles.sectionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.accordionHeader}
-                  onPress={() => setAccountsOpen((o) => !o)}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: accountsOpen }}
-                >
-                  <FontAwesome
-                    name={accountsOpen ? 'chevron-down' : 'chevron-right'}
-                    size={12}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-                    By account
-                  </Text>
-                  <Text
-                    style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-                  >
-                    {yearReturnRows.length}
-                  </Text>
-                </TouchableOpacity>
-                {accountsOpen
-                  ? institutionGroups.map((group) => (
-                      <View key={group.key} style={styles.institutionGroup}>
-                        <Text
-                          style={[styles.institutionHeader, { color: colors.textSecondary }]}
-                          numberOfLines={1}
-                        >
-                          {group.label}
-                        </Text>
-                        {group.rows.map((row) => (
-                          <View
-                            key={row.id}
-                            style={[styles.accountRow, { borderTopColor: colors.border }]}
-                          >
-                            <View style={styles.accountTop}>
-                              <Text
-                                style={[styles.accountName, { color: colors.text }]}
-                                numberOfLines={1}
-                              >
-                                {ACCOUNT_TYPE_LABELS[row.accountType] || row.accountType}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.accountPct,
-                                  { color: returnsDeltaColor(row.returnPct) },
-                                ]}
-                              >
-                                {fmtReturnPct(row.returnPct)}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.accountDelta,
-                                  { color: returnsDeltaColor(row.delta) },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {fmtSignedMoney(row.delta)}
-                              </Text>
-                            </View>
-                            <View style={styles.accountAmounts}>
-                              <Text
-                                style={[styles.accountMeta, { color: colors.textSecondary }]}
-                                numberOfLines={1}
-                              >
-                                {row.startDate ? formatShortDate(row.startDate) : 'no start'}
-                                {row.latestDate ? ` → ${formatShortDate(row.latestDate)}` : ''}
-                              </Text>
-                              <Text style={[styles.accountAmt, { color: colors.text }]}>
-                                {displayMoney(row.startBalance)}
-                              </Text>
-                              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>→</Text>
-                              <Text style={[styles.accountAmt, { color: colors.text }]}>
-                                {displayMoney(row.latestBalance)}
-                              </Text>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    ))
-                  : null}
-              </View>
+              {left}
+              {right}
             </>
           )}
         </ScrollView>
@@ -590,6 +588,16 @@ const styles = StyleSheet.create({
   },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   heroCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

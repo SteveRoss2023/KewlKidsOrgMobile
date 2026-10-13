@@ -32,6 +32,7 @@ import {
   startOfPeriod,
 } from '../../utils/expensePeriods';
 import { forFamily } from '../../utils/familyScope';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 import RecurringExpenseRow, { formatOccurrenceDate } from './RecurringExpenseRow';
 import ExpenseCategoryRow from './ExpenseCategoryRow';
@@ -75,6 +76,7 @@ export default function ExpenseDashboard({
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>('month');
   const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
@@ -405,6 +407,458 @@ export default function ExpenseDashboard({
     );
   }
 
+  const left = (
+    <>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <View style={styles.periodChips}>
+          {PERIOD_OPTIONS.map((opt) => {
+            const active = periodMode === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.primary : colors.background,
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setPeriodMode(opt.value)}
+              >
+                <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {activePeriodMode ? (
+          <View style={styles.periodNav}>
+            <TouchableOpacity
+              onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, -1))}
+              style={styles.navBtn}
+              accessibilityLabel="Previous period"
+            >
+              <FontAwesome name="chevron-left" size={14} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.periodLabel, { color: colors.text }]} numberOfLines={1}>
+              {periodLabel}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, 1))}
+              style={styles.navBtn}
+              accessibilityLabel="Next period"
+            >
+              <FontAwesome name="chevron-right" size={14} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.todayBtn,
+                {
+                  backgroundColor: onTodayPeriod ? colors.card : colors.primary,
+                  borderColor: onTodayPeriod ? colors.border : colors.primary,
+                },
+              ]}
+              onPress={() => todayPeriod && setViewDate(todayPeriod)}
+              disabled={onTodayPeriod}
+              accessibilityLabel="Go to today"
+            >
+              <Text
+                style={[
+                  styles.todayBtnText,
+                  { color: onTodayPeriod ? colors.textSecondary : '#fff' },
+                ]}
+              >
+                Today
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={[styles.periodLabel, { color: colors.text, textAlign: 'center' }]}>
+            {periodLabel}
+          </Text>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.heroCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+          Period summary
+        </Text>
+        <View style={styles.heroGrid}>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
+            <Text style={[styles.heroValue, { color: paidColor }]}>
+              {displayMoney(periodPaid)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Unpaid</Text>
+            <Text style={[styles.heroValue, { color: UNPAID_COLOR }]}>
+              {displayMoney(periodUnpaid)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Expenses</Text>
+            <Text style={[styles.heroValue, { color: colors.text }]}>
+              {filteredExpenses.length}
+            </Text>
+          </View>
+          {periodMode !== 'all' ? (
+            <View style={styles.heroCell}>
+              <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budgeted</Text>
+              <Text style={[styles.heroValue, { color: colors.primary }]}>
+                {displayMoney(periodBudgetTotal)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Paid vs unpaid</Text>
+        <View style={styles.donutBlock}>
+          <DonutChart
+            slices={donutSlices.filter((s) => s.key !== 'empty')}
+            textColor={colors.text}
+            mutedColor={colors.textSecondary}
+            trackColor={colors.border}
+            centerLabel={displayMoney(periodPaid + periodUnpaid)}
+            centerSubLabel="Total"
+          />
+          <View style={styles.donutLegend}>
+            {donutSlices
+              .filter((s) => s.key !== 'empty')
+              .map((s) => (
+                <View key={s.key} style={styles.donutLegendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                  <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
+                  <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                    {displayMoney(s.amount)}
+                  </Text>
+                </View>
+              ))}
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+          onPress={onAdd}
+          accessibilityLabel="Add expense"
+        >
+          <FontAwesome name="plus" size={14} color="#fff" />
+          <Text style={styles.primaryActionText}>Add</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.secondaryAction,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          onPress={onScan}
+          accessibilityLabel="Scan receipt"
+        >
+          <FontAwesome name="camera" size={14} color={colors.primary} />
+          <Text style={[styles.secondaryActionText, { color: colors.primary }]}>
+            Scan receipt
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const right = (
+    <>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <View style={styles.toolsRow}>
+          <View
+            style={[
+              styles.searchBox,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <FontAwesome name="search" size={12} color={colors.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Search..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <FontAwesome name="times" size={12} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.filterBtn,
+              {
+                backgroundColor:
+                  showFilters || hasActiveFilters ? colors.primary : colors.background,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => setShowFilters((v) => !v)}
+            accessibilityLabel="Filters"
+          >
+            <FontAwesome
+              name="filter"
+              size={13}
+              color={showFilters || hasActiveFilters ? '#fff' : colors.text}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {showFilters ? (
+          <View style={styles.filterPanel}>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Category</Text>
+              <ThemeAwarePicker
+                selectedValue={filterCategory?.toString() || ''}
+                onValueChange={(value) =>
+                  setFilterCategory(value ? parseInt(value, 10) : null)
+                }
+                options={[
+                  { label: 'All', value: '' },
+                  ...categories.map((cat) => ({
+                    label: cat.name,
+                    value: cat.id.toString(),
+                  })),
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Payment</Text>
+              <ThemeAwarePicker
+                selectedValue={filterPaymentMethod || ''}
+                onValueChange={(value) =>
+                  setFilterPaymentMethod((value || null) as PaymentMethod | null)
+                }
+                options={[
+                  { label: 'All', value: '' },
+                  { label: 'Cash', value: 'cash' },
+                  { label: 'Credit Card', value: 'credit_card' },
+                  { label: 'Debit Card', value: 'debit_card' },
+                  { label: 'Bank Transfer', value: 'bank_transfer' },
+                  { label: 'E-Transfer', value: 'e_transfer' },
+                  { label: 'Check', value: 'check' },
+                  { label: 'Other', value: 'other' },
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Tag</Text>
+              <ThemeAwarePicker
+                selectedValue={filterTag?.toString() || ''}
+                onValueChange={(value) => setFilterTag(value ? parseInt(value, 10) : null)}
+                options={[
+                  { label: 'All', value: '' },
+                  ...tags.map((tag) => ({ label: tag.name, value: tag.id.toString() })),
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Type</Text>
+              <ThemeAwarePicker
+                selectedValue={
+                  filterRecurring === null ? '' : filterRecurring ? 'recurring' : 'one_time'
+                }
+                onValueChange={(value) => {
+                  if (value === 'recurring') setFilterRecurring(true);
+                  else if (value === 'one_time') setFilterRecurring(false);
+                  else setFilterRecurring(null);
+                }}
+                options={[
+                  { label: 'All', value: '' },
+                  { label: 'Recurring', value: 'recurring' },
+                  { label: 'One-time', value: 'one_time' },
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Status</Text>
+              <ThemeAwarePicker
+                selectedValue={filterPaid === null ? '' : filterPaid ? 'paid' : 'unpaid'}
+                onValueChange={(value) => {
+                  if (value === 'paid') setFilterPaid(true);
+                  else if (value === 'unpaid') setFilterPaid(false);
+                  else setFilterPaid(null);
+                }}
+                options={[
+                  { label: 'All', value: '' },
+                  { label: 'Paid', value: 'paid' },
+                  { label: 'Unpaid', value: 'unpaid' },
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Sort</Text>
+              <ThemeAwarePicker
+                selectedValue={`${sortBy}_${sortOrder}`}
+                onValueChange={(value) => {
+                  const [by, order] = String(value ?? 'date_desc').split('_') as [
+                    SortBy,
+                    SortOrder,
+                  ];
+                  setSortBy(by);
+                  setSortOrder(order);
+                }}
+                options={[
+                  { label: 'Date (newest)', value: 'date_desc' },
+                  { label: 'Date (oldest)', value: 'date_asc' },
+                  { label: 'Amount (high)', value: 'amount_desc' },
+                  { label: 'Amount (low)', value: 'amount_asc' },
+                  { label: 'Category A–Z', value: 'category_asc' },
+                  { label: 'Category Z–A', value: 'category_desc' },
+                ]}
+              />
+            </View>
+            <View style={styles.filterRow}>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Upcoming bills</Text>
+              <TouchableOpacity
+                style={[
+                  styles.chip,
+                  {
+                    alignSelf: 'flex-start',
+                    backgroundColor: showCombinedView ? colors.primary : colors.background,
+                    borderColor: showCombinedView ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setShowCombinedView((v) => !v)}
+              >
+                <Text
+                  style={[styles.chipText, { color: showCombinedView ? '#fff' : colors.text }]}
+                >
+                  {showCombinedView ? 'On' : 'Off'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[styles.clearFiltersBtn, { backgroundColor: colors.border }]}
+              onPress={() => {
+                setFilterCategory(null);
+                setFilterPaymentMethod(null);
+                setFilterTag(null);
+                setFilterRecurring(null);
+                setFilterPaid(null);
+                setSortBy('date');
+                setSortOrder('desc');
+                setShowCombinedView(false);
+              }}
+            >
+              <Text style={[styles.clearFiltersText, { color: colors.text }]}>Clear filters</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+
+      {showCombinedView && upcomingRecurring.length > 0 ? (
+        <View
+          style={[
+            styles.sectionCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.upcomingHeader}
+            onPress={() => setUpcomingOpen((o) => !o)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: upcomingOpen }}
+          >
+            <FontAwesome
+              name={upcomingOpen ? 'chevron-down' : 'chevron-right'}
+              size={12}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+              Upcoming bills
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+              {upcomingRecurring.length}
+            </Text>
+          </TouchableOpacity>
+          {upcomingOpen
+            ? upcomingRecurring.map((recurring) => {
+                const nextDate = new Date(recurring.next_due_date);
+                nextDate.setHours(0, 0, 0, 0);
+                return (
+                  <RecurringExpenseRow
+                    key={`upcoming-${recurring.id}`}
+                    recurring={recurring}
+                    dateLabel={formatOccurrenceDate(nextDate)}
+                    badge={{ label: 'Upcoming', color: colors.primary }}
+                  />
+                );
+              })
+            : null}
+        </View>
+      ) : null}
+
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Categories</Text>
+        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+          Tap a category for items · edit, paid, receipt, delete
+        </Text>
+        {loading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
+        ) : categoryGroups.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No expenses or budgets this period
+          </Text>
+        ) : (
+          <View style={styles.categoryList}>
+            {categoryGroups.map(([catId, group]) => (
+              <ExpenseCategoryRow
+                key={catId}
+                categoryName={group.name}
+                items={group.expenses}
+                budget={group.budget}
+                showBudgetLimit={!!group.budget && periodMode !== 'all'}
+                onEditBudget={
+                  group.budget && onBudgetPress
+                    ? () => onBudgetPress(group.budget!)
+                    : undefined
+                }
+                onItemPress={onExpensePress}
+                onItemDelete={(exp) => setExpensePendingDelete(exp)}
+                onToggleItemPaid={(exp, next) => void handleTogglePaid(exp, next)}
+                paidToggleExpenseId={paidToggleId}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+    </>
+  );
+
   return (
     <>
       <View style={styles.flex}>
@@ -422,478 +876,17 @@ export default function ExpenseDashboard({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.periodChips}>
-                {PERIOD_OPTIONS.map((opt) => {
-                  const active = periodMode === opt.value;
-                  return (
-                    <TouchableOpacity
-                      key={opt.value}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: active ? colors.primary : colors.background,
-                          borderColor: active ? colors.primary : colors.border,
-                        },
-                      ]}
-                      onPress={() => setPeriodMode(opt.value)}
-                    >
-                      <Text
-                        style={[styles.chipText, { color: active ? '#fff' : colors.text }]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+            {isWide ? (
+              <View style={styles.wideRow}>
+                <View style={styles.wideCol}>{left}</View>
+                <View style={styles.wideCol}>{right}</View>
               </View>
-
-              {activePeriodMode ? (
-                <View style={styles.periodNav}>
-                  <TouchableOpacity
-                    onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, -1))}
-                    style={styles.navBtn}
-                    accessibilityLabel="Previous period"
-                  >
-                    <FontAwesome name="chevron-left" size={14} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.periodLabel, { color: colors.text }]} numberOfLines={1}>
-                    {periodLabel}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setViewDate((d) => shiftPeriod(d, activePeriodMode, 1))}
-                    style={styles.navBtn}
-                    accessibilityLabel="Next period"
-                  >
-                    <FontAwesome name="chevron-right" size={14} color={colors.text} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.todayBtn,
-                      {
-                        backgroundColor: onTodayPeriod ? colors.card : colors.primary,
-                        borderColor: onTodayPeriod ? colors.border : colors.primary,
-                      },
-                    ]}
-                    onPress={() => todayPeriod && setViewDate(todayPeriod)}
-                    disabled={onTodayPeriod}
-                    accessibilityLabel="Go to today"
-                  >
-                    <Text
-                      style={[
-                        styles.todayBtnText,
-                        { color: onTodayPeriod ? colors.textSecondary : '#fff' },
-                      ]}
-                    >
-                      Today
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <Text style={[styles.periodLabel, { color: colors.text, textAlign: 'center' }]}>
-                  {periodLabel}
-                </Text>
-              )}
-            </View>
-
-            <View
-              style={[
-                styles.heroCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-                Period summary
-              </Text>
-              <View style={styles.heroGrid}>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
-                  <Text style={[styles.heroValue, { color: paidColor }]}>
-                    {displayMoney(periodPaid)}
-                  </Text>
-                </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    Unpaid
-                  </Text>
-                  <Text style={[styles.heroValue, { color: UNPAID_COLOR }]}>
-                    {displayMoney(periodUnpaid)}
-                  </Text>
-                </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    Expenses
-                  </Text>
-                  <Text style={[styles.heroValue, { color: colors.text }]}>
-                    {filteredExpenses.length}
-                  </Text>
-                </View>
-                {periodMode !== 'all' ? (
-                  <View style={styles.heroCell}>
-                    <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                      Budgeted
-                    </Text>
-                    <Text style={[styles.heroValue, { color: colors.primary }]}>
-                      {displayMoney(periodBudgetTotal)}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Paid vs unpaid</Text>
-              <View style={styles.donutBlock}>
-                <DonutChart
-                  slices={donutSlices.filter((s) => s.key !== 'empty')}
-                  textColor={colors.text}
-                  mutedColor={colors.textSecondary}
-                  trackColor={colors.border}
-                  centerLabel={displayMoney(periodPaid + periodUnpaid)}
-                  centerSubLabel="Total"
-                />
-                <View style={styles.donutLegend}>
-                  {donutSlices
-                    .filter((s) => s.key !== 'empty')
-                    .map((s) => (
-                      <View key={s.key} style={styles.donutLegendRow}>
-                        <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                        <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                          {s.label}
-                        </Text>
-                        <Text
-                          style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
-                        >
-                          {displayMoney(s.amount)}
-                        </Text>
-                      </View>
-                    ))}
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-                onPress={onAdd}
-                accessibilityLabel="Add expense"
-              >
-                <FontAwesome name="plus" size={14} color="#fff" />
-                <Text style={styles.primaryActionText}>Add</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.secondaryAction,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-                onPress={onScan}
-                accessibilityLabel="Scan receipt"
-              >
-                <FontAwesome name="camera" size={14} color={colors.primary} />
-                <Text style={[styles.secondaryActionText, { color: colors.primary }]}>
-                  Scan receipt
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.toolsRow}>
-                <View
-                  style={[
-                    styles.searchBox,
-                    { backgroundColor: colors.background, borderColor: colors.border },
-                  ]}
-                >
-                  <FontAwesome name="search" size={12} color={colors.textSecondary} />
-                  <TextInput
-                    style={[styles.searchInput, { color: colors.text }]}
-                    placeholder="Search..."
-                    placeholderTextColor={colors.textSecondary}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                  />
-                  {searchQuery.length > 0 ? (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
-                      <FontAwesome name="times" size={12} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-                <TouchableOpacity
-                  style={[
-                    styles.filterBtn,
-                    {
-                      backgroundColor:
-                        showFilters || hasActiveFilters ? colors.primary : colors.background,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                  onPress={() => setShowFilters((v) => !v)}
-                  accessibilityLabel="Filters"
-                >
-                  <FontAwesome
-                    name="filter"
-                    size={13}
-                    color={showFilters || hasActiveFilters ? '#fff' : colors.text}
-                  />
-                </TouchableOpacity>
-              </View>
-
-              {showFilters ? (
-                <View style={styles.filterPanel}>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Category</Text>
-                    <ThemeAwarePicker
-                      selectedValue={filterCategory?.toString() || ''}
-                      onValueChange={(value) =>
-                        setFilterCategory(value ? parseInt(value, 10) : null)
-                      }
-                      options={[
-                        { label: 'All', value: '' },
-                        ...categories.map((cat) => ({
-                          label: cat.name,
-                          value: cat.id.toString(),
-                        })),
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Payment</Text>
-                    <ThemeAwarePicker
-                      selectedValue={filterPaymentMethod || ''}
-                      onValueChange={(value) =>
-                        setFilterPaymentMethod((value || null) as PaymentMethod | null)
-                      }
-                      options={[
-                        { label: 'All', value: '' },
-                        { label: 'Cash', value: 'cash' },
-                        { label: 'Credit Card', value: 'credit_card' },
-                        { label: 'Debit Card', value: 'debit_card' },
-                        { label: 'Bank Transfer', value: 'bank_transfer' },
-                        { label: 'E-Transfer', value: 'e_transfer' },
-                        { label: 'Check', value: 'check' },
-                        { label: 'Other', value: 'other' },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Tag</Text>
-                    <ThemeAwarePicker
-                      selectedValue={filterTag?.toString() || ''}
-                      onValueChange={(value) =>
-                        setFilterTag(value ? parseInt(value, 10) : null)
-                      }
-                      options={[
-                        { label: 'All', value: '' },
-                        ...tags.map((tag) => ({ label: tag.name, value: tag.id.toString() })),
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Type</Text>
-                    <ThemeAwarePicker
-                      selectedValue={
-                        filterRecurring === null
-                          ? ''
-                          : filterRecurring
-                            ? 'recurring'
-                            : 'one_time'
-                      }
-                      onValueChange={(value) => {
-                        if (value === 'recurring') setFilterRecurring(true);
-                        else if (value === 'one_time') setFilterRecurring(false);
-                        else setFilterRecurring(null);
-                      }}
-                      options={[
-                        { label: 'All', value: '' },
-                        { label: 'Recurring', value: 'recurring' },
-                        { label: 'One-time', value: 'one_time' },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Status</Text>
-                    <ThemeAwarePicker
-                      selectedValue={
-                        filterPaid === null ? '' : filterPaid ? 'paid' : 'unpaid'
-                      }
-                      onValueChange={(value) => {
-                        if (value === 'paid') setFilterPaid(true);
-                        else if (value === 'unpaid') setFilterPaid(false);
-                        else setFilterPaid(null);
-                      }}
-                      options={[
-                        { label: 'All', value: '' },
-                        { label: 'Paid', value: 'paid' },
-                        { label: 'Unpaid', value: 'unpaid' },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>Sort</Text>
-                    <ThemeAwarePicker
-                      selectedValue={`${sortBy}_${sortOrder}`}
-                      onValueChange={(value) => {
-                        const [by, order] = String(value ?? 'date_desc').split('_') as [
-                          SortBy,
-                          SortOrder,
-                        ];
-                        setSortBy(by);
-                        setSortOrder(order);
-                      }}
-                      options={[
-                        { label: 'Date (newest)', value: 'date_desc' },
-                        { label: 'Date (oldest)', value: 'date_asc' },
-                        { label: 'Amount (high)', value: 'amount_desc' },
-                        { label: 'Amount (low)', value: 'amount_asc' },
-                        { label: 'Category A–Z', value: 'category_asc' },
-                        { label: 'Category Z–A', value: 'category_desc' },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.filterRow}>
-                    <Text style={[styles.filterLabel, { color: colors.text }]}>
-                      Upcoming bills
-                    </Text>
-                    <TouchableOpacity
-                      style={[
-                        styles.chip,
-                        {
-                          alignSelf: 'flex-start',
-                          backgroundColor: showCombinedView
-                            ? colors.primary
-                            : colors.background,
-                          borderColor: showCombinedView ? colors.primary : colors.border,
-                        },
-                      ]}
-                      onPress={() => setShowCombinedView((v) => !v)}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          { color: showCombinedView ? '#fff' : colors.text },
-                        ]}
-                      >
-                        {showCombinedView ? 'On' : 'Off'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.clearFiltersBtn, { backgroundColor: colors.border }]}
-                    onPress={() => {
-                      setFilterCategory(null);
-                      setFilterPaymentMethod(null);
-                      setFilterTag(null);
-                      setFilterRecurring(null);
-                      setFilterPaid(null);
-                      setSortBy('date');
-                      setSortOrder('desc');
-                      setShowCombinedView(false);
-                    }}
-                  >
-                    <Text style={[styles.clearFiltersText, { color: colors.text }]}>
-                      Clear filters
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </View>
-
-            {showCombinedView && upcomingRecurring.length > 0 ? (
-              <View
-                style={[
-                  styles.sectionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.upcomingHeader}
-                  onPress={() => setUpcomingOpen((o) => !o)}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: upcomingOpen }}
-                >
-                  <FontAwesome
-                    name={upcomingOpen ? 'chevron-down' : 'chevron-right'}
-                    size={12}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-                    Upcoming bills
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                    {upcomingRecurring.length}
-                  </Text>
-                </TouchableOpacity>
-                {upcomingOpen
-                  ? upcomingRecurring.map((recurring) => {
-                      const nextDate = new Date(recurring.next_due_date);
-                      nextDate.setHours(0, 0, 0, 0);
-                      return (
-                        <RecurringExpenseRow
-                          key={`upcoming-${recurring.id}`}
-                          recurring={recurring}
-                          dateLabel={formatOccurrenceDate(nextDate)}
-                          badge={{ label: 'Upcoming', color: colors.primary }}
-                        />
-                      );
-                    })
-                  : null}
-              </View>
-            ) : null}
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Categories</Text>
-              <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-                Tap a category for items · edit, paid, receipt, delete
-              </Text>
-              {loading ? (
-                <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
-              ) : categoryGroups.length === 0 ? (
-                <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                  No expenses or budgets this period
-                </Text>
-              ) : (
-                <View style={styles.categoryList}>
-                  {categoryGroups.map(([catId, group]) => (
-                    <ExpenseCategoryRow
-                      key={catId}
-                      categoryName={group.name}
-                      items={group.expenses}
-                      budget={group.budget}
-                      showBudgetLimit={!!group.budget && periodMode !== 'all'}
-                      onEditBudget={
-                        group.budget && onBudgetPress
-                          ? () => onBudgetPress(group.budget!)
-                          : undefined
-                      }
-                      onItemPress={onExpensePress}
-                      onItemDelete={(exp) => setExpensePendingDelete(exp)}
-                      onToggleItemPaid={(exp, next) => void handleTogglePaid(exp, next)}
-                      paidToggleExpenseId={paidToggleId}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>
+            ) : (
+              <>
+                {left}
+                {right}
+              </>
+            )}
           </ScrollView>
         )}
       </View>
@@ -930,6 +923,8 @@ const styles = StyleSheet.create({
   },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
+  wideCol: { flex: 1, minWidth: 0, gap: 14 },
   heroCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

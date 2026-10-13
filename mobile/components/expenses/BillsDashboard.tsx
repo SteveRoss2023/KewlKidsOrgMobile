@@ -12,6 +12,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import expenseService from '../../services/expenseService';
 import {
   Budget,
@@ -44,6 +45,7 @@ export default function BillsDashboard({
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<RecurringExpense[]>([]);
@@ -267,6 +269,265 @@ export default function BillsDashboard({
     );
   }
 
+  const hero = (
+    <View
+      style={[
+        styles.heroCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
+        Bills drive the plan
+      </Text>
+      <View style={styles.heroGrid}>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Active bills
+          </Text>
+          <Text style={[styles.heroValue, { color: colors.text }]}>
+            {activeBills.length}
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            Category budgets
+          </Text>
+          <Text style={[styles.heroValue, { color: colors.text }]}>
+            {budgets.length}
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            This month limits
+          </Text>
+          <Text style={[styles.heroValue, { color: colors.primary }]}>
+            {displayMoney(thisMonthBudgetTotal)}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const donut = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Active vs inactive</Text>
+      {donutSlices.length === 0 ? (
+        <Text style={[styles.empty, { color: colors.textSecondary }]}>
+          No bills to chart yet
+        </Text>
+      ) : (
+        <View style={styles.donutBlock}>
+          <DonutChart
+            slices={donutSlices}
+            textColor={colors.text}
+            mutedColor={colors.textSecondary}
+            trackColor={colors.border}
+            centerLabel={
+              usingCounts
+                ? String(activeBills.length + inactiveBills.length)
+                : displayMoney(activeAmount + inactiveAmount)
+            }
+            centerSubLabel={usingCounts ? 'Bills' : 'Total'}
+          />
+          <View style={styles.donutLegend}>
+            {donutSlices.map((s) => (
+              <View key={s.key} style={styles.donutLegendRow}>
+                <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                  {s.label}
+                </Text>
+                <Text
+                  style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
+                >
+                  {usingCounts ? String(s.amount) : displayMoney(s.amount)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  const actionButtons = (
+    <View style={styles.actionRow}>
+      <TouchableOpacity
+        style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+        onPress={() => setShowWizard(true)}
+        accessibilityLabel="Update plan"
+      >
+        <FontAwesome name="magic" size={14} color="#fff" />
+        <Text style={styles.primaryActionText}>Update plan</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.secondaryAction,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+        onPress={() => {
+          setEditingBill(null);
+          setShowBillForm(true);
+        }}
+        accessibilityLabel="Add bill"
+      >
+        <FontAwesome name="plus" size={14} color={colors.primary} />
+        <Text style={[styles.secondaryActionText, { color: colors.primary }]}>
+          Add bill
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const activeBillsList = (
+    <View
+      style={[
+        styles.sectionCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.accordionHeader}
+        onPress={() => setActiveOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: activeOpen }}
+      >
+        <FontAwesome
+          name={activeOpen ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+          Active
+        </Text>
+        <Text
+          style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
+        >
+          {activeBills.length}
+        </Text>
+      </TouchableOpacity>
+      {activeOpen ? (
+        loading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
+        ) : activeBills.length === 0 && inactiveBills.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No bills yet. Add rent, utilities, and subscriptions, then run Update plan.
+          </Text>
+        ) : activeBills.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No active bills
+          </Text>
+        ) : (
+          activeBills.map((bill) => (
+            <RecurringExpenseRow
+              key={bill.id}
+              recurring={bill}
+              onPress={() => {
+                setEditingBill(bill);
+                setShowBillForm(true);
+              }}
+              onDelete={() => setBillPendingDelete(bill)}
+            />
+          ))
+        )
+      ) : null}
+    </View>
+  );
+
+  const inactiveBillsList =
+    inactiveBills.length > 0 ? (
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.accordionHeader}
+          onPress={() => setInactiveOpen((o) => !o)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: inactiveOpen }}
+        >
+          <FontAwesome
+            name={inactiveOpen ? 'chevron-down' : 'chevron-right'}
+            size={12}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+            Inactive
+          </Text>
+          <Text
+            style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
+          >
+            {inactiveBills.length}
+          </Text>
+        </TouchableOpacity>
+        {inactiveOpen
+          ? inactiveBills.map((bill) => (
+              <RecurringExpenseRow
+                key={bill.id}
+                recurring={bill}
+                badge={{ label: 'Inactive', color: inactiveColor }}
+                onPress={() => {
+                  setEditingBill(bill);
+                  setShowBillForm(true);
+                }}
+                onDelete={() => setBillPendingDelete(bill)}
+              />
+            ))
+          : null}
+      </View>
+    ) : null;
+
+  const help = (
+    <>
+      <TouchableOpacity
+        style={[
+          styles.helpHeader,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+        onPress={() => setHelpOpen((o) => !o)}
+        activeOpacity={0.7}
+      >
+        <FontAwesome
+          name={helpOpen ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.helpTitle, { color: colors.text }]}>How this works</Text>
+      </TouchableOpacity>
+      {helpOpen ? (
+        <View
+          style={[
+            styles.helpBody,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            1. Active bills keep unpaid expenses and category budgets in sync. Paid
+            expenses stay as-is.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            2. When you add or change a bill, the app syncs that bill’s unpaid expenses
+            and refreshes that category’s budget for you.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            3. Use Update plan for a full refresh across all bills (first setup, lots of
+            changes) or to preview what will be created/updated before applying.
+          </Text>
+          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+            4. Manual budget edits on Budgets can be overwritten the next time that
+            category is synced from bills.
+          </Text>
+        </View>
+      ) : null}
+    </>
+  );
+
   return (
     <>
       <View style={styles.flex}>
@@ -284,251 +545,29 @@ export default function BillsDashboard({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View
-              style={[
-                styles.heroCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-                Bills drive the plan
-              </Text>
-              <View style={styles.heroGrid}>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    Active bills
-                  </Text>
-                  <Text style={[styles.heroValue, { color: colors.text }]}>
-                    {activeBills.length}
-                  </Text>
+            {isWide ? (
+              <View style={styles.wideRow}>
+                <View style={styles.wideCol}>
+                  {hero}
+                  {donut}
+                  {actionButtons}
+                  {help}
                 </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    Category budgets
-                  </Text>
-                  <Text style={[styles.heroValue, { color: colors.text }]}>
-                    {budgets.length}
-                  </Text>
-                </View>
-                <View style={styles.heroCell}>
-                  <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                    This month limits
-                  </Text>
-                  <Text style={[styles.heroValue, { color: colors.primary }]}>
-                    {displayMoney(thisMonthBudgetTotal)}
-                  </Text>
+                <View style={styles.wideCol}>
+                  {activeBillsList}
+                  {inactiveBillsList}
                 </View>
               </View>
-            </View>
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Active vs inactive</Text>
-              {donutSlices.length === 0 ? (
-                <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                  No bills to chart yet
-                </Text>
-              ) : (
-                <View style={styles.donutBlock}>
-                  <DonutChart
-                    slices={donutSlices}
-                    textColor={colors.text}
-                    mutedColor={colors.textSecondary}
-                    trackColor={colors.border}
-                    centerLabel={
-                      usingCounts
-                        ? String(activeBills.length + inactiveBills.length)
-                        : displayMoney(activeAmount + inactiveAmount)
-                    }
-                    centerSubLabel={usingCounts ? 'Bills' : 'Total'}
-                  />
-                  <View style={styles.donutLegend}>
-                    {donutSlices.map((s) => (
-                      <View key={s.key} style={styles.donutLegendRow}>
-                        <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                        <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                          {s.label}
-                        </Text>
-                        <Text
-                          style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
-                        >
-                          {usingCounts ? String(s.amount) : displayMoney(s.amount)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-                onPress={() => setShowWizard(true)}
-                accessibilityLabel="Update plan"
-              >
-                <FontAwesome name="magic" size={14} color="#fff" />
-                <Text style={styles.primaryActionText}>Update plan</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.secondaryAction,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-                onPress={() => {
-                  setEditingBill(null);
-                  setShowBillForm(true);
-                }}
-                accessibilityLabel="Add bill"
-              >
-                <FontAwesome name="plus" size={14} color={colors.primary} />
-                <Text style={[styles.secondaryActionText, { color: colors.primary }]}>
-                  Add bill
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.accordionHeader}
-                onPress={() => setActiveOpen((o) => !o)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: activeOpen }}
-              >
-                <FontAwesome
-                  name={activeOpen ? 'chevron-down' : 'chevron-right'}
-                  size={12}
-                  color={colors.textSecondary}
-                />
-                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-                  Active
-                </Text>
-                <Text
-                  style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-                >
-                  {activeBills.length}
-                </Text>
-              </TouchableOpacity>
-              {activeOpen ? (
-                loading ? (
-                  <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
-                ) : activeBills.length === 0 && inactiveBills.length === 0 ? (
-                  <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                    No bills yet. Add rent, utilities, and subscriptions, then run Update plan.
-                  </Text>
-                ) : activeBills.length === 0 ? (
-                  <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                    No active bills
-                  </Text>
-                ) : (
-                  activeBills.map((bill) => (
-                    <RecurringExpenseRow
-                      key={bill.id}
-                      recurring={bill}
-                      onPress={() => {
-                        setEditingBill(bill);
-                        setShowBillForm(true);
-                      }}
-                      onDelete={() => setBillPendingDelete(bill)}
-                    />
-                  ))
-                )
-              ) : null}
-            </View>
-
-            {inactiveBills.length > 0 ? (
-              <View
-                style={[
-                  styles.sectionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.accordionHeader}
-                  onPress={() => setInactiveOpen((o) => !o)}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: inactiveOpen }}
-                >
-                  <FontAwesome
-                    name={inactiveOpen ? 'chevron-down' : 'chevron-right'}
-                    size={12}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-                    Inactive
-                  </Text>
-                  <Text
-                    style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-                  >
-                    {inactiveBills.length}
-                  </Text>
-                </TouchableOpacity>
-                {inactiveOpen
-                  ? inactiveBills.map((bill) => (
-                      <RecurringExpenseRow
-                        key={bill.id}
-                        recurring={bill}
-                        badge={{ label: 'Inactive', color: inactiveColor }}
-                        onPress={() => {
-                          setEditingBill(bill);
-                          setShowBillForm(true);
-                        }}
-                        onDelete={() => setBillPendingDelete(bill)}
-                      />
-                    ))
-                  : null}
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[
-                styles.helpHeader,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-              onPress={() => setHelpOpen((o) => !o)}
-              activeOpacity={0.7}
-            >
-              <FontAwesome
-                name={helpOpen ? 'chevron-down' : 'chevron-right'}
-                size={12}
-                color={colors.textSecondary}
-              />
-              <Text style={[styles.helpTitle, { color: colors.text }]}>How this works</Text>
-            </TouchableOpacity>
-            {helpOpen ? (
-              <View
-                style={[
-                  styles.helpBody,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  1. Active bills keep unpaid expenses and category budgets in sync. Paid
-                  expenses stay as-is.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  2. When you add or change a bill, the app syncs that bill’s unpaid expenses
-                  and refreshes that category’s budget for you.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  3. Use Update plan for a full refresh across all bills (first setup, lots of
-                  changes) or to preview what will be created/updated before applying.
-                </Text>
-                <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-                  4. Manual budget edits on Budgets can be overwritten the next time that
-                  category is synced from bills.
-                </Text>
-              </View>
-            ) : null}
+            ) : (
+              <>
+                {hero}
+                {donut}
+                {actionButtons}
+                {activeBillsList}
+                {inactiveBillsList}
+                {help}
+              </>
+            )}
           </ScrollView>
         )}
       </View>
@@ -589,6 +628,16 @@ const styles = StyleSheet.create({
   },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   heroCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

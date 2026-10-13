@@ -6,13 +6,13 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import expenseService from '../../services/expenseService';
 import moneyService from '../../services/moneyService';
 import { Expense } from '../../types/expenses';
@@ -41,15 +41,11 @@ function monthTitle(year: number, monthIndex: number): string {
   });
 }
 
-const CONTENT_MAX_WIDTH = 960;
-const WIDE_BREAKPOINT = 768;
-
 export default function CashflowDashboard() {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
-  const { width: windowWidth } = useWindowDimensions();
-  const isWide = windowWidth >= WIDE_BREAKPOINT;
+  const isWide = useIsWideLayout();
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
@@ -272,9 +268,149 @@ export default function CashflowDashboard() {
     );
   }
 
+  const yearHero = (
+    <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Year overview</Text>
+      <View style={styles.heroGrid}>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Income</Text>
+          <Text style={[styles.heroValue, { color: colors.success }]}>
+            {displayMoney(yearSummary.incomeTotal)}
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Outflow</Text>
+          <Text style={[styles.heroValue, { color: spentColor }]}>
+            {displayMoney(yearSummary.spentTotal + yearSummary.unpaidTotal)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.paidCount} paid · {yearSummary.unpaidCount} unpaid
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Net</Text>
+          <Text style={[styles.heroValue, { color: toneFor(yearSummary.netAfterUnpaid) }]}>
+            {displayMoney(yearSummary.netAfterUnpaid)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>After unpaid</Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const monthBars = (
+    <View
+      style={[
+        styles.sectionCard,
+        styles.chartCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly cashflow</Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Tap a month · dots show net after unpaid
+      </Text>
+      <MonthCashflowBars
+        points={barPoints}
+        selectedMonthIndex={selectedMonthIndex}
+        onSelectMonth={setSelectedMonthIndex}
+        incomeColor={colors.success}
+        spentColor={spentColor}
+        trackColor={colors.border}
+        textColor={colors.text}
+        mutedColor={colors.textSecondary}
+        selectedBorderColor={colors.primary}
+      />
+    </View>
+  );
+
+  const monthDetail = selectedMonth ? (
+    <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        {monthTitle(year, selectedMonth.monthIndex)}
+      </Text>
+
+      <View style={styles.monthKpis}>
+        <Kpi
+          label="In"
+          value={displayMoney(selectedMonth.incomeTotal)}
+          color={colors.success}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Spent"
+          value={displayMoney(selectedMonth.spentTotal)}
+          color={spentColor}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Unpaid"
+          value={displayMoney(selectedMonth.unpaidTotal)}
+          color={UNPAID_COLOR}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Net"
+          value={displayMoney(selectedMonth.netAfterUnpaid)}
+          color={toneFor(selectedMonth.netAfterUnpaid)}
+          muted={colors.textSecondary}
+        />
+      </View>
+
+      <View style={styles.donutBlock}>
+        <DonutChart
+          slices={donutSlices}
+          textColor={colors.text}
+          mutedColor={colors.textSecondary}
+          trackColor={colors.border}
+          centerLabel={displayMoney(
+            selectedMonth.incomeTotal ||
+              selectedMonth.spentTotal + selectedMonth.unpaidTotal
+          )}
+          centerSubLabel="Activity"
+        />
+        <View style={styles.donutLegend}>
+          {donutSlices.map((s) => (
+            <View key={s.key} style={styles.donutLegendRow}>
+              <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+              <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
+              <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                {displayMoney(s.amount)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <Text style={[styles.subSectionTitle, { color: colors.text }]}>Spent by category</Text>
+      <CategoryHBars
+        rows={selectedMonth.spentByCategory}
+        emptyText="No paid expenses this month"
+        barColor={spentColor}
+        trackColor={colors.border}
+        textColor={colors.text}
+        mutedColor={colors.textSecondary}
+        formatAmount={displayMoney}
+      />
+
+      <Text style={[styles.subSectionTitle, { color: colors.text, marginTop: 16 }]}>
+        Unpaid by category
+      </Text>
+      <CategoryHBars
+        rows={selectedMonth.unpaidByCategory}
+        emptyText="No unpaid expenses this month"
+        barColor={UNPAID_COLOR}
+        trackColor={colors.border}
+        textColor={colors.text}
+        mutedColor={colors.textSecondary}
+        formatAmount={displayMoney}
+      />
+    </View>
+  ) : null;
+
   return (
     <View style={styles.flex}>
-      <View style={[styles.yearNav, styles.contentShell]}>
+      <View style={styles.yearNav}>
         <TouchableOpacity
           style={styles.navBtn}
           onPress={() => setYear((y) => y - 1)}
@@ -301,9 +437,7 @@ export default function CashflowDashboard() {
       </View>
 
       {error ? (
-        <Text style={[styles.errorBanner, styles.contentShell, { color: colors.error || '#c0392b' }]}>
-          {error}
-        </Text>
+        <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
       ) : null}
 
       {loading ? (
@@ -311,172 +445,22 @@ export default function CashflowDashboard() {
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={[styles.content, styles.contentShell]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Year hero */}
-          <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-              Year overview
-            </Text>
-            <View style={styles.heroGrid}>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Income</Text>
-                <Text style={[styles.heroValue, { color: colors.success }]}>
-                  {displayMoney(yearSummary.incomeTotal)}
-                </Text>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {isWide ? (
+            <View style={styles.wideRow}>
+              <View style={styles.wideCol}>
+                {yearHero}
+                {monthBars}
               </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Outflow</Text>
-                <Text style={[styles.heroValue, { color: spentColor }]}>
-                  {displayMoney(yearSummary.spentTotal + yearSummary.unpaidTotal)}
-                </Text>
-                <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-                  {yearSummary.paidCount} paid · {yearSummary.unpaidCount} unpaid
-                </Text>
-              </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Net</Text>
-                <Text
-                  style={[
-                    styles.heroValue,
-                    { color: toneFor(yearSummary.netAfterUnpaid) },
-                  ]}
-                >
-                  {displayMoney(yearSummary.netAfterUnpaid)}
-                </Text>
-                <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-                  After unpaid
-                </Text>
-              </View>
+              <View style={styles.wideCol}>{monthDetail}</View>
             </View>
-          </View>
-
-          {/* 12-month bars */}
-          <View
-            style={[
-              styles.sectionCard,
-              styles.chartCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly cashflow</Text>
-            <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-              Tap a month · dots show net after unpaid
-            </Text>
-            <MonthCashflowBars
-              points={barPoints}
-              selectedMonthIndex={selectedMonthIndex}
-              onSelectMonth={setSelectedMonthIndex}
-              incomeColor={colors.success}
-              spentColor={spentColor}
-              trackColor={colors.border}
-              textColor={colors.text}
-              mutedColor={colors.textSecondary}
-              selectedBorderColor={colors.primary}
-            />
-          </View>
-
-          {/* Selected month */}
-          {selectedMonth ? (
-            <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                {monthTitle(year, selectedMonth.monthIndex)}
-              </Text>
-
-              <View style={isWide ? styles.monthWideRow : undefined}>
-                <View style={isWide ? styles.monthWideCol : undefined}>
-                  <View style={styles.monthKpis}>
-                    <Kpi
-                      label="In"
-                      value={displayMoney(selectedMonth.incomeTotal)}
-                      color={colors.success}
-                      muted={colors.textSecondary}
-                    />
-                    <Kpi
-                      label="Spent"
-                      value={displayMoney(selectedMonth.spentTotal)}
-                      color={spentColor}
-                      muted={colors.textSecondary}
-                    />
-                    <Kpi
-                      label="Unpaid"
-                      value={displayMoney(selectedMonth.unpaidTotal)}
-                      color={UNPAID_COLOR}
-                      muted={colors.textSecondary}
-                    />
-                    <Kpi
-                      label="Net"
-                      value={displayMoney(selectedMonth.netAfterUnpaid)}
-                      color={toneFor(selectedMonth.netAfterUnpaid)}
-                      muted={colors.textSecondary}
-                    />
-                  </View>
-
-                  <View style={styles.donutBlock}>
-                    <DonutChart
-                      slices={donutSlices}
-                      textColor={colors.text}
-                      mutedColor={colors.textSecondary}
-                      trackColor={colors.border}
-                      centerLabel={displayMoney(
-                        selectedMonth.incomeTotal ||
-                          selectedMonth.spentTotal + selectedMonth.unpaidTotal
-                      )}
-                      centerSubLabel="Activity"
-                    />
-                    <View style={styles.donutLegend}>
-                      {donutSlices.map((s) => (
-                        <View key={s.key} style={styles.donutLegendRow}>
-                          <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                          <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                            {s.label}
-                          </Text>
-                          <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                            {displayMoney(s.amount)}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                </View>
-
-                <View style={isWide ? styles.monthWideCol : undefined}>
-                  <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                    Spent by category
-                  </Text>
-                  <CategoryHBars
-                    rows={selectedMonth.spentByCategory}
-                    emptyText="No paid expenses this month"
-                    barColor={spentColor}
-                    trackColor={colors.border}
-                    textColor={colors.text}
-                    mutedColor={colors.textSecondary}
-                    formatAmount={displayMoney}
-                  />
-
-                  <Text
-                    style={[
-                      styles.subSectionTitle,
-                      { color: colors.text, marginTop: 16 },
-                    ]}
-                  >
-                    Unpaid by category
-                  </Text>
-                  <CategoryHBars
-                    rows={selectedMonth.unpaidByCategory}
-                    emptyText="No unpaid expenses this month"
-                    barColor={UNPAID_COLOR}
-                    trackColor={colors.border}
-                    textColor={colors.text}
-                    mutedColor={colors.textSecondary}
-                    formatAmount={displayMoney}
-                  />
-                </View>
-              </View>
-            </View>
-          ) : null}
+          ) : (
+            <>
+              {yearHero}
+              {monthBars}
+              {monthDetail}
+            </>
+          )}
         </ScrollView>
       )}
     </View>
@@ -506,11 +490,6 @@ function Kpi({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  contentShell: {
-    width: '100%',
-    maxWidth: CONTENT_MAX_WIDTH,
-    alignSelf: 'center',
-  },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -537,6 +516,16 @@ const styles = StyleSheet.create({
   todayBtnText: { fontSize: 12, fontWeight: '700' },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
   heroCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
@@ -569,16 +558,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: -4,
     alignSelf: 'stretch',
-  },
-  monthWideRow: {
-    flexDirection: 'row',
-    gap: 20,
-    alignItems: 'flex-start',
-  },
-  monthWideCol: {
-    flex: 1,
-    minWidth: 0,
-    gap: 10,
   },
   monthKpis: {
     flexDirection: 'row',

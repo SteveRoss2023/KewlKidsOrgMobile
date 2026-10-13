@@ -40,6 +40,7 @@ import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
 import CashflowDashboard from '../../components/expenses/CashflowDashboard';
 import AlertModal from '../../components/AlertModal';
 import { forFamily } from '../../utils/familyScope';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 
 type HubTab = 'overview' | 'budgets' | 'expenses' | 'bills' | 'categories';
 
@@ -47,6 +48,7 @@ export default function ExpensesHubScreen() {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { showAmounts, setShowAmounts, toggleShowAmounts } = useShowAmounts();
+  const isWide = useIsWideLayout();
 
   const [activeTab, setActiveTab] = useState<HubTab>('overview');
 
@@ -365,8 +367,9 @@ export default function ExpensesHubScreen() {
         </View>
       );
     }
-    return (
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 8 }}>
+
+    const categoriesSection = (
+      <>
         <View style={styles.catHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Categories</Text>
           <TouchableOpacity
@@ -401,6 +404,11 @@ export default function ExpensesHubScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         ))}
+      </>
+    );
+
+    const tagsSection = (
+      <>
         <View style={[styles.catHeader, { marginTop: 16 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Tags</Text>
           <TouchableOpacity
@@ -434,6 +442,22 @@ export default function ExpensesHubScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         ))}
+      </>
+    );
+
+    return (
+      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 8 }}>
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideCol}>{categoriesSection}</View>
+            <View style={styles.wideCol}>{tagsSection}</View>
+          </View>
+        ) : (
+          <>
+            {categoriesSection}
+            {tagsSection}
+          </>
+        )}
       </ScrollView>
     );
   };
@@ -758,6 +782,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 4,
+  },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700' },
   catRow: {

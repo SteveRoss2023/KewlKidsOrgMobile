@@ -24,6 +24,7 @@ import {
 import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 import DonutChart from '../expenses/charts/DonutChart';
 import TooltipButton from '../TooltipButton';
+import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   rrsp: 'RRSP',
@@ -91,6 +92,7 @@ export default function AccountsDashboard({
   const { colors, theme } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
+  const isWide = useIsWideLayout();
   const isDark = theme === 'dark';
 
   const [loading, setLoading] = useState(true);
@@ -325,157 +327,177 @@ export default function AccountsDashboard({
     );
   }
 
-  const renderOverview = () => (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
-      {accounts.length === 0 ? (
-        <View style={styles.emptyBlock}>
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add RRSP, TFSA, Non-reg, or Cash — then update balances monthly.
-          </Text>
-          {onAddAccount ? (
-            <TouchableOpacity
-              style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                setBoardTab('accounts');
-                onAddAccount();
-              }}
-            >
-              <FontAwesome name="plus" size={14} color="#fff" />
-              <Text style={styles.primaryActionText}>Add account</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity onPress={() => setBoardTab('accounts')}>
-              <Text style={{ color: colors.primary, fontWeight: '700' }}>Go to Accounts</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      ) : (
-        <>
-          <View
-            style={[
-              styles.heroCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
-              Portfolio
+  const renderOverview = () => {
+    if (accounts.length === 0) {
+      return (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.emptyBlock}>
+            <Text style={[styles.empty, { color: colors.textSecondary }]}>
+              Add RRSP, TFSA, Non-reg, or Cash — then update balances monthly.
             </Text>
-            <View style={styles.heroGrid}>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Total</Text>
-                <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
-                  {displayMoney(portfolioTotal)}
-                </Text>
-              </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-                  Investments
-                </Text>
-                <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
-                  {displayMoney(investedTotal)}
-                </Text>
-              </View>
-              <View style={styles.heroCell}>
-                <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
-                <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
-                  {displayMoney(cashTotal)}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.sectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>By institution</Text>
-            <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-              Latest balances
-            </Text>
-            {donutSlices.length === 0 ? (
-              <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                No balances to chart
-              </Text>
+            {onAddAccount ? (
+              <TouchableOpacity
+                style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  setBoardTab('accounts');
+                  onAddAccount();
+                }}
+              >
+                <FontAwesome name="plus" size={14} color="#fff" />
+                <Text style={styles.primaryActionText}>Add account</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={styles.donutBlock}>
-                <DonutChart
-                  slices={donutSlices}
-                  textColor={colors.text}
-                  mutedColor={colors.textSecondary}
-                  trackColor={colors.border}
-                  centerLabel={displayMoney(portfolioTotal)}
-                  centerSubLabel="Total"
-                />
-                <View style={styles.donutLegend}>
-                  {donutSlices.map((s) => (
-                    <View key={s.key} style={styles.donutLegendRow}>
-                      <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                      <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                        {s.label}
-                      </Text>
-                      <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                        {displayMoney(s.amount)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              <TouchableOpacity onPress={() => setBoardTab('accounts')}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>Go to Accounts</Text>
+              </TouchableOpacity>
             )}
           </View>
+        </ScrollView>
+      );
+    }
 
-          {investCashSlices.length > 0 ? (
-            <View
-              style={[
-                styles.sectionCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Investments vs cash
-              </Text>
-              <View style={styles.donutBlock}>
-                <DonutChart
-                  slices={investCashSlices}
-                  textColor={colors.text}
-                  mutedColor={colors.textSecondary}
-                  trackColor={colors.border}
-                  centerLabel={displayMoney(portfolioTotal)}
-                  centerSubLabel="Mix"
-                />
-                <View style={styles.donutLegend}>
-                  {investCashSlices.map((s) => (
-                    <View key={s.key} style={styles.donutLegendRow}>
-                      <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                      <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                        {s.label}
-                      </Text>
-                      <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                        {displayMoney(s.amount)}
-                      </Text>
-                    </View>
-                  ))}
+    const portfolioHero = (
+      <View
+        style={[
+          styles.heroCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Portfolio</Text>
+        <View style={styles.heroGrid}>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Total</Text>
+            <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+              {displayMoney(portfolioTotal)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+              Investments
+            </Text>
+            <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+              {displayMoney(investedTotal)}
+            </Text>
+          </View>
+          <View style={styles.heroCell}>
+            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
+            <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+              {displayMoney(cashTotal)}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+
+    const byInstitutionDonut = (
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>By institution</Text>
+        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+          Latest balances
+        </Text>
+        {donutSlices.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No balances to chart
+          </Text>
+        ) : (
+          <View style={styles.donutBlock}>
+            <DonutChart
+              slices={donutSlices}
+              textColor={colors.text}
+              mutedColor={colors.textSecondary}
+              trackColor={colors.border}
+              centerLabel={displayMoney(portfolioTotal)}
+              centerSubLabel="Total"
+            />
+            <View style={styles.donutLegend}>
+              {donutSlices.map((s) => (
+                <View key={s.key} style={styles.donutLegendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                  <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                    {s.label}
+                  </Text>
+                  <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                    {displayMoney(s.amount)}
+                  </Text>
                 </View>
-              </View>
+              ))}
             </View>
-          ) : null}
-        </>
-      )}
-    </ScrollView>
-  );
+          </View>
+        )}
+      </View>
+    );
 
-  const renderManage = () => (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
-      {accounts.length > 0 && onUpdateBalances ? (
+    const investCashDonut =
+      investCashSlices.length > 0 ? (
+        <View
+          style={[
+            styles.sectionCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Investments vs cash
+          </Text>
+          <View style={styles.donutBlock}>
+            <DonutChart
+              slices={investCashSlices}
+              textColor={colors.text}
+              mutedColor={colors.textSecondary}
+              trackColor={colors.border}
+              centerLabel={displayMoney(portfolioTotal)}
+              centerSubLabel="Mix"
+            />
+            <View style={styles.donutLegend}>
+              {investCashSlices.map((s) => (
+                <View key={s.key} style={styles.donutLegendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                  <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                    {s.label}
+                  </Text>
+                  <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                    {displayMoney(s.amount)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      ) : null;
+
+    return (
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {portfolioHero}
+        {isWide && investCashDonut ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideCol}>{byInstitutionDonut}</View>
+            <View style={styles.wideCol}>{investCashDonut}</View>
+          </View>
+        ) : (
+          <>
+            {byInstitutionDonut}
+            {investCashDonut}
+          </>
+        )}
+      </ScrollView>
+    );
+  };
+
+  const renderManage = () => {
+    const updateBalancesCta =
+      accounts.length > 0 && onUpdateBalances ? (
         <TouchableOpacity
           style={[styles.wizardBtn, { backgroundColor: colors.primary }]}
           onPress={onUpdateBalances}
@@ -489,8 +511,9 @@ export default function AccountsDashboard({
           </View>
           <FontAwesome name="chevron-right" size={14} color="rgba(255,255,255,0.85)" />
         </TouchableOpacity>
-      ) : null}
+      ) : null;
 
+    const manageHeader = (
       <View style={styles.manageHeader}>
         <Text style={styles.portfolioLine} numberOfLines={1}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Portfolio </Text>
@@ -511,219 +534,237 @@ export default function AccountsDashboard({
           </TouchableOpacity>
         ) : null}
       </View>
+    );
 
-      {accounts.length === 0 ? (
-        <View style={styles.emptyBlock}>
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            Add RRSP, TFSA, Non-reg, or Cash — then update balances monthly.
-          </Text>
-          {onAddAccount ? (
-            <TouchableOpacity
-              style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-              onPress={onAddAccount}
-            >
-              <FontAwesome name="plus" size={14} color="#fff" />
-              <Text style={styles.primaryActionText}>Add account</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : (
-        <View style={styles.institutionStack}>
-          {institutionGroups.map((group) => {
-            const groupKey = group.key || '__other';
-            const accent = institutionColor(groupKey, isDark);
-            const groupTotal = institutionGroupTotal(group.accounts);
-            return (
-              <View
-                key={groupKey}
-                style={[
-                  styles.institutionCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
+    if (accounts.length === 0) {
+      return (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {manageHeader}
+          <View style={styles.emptyBlock}>
+            <Text style={[styles.empty, { color: colors.textSecondary }]}>
+              Add RRSP, TFSA, Non-reg, or Cash — then update balances monthly.
+            </Text>
+            {onAddAccount ? (
+              <TouchableOpacity
+                style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+                onPress={onAddAccount}
               >
-                <View style={[styles.institutionAccent, { backgroundColor: accent }]} />
-                <View style={styles.institutionBody}>
-                  <View style={styles.institutionHeaderRow}>
-                    <View style={[styles.institutionDot, { backgroundColor: accent }]} />
-                    <Text
-                      style={[styles.institutionTitle, { color: colors.text, flex: 1 }]}
-                      numberOfLines={1}
-                    >
-                      {group.label}
-                    </Text>
-                    <Text style={[styles.groupAmt, { color: colors.text }]}>
-                      {displayMoney(groupTotal)}
-                    </Text>
-                  </View>
+                <FontAwesome name="plus" size={14} color="#fff" />
+                <Text style={styles.primaryActionText}>Add account</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </ScrollView>
+      );
+    }
 
-                  {group.accounts.map((a, idx) => {
-                    const expanded = expandedAccountId === a.id;
-                    const history = expanded ? snapshotsForAccount(a.id) : [];
-                    const isCash = a.account_type === 'cash';
-                    const amtColor = isCash ? cashColor : investedColor;
-                    const typeLabel = ACCOUNT_TYPE_LABELS[a.account_type] || a.account_type;
-                    return (
-                      <View key={a.id}>
-                        <TouchableOpacity
+    const institutionCards = institutionGroups.map((group) => {
+      const groupKey = group.key || '__other';
+      const accent = institutionColor(groupKey, isDark);
+      const groupTotal = institutionGroupTotal(group.accounts);
+      return (
+        <View
+          key={groupKey}
+          style={[
+            styles.institutionCard,
+            isWide && styles.institutionGridItem,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <View style={[styles.institutionAccent, { backgroundColor: accent }]} />
+          <View style={styles.institutionBody}>
+            <View style={styles.institutionHeaderRow}>
+              <View style={[styles.institutionDot, { backgroundColor: accent }]} />
+              <Text
+                style={[styles.institutionTitle, { color: colors.text, flex: 1 }]}
+                numberOfLines={1}
+              >
+                {group.label}
+              </Text>
+              <Text style={[styles.groupAmt, { color: colors.text }]}>
+                {displayMoney(groupTotal)}
+              </Text>
+            </View>
+
+            {group.accounts.map((a, idx) => {
+              const expanded = expandedAccountId === a.id;
+              const history = expanded ? snapshotsForAccount(a.id) : [];
+              const isCash = a.account_type === 'cash';
+              const amtColor = isCash ? cashColor : investedColor;
+              const typeLabel = ACCOUNT_TYPE_LABELS[a.account_type] || a.account_type;
+              return (
+                <View key={a.id}>
+                  <TouchableOpacity
+                    style={[
+                      styles.accountRow,
+                      idx > 0 && {
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: colors.border,
+                      },
+                    ]}
+                    onPress={() => toggleAccountExpanded(a.id)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded }}
+                  >
+                    <FontAwesome
+                      name={expanded ? 'chevron-down' : 'chevron-right'}
+                      size={12}
+                      color={colors.textSecondary}
+                    />
+                    <View style={styles.flex}>
+                      <Text
+                        style={[styles.accountName, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {a.name}
+                      </Text>
+                      <View style={styles.accountMetaRow}>
+                        <View
                           style={[
-                            styles.accountRow,
-                            idx > 0 && {
-                              borderTopWidth: StyleSheet.hairlineWidth,
-                              borderTopColor: colors.border,
-                            },
+                            styles.typeChip,
+                            { backgroundColor: isCash ? cashChipBg : investChipBg },
                           ]}
-                          onPress={() => toggleAccountExpanded(a.id)}
-                          accessibilityRole="button"
-                          accessibilityState={{ expanded }}
                         >
-                          <FontAwesome
-                            name={expanded ? 'chevron-down' : 'chevron-right'}
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                          <View style={styles.flex}>
-                            <Text
-                              style={[styles.accountName, { color: colors.text }]}
-                              numberOfLines={1}
-                            >
-                              {a.name}
-                            </Text>
-                            <View style={styles.accountMetaRow}>
-                              <View
-                                style={[
-                                  styles.typeChip,
-                                  { backgroundColor: isCash ? cashChipBg : investChipBg },
-                                ]}
-                              >
-                                <Text style={[styles.typeChipText, { color: amtColor }]}>
-                                  {typeLabel}
-                                </Text>
-                              </View>
-                              {a.latest_as_of ? (
-                                <Text
-                                  style={[styles.meta, { color: colors.textSecondary }]}
-                                  numberOfLines={1}
-                                >
-                                  as of {formatShortDate(a.latest_as_of)}
-                                </Text>
-                              ) : null}
-                            </View>
-                          </View>
-                          <Text style={[styles.accountAmt, { color: amtColor }]}>
-                            {displayAccountMoney(a.latest_balance, a.account_type)}
+                          <Text style={[styles.typeChipText, { color: amtColor }]}>
+                            {typeLabel}
                           </Text>
-                          {onEditAccount ? (
-                            <TooltipButton
-                              tooltip={`Edit ${a.name}`}
-                              style={styles.iconAction}
-                              onPress={() => onEditAccount(a)}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            >
-                              <FontAwesome name="pencil" size={13} color={colors.primary} />
-                            </TooltipButton>
-                          ) : null}
-                          {onDeleteAccount ? (
-                            <TooltipButton
-                              tooltip={`Delete ${a.name}`}
-                              style={styles.iconAction}
-                              onPress={() => onDeleteAccount(a)}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            >
-                              <FontAwesome
-                                name="trash"
-                                size={13}
-                                color={colors.error || '#ef4444'}
-                              />
-                            </TooltipButton>
-                          ) : null}
-                        </TouchableOpacity>
+                        </View>
+                        {a.latest_as_of ? (
+                          <Text
+                            style={[styles.meta, { color: colors.textSecondary }]}
+                            numberOfLines={1}
+                          >
+                            as of {formatShortDate(a.latest_as_of)}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                    <Text style={[styles.accountAmt, { color: amtColor }]}>
+                      {displayAccountMoney(a.latest_balance, a.account_type)}
+                    </Text>
+                    {onEditAccount ? (
+                      <TooltipButton
+                        tooltip={`Edit ${a.name}`}
+                        style={styles.iconAction}
+                        onPress={() => onEditAccount(a)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <FontAwesome name="pencil" size={13} color={colors.primary} />
+                      </TooltipButton>
+                    ) : null}
+                    {onDeleteAccount ? (
+                      <TooltipButton
+                        tooltip={`Delete ${a.name}`}
+                        style={styles.iconAction}
+                        onPress={() => onDeleteAccount(a)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <FontAwesome
+                          name="trash"
+                          size={13}
+                          color={colors.error || '#ef4444'}
+                        />
+                      </TooltipButton>
+                    ) : null}
+                  </TouchableOpacity>
 
-                        {expanded ? (
+                  {expanded ? (
+                    <View
+                      style={[
+                        styles.historyPanel,
+                        {
+                          borderTopColor: colors.border,
+                          backgroundColor: colors.background,
+                          borderLeftColor: accent,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.historyTitle, { color: colors.text }]}>
+                        History ({history.length})
+                      </Text>
+                      {history.length === 0 ? (
+                        <Text style={[styles.meta, { color: colors.textSecondary }]}>
+                          No balances yet. Use Update balances above.
+                        </Text>
+                      ) : (
+                        history.map((s) => (
                           <View
+                            key={s.id}
                             style={[
-                              styles.historyPanel,
+                              styles.historyRow,
                               {
-                                borderTopColor: colors.border,
-                                backgroundColor: colors.background,
-                                borderLeftColor: accent,
+                                borderColor: colors.border,
+                                backgroundColor: colors.card || colors.surface,
                               },
                             ]}
                           >
-                            <Text style={[styles.historyTitle, { color: colors.text }]}>
-                              History ({history.length})
+                            <Text
+                              style={[styles.historyDate, { color: colors.textSecondary }]}
+                              numberOfLines={1}
+                            >
+                              {formatShortDate(s.as_of_date)}
                             </Text>
-                            {history.length === 0 ? (
-                              <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                                No balances yet. Use Update balances above.
-                              </Text>
-                            ) : (
-                              history.map((s) => (
-                                <View
-                                  key={s.id}
-                                  style={[
-                                    styles.historyRow,
-                                    {
-                                      borderColor: colors.border,
-                                      backgroundColor: colors.card || colors.surface,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[styles.historyDate, { color: colors.textSecondary }]}
-                                    numberOfLines={1}
-                                  >
-                                    {formatShortDate(s.as_of_date)}
-                                  </Text>
-                                  <Text
-                                    style={[styles.historyAmt, { color: amtColor }]}
-                                    numberOfLines={1}
-                                  >
-                                    {displayAccountMoney(s.balance, a.account_type)}
-                                  </Text>
-                                  {onEditSnapshot ? (
-                                    <TooltipButton
-                                      tooltip="Edit this balance"
-                                      style={styles.iconAction}
-                                      onPress={() => onEditSnapshot(a, s)}
-                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                    >
-                                      <FontAwesome
-                                        name="pencil"
-                                        size={12}
-                                        color={colors.primary}
-                                      />
-                                    </TooltipButton>
-                                  ) : null}
-                                  {onDeleteSnapshot ? (
-                                    <TooltipButton
-                                      tooltip="Delete this balance"
-                                      style={styles.iconAction}
-                                      onPress={() => onDeleteSnapshot(s)}
-                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                    >
-                                      <FontAwesome
-                                        name="trash"
-                                        size={12}
-                                        color={colors.error || '#ef4444'}
-                                      />
-                                    </TooltipButton>
-                                  ) : null}
-                                </View>
-                              ))
-                            )}
+                            <Text
+                              style={[styles.historyAmt, { color: amtColor }]}
+                              numberOfLines={1}
+                            >
+                              {displayAccountMoney(s.balance, a.account_type)}
+                            </Text>
+                            {onEditSnapshot ? (
+                              <TooltipButton
+                                tooltip="Edit this balance"
+                                style={styles.iconAction}
+                                onPress={() => onEditSnapshot(a, s)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <FontAwesome name="pencil" size={12} color={colors.primary} />
+                              </TooltipButton>
+                            ) : null}
+                            {onDeleteSnapshot ? (
+                              <TooltipButton
+                                tooltip="Delete this balance"
+                                style={styles.iconAction}
+                                onPress={() => onDeleteSnapshot(s)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <FontAwesome
+                                  name="trash"
+                                  size={12}
+                                  color={colors.error || '#ef4444'}
+                                />
+                              </TooltipButton>
+                            ) : null}
                           </View>
-                        ) : null}
-                      </View>
-                    );
-                  })}
+                        ))
+                      )}
+                    </View>
+                  ) : null}
                 </View>
-              </View>
-            );
-          })}
+              );
+            })}
+          </View>
         </View>
-      )}
-    </ScrollView>
-  );
+      );
+    });
+
+    return (
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {updateBalancesCta}
+        {manageHeader}
+        <View style={isWide ? styles.institutionGrid : styles.institutionStack}>
+          {institutionCards}
+        </View>
+      </ScrollView>
+    );
+  };
 
   return (
     <View style={styles.flex}>
@@ -809,6 +850,26 @@ const styles = StyleSheet.create({
   boardTabText: { fontSize: 13, fontWeight: '600' },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
+  wideRow: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  wideCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 14,
+  },
+  institutionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  institutionGridItem: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    minWidth: 280,
+  },
   emptyBlock: { gap: 12, paddingVertical: 16, alignItems: 'flex-start' },
   empty: { fontSize: 13, paddingVertical: 8 },
   wizardBtn: {
