@@ -46,7 +46,7 @@ type HubTab = 'overview' | 'budgets' | 'expenses' | 'bills' | 'categories';
 export default function ExpensesHubScreen() {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
-  const { showAmounts, toggleShowAmounts } = useShowAmounts();
+  const { showAmounts, setShowAmounts, toggleShowAmounts } = useShowAmounts();
 
   const [activeTab, setActiveTab] = useState<HubTab>('overview');
 
@@ -156,6 +156,13 @@ export default function ExpensesHubScreen() {
     // Only reset when the selected family changes — not on period/tab refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
+
+  // Hide amounts whenever Expense Tracker is opened (e.g. from Home card).
+  useFocusEffect(
+    useCallback(() => {
+      setShowAmounts(false);
+    }, [setShowAmounts])
+  );
 
   useFocusEffect(
     useCallback(() => {
