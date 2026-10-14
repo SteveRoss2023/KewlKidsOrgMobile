@@ -37,12 +37,16 @@ Extract the purchase details and return ONLY valid JSON (no markdown) with this 
 }
 
 Rules:
+- The receipt may be in any language.
+- Return merchant and each line_items[].name in English. Translate when the receipt text is not English.
+- Keep well-known brand names as commonly written (e.g. Coca-Cola) when a natural English form is unclear.
+- Do not invent items; only extract what appears on the receipt, translated as needed.
 - Include every product/fee line (plastic bag, recycle fee, etc.).
 - Exclude payment method lines, change, rewards marketing, survey text.
 - Prefer BALANCE DUE / amount due for total (not "you could have saved").
 - quantity defaults to 1 when not shown.
 - unit_price is the per-unit price when qty is shown (e.g. 4 @ 2.29); otherwise same as line_total.
-- Numbers must be plain JSON numbers (no $ or commas).
+- Numbers must be plain JSON numbers (no $ or commas). Dates must be YYYY-MM-DD.
 """
 
 
