@@ -39,7 +39,9 @@ export default function ImportRecipeForm({ onImport, onClose }: ImportRecipeForm
       await onImport(url.trim());
       setUrl('');
     } catch (err: any) {
-      setError(err.message || 'Failed to import recipe');
+      // Parent usually closes this modal and shows AlertModal on failure.
+      // Keep an inline message if the form stays open.
+      setError(err?.message || 'Failed to import recipe');
     } finally {
       setImporting(false);
     }
@@ -76,7 +78,7 @@ export default function ImportRecipeForm({ onImport, onClose }: ImportRecipeForm
             <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
           ) : (
             <Text style={[styles.hintText, { color: colors.textSecondary }]}>
-              Enter a URL from a recipe website (e.g., AllRecipes, Food Network, BBC Good Food)
+              Paste a direct recipe page URL from a recipe website.
             </Text>
           )}
 

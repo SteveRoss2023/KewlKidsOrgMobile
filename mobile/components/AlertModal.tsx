@@ -163,6 +163,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 22,
+    ...(Platform.OS === 'web' ? { whiteSpace: 'pre-line' as const } : {}),
   },
   buttonContainer: {
     flexDirection: 'row',

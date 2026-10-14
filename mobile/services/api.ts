@@ -312,6 +312,14 @@ export const handleAPIError = (error: AxiosError): APIError => {
         message = data;
       } else if ((data as any)?.detail) {
         message = (data as any).detail;
+      } else if ((data as any)?.error) {
+        // Common API shape: { error, suggestion?, detail? }
+        const errText = String((data as any).error);
+        const suggestion = (data as any).suggestion;
+        message =
+          suggestion && typeof suggestion === 'string'
+            ? `${errText}\n\n${suggestion}`
+            : errText;
       } else if ((data as any)?.message) {
         message = (data as any).message;
       } else if ((data as any)?.photo) {

@@ -3,7 +3,7 @@ Recipe import functionality - parse recipes from URLs.
 """
 import requests
 from bs4 import BeautifulSoup
-from recipe_scrapers import scrape_me
+from recipe_scrapers import scrape_html, scrape_me
 from typing import Dict, List, Optional, Tuple
 import json
 import re
@@ -14,6 +14,104 @@ from django.core.files.storage import default_storage
 import logging
 
 logger = logging.getLogger(__name__)
+
+_BROWSER_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    ),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+}
+
+
+def _fetch_recipe_page(
+    url: str, timeout: int = 20
+) -> Tuple[Optional[str], Optional[BeautifulSoup], Optional[str]]:
+    """
+    Fetch recipe HTML with browser-like headers.
+    Returns (html_text, soup, error_message). error_message set when fetch fails or looks blocked.
+    """
+    try:
+        response = requests.get(url, timeout=timeout, headers=_BROWSER_HEADERS, allow_redirects=True)
+        status = response.status_code
+        if status in (401, 402, 403, 429, 451, 460):
+            msg = (
+                f'The recipe site blocked the import request (HTTP {status}). '
+                f'Try again later, or create the recipe manually.'
+            )
+            logger.warning(f"Recipe site blocked fetch for {url}: HTTP {status}")
+            return None, None, msg
+        response.raise_for_status()
+        html = response.text or ''
+        lower = html[:4000].lower()
+        if (
+            'cf-browser-verification' in lower
+            or 'attention required' in lower
+            or 'captcha' in lower
+            or ('security verification' in lower and 'recipeingredient' not in lower)
+        ):
+            msg = (
+                'The recipe site returned a bot-check page instead of the recipe. '
+                'Try again later, or create the recipe manually.'
+            )
+            logger.warning(f"Bot-check / challenge page for {url}")
+            return None, None, msg
+        if len(html) < 500:
+            return None, None, 'The recipe page returned almost no content.'
+        # Parse the same unicode text we keep (not response.content) so soup matches html.
+        return html, BeautifulSoup(html, 'html.parser'), None
+    except requests.exceptions.Timeout:
+        msg = 'Timed out fetching the recipe page. Retry once, or use Paste.'
+        logger.warning(f"Timeout fetching {url}")
+        return None, None, msg
+    except Exception as e:
+        logger.warning(f"Failed to fetch recipe page {url}: {e}")
+        return None, None, f'Could not fetch the recipe page: {e}'
+
+
+def _iter_ldjson_nodes(data) -> List[Dict]:
+    """Flatten JSON-LD into dict nodes (handles @graph, lists, nested graphs)."""
+    nodes: List[Dict] = []
+    if data is None:
+        return nodes
+    if isinstance(data, list):
+        for item in data:
+            nodes.extend(_iter_ldjson_nodes(item))
+        return nodes
+    if not isinstance(data, dict):
+        return nodes
+    nodes.append(data)
+    if '@graph' in data:
+        nodes.extend(_iter_ldjson_nodes(data.get('@graph')))
+    return nodes
+
+
+def _ldjson_type_names(node: Dict) -> List[str]:
+    raw = node.get('@type')
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    if raw is None:
+        return []
+    return [str(raw)]
+
+
+def _find_schema_recipe(soup: BeautifulSoup) -> Optional[Dict]:
+    """Find the first Schema.org Recipe object in any ld+json block (including @graph)."""
+    for script in soup.find_all('script', type='application/ld+json'):
+        raw = script.string or script.get_text() or ''
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        for node in _iter_ldjson_nodes(data):
+            types = _ldjson_type_names(node)
+            if any(t.endswith('Recipe') or t == 'Recipe' for t in types):
+                return node
+    return None
 
 
 def _unwrap_email_security_wrapper_url(url: str) -> str:
@@ -38,140 +136,178 @@ def _unwrap_email_security_wrapper_url(url: str) -> str:
     return url
 
 
-def import_recipe_from_url(url: str) -> Optional[Dict]:
+def import_recipe_from_url(url: str) -> Tuple[Optional[Dict], Optional[str]]:
     """
     Import a recipe from a URL.
-    Returns a dictionary with recipe data or None if import fails.
+    Returns (recipe_data, error_message). On success error_message is None.
 
-    The import process:
-    1. First tries recipe-scrapers library (supports many popular sites)
-    2. Falls back to manual parsing with BeautifulSoup:
-       - Looks for Schema.org structured data (JSON-LD)
-       - Falls back to HTML parsing for common recipe patterns
+    Fetch HTML ourselves (timeouts + browser headers), then:
+    1. Parse with recipe-scrapers scrape_html (avoids scrape_me urlopen hangs)
+    2. Fall back to Schema.org / HTML parsing on the same page
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     url = _unwrap_email_security_wrapper_url(url.strip())
+    logger.info(f"Attempting to import recipe from {url}")
 
-    try:
-        # Try using recipe-scrapers first (supports many sites)
-        logger.info(f"Attempting to import recipe from {url} using recipe-scrapers")
-        scraper = scrape_me(url)
+    html, soup, fetch_error = _fetch_recipe_page(url)
 
-        title = scraper.title() or ''
-        ingredients = scraper.ingredients() or []
-        instructions = scraper.instructions_list() or []
-
-        # Validate that we got at least some content
-        if not title and not ingredients and not instructions:
-            logger.warning(f"Recipe scraper returned empty data for URL: {url}, trying fallback")
-            # Try fallback
-            return _parse_recipe_manually(url)
-
-        # Always fetch the page HTML to enhance title and image extraction
-        soup = None
+    # Prefer scrape_html on HTML we already fetched (bounded timeout, better UA).
+    # scrape_me() uses urlopen and can hang ~60s+ when a site blocks or stalls.
+    # If the host isn't in recipe-scrapers, skip wild-mode SchemaScraper — sites like
+    # Best of Bridge need our HTML fallback (partial schema often breaks on title()).
+    scraper = None
+    if html:
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, timeout=15, headers=headers)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            logger.info(f"Successfully fetched page HTML for {url}")
+            scraper = scrape_html(html, org_url=url)
+            logger.info(f"Parsed {url} with scrape_html")
         except Exception as e:
-            logger.warning(f"Failed to fetch page HTML for title/image extraction: {str(e)}")
-
-        # DEBUG: Log what scraper returned
-        logger.info(f"DEBUG: Scraper title: '{title}' (length: {len(title) if title else 0})")
-        logger.info(f"DEBUG: Scraper ingredients count: {len(ingredients)}")
-        logger.info(f"DEBUG: Scraper instructions count: {len(instructions)}")
-
-        # Always try to extract title from the page, use it if better than scraper's title
-        extracted_title = None
-        if soup:
-            extracted_title = _extract_title_from_soup(soup)
-            logger.info(f"DEBUG: Extracted title from soup: '{extracted_title}'")
-
-            if extracted_title and len(extracted_title.strip()) > 3:
-                # Use extracted title if scraper's title is empty, too short, or generic
-                if not title or len(title.strip()) < 3 or any(generic in title.lower() for generic in ['recipe', 'untitled', 'page not found', 'best of bridge']):
-                    title = extracted_title
-                    logger.info(f"Using extracted title '{title}' from page (scraper title was: '{scraper.title()}')")
-                elif extracted_title != title:
-                    logger.debug(f"Scraper title '{title}' differs from extracted '{extracted_title}', keeping scraper title")
-
-        # Fallback: Extract title from URL if still no title
-        if not title or len(title.strip()) < 3:
-            url_title = _extract_title_from_url(url)
-            if url_title:
-                title = url_title
-                logger.info(f"Using title extracted from URL: '{title}'")
-
-        logger.info(f"DEBUG: Final title: '{title}'")
-
-        # Get image from scraper first
-        image_url = scraper.image() or None
-        logger.info(f"DEBUG: Scraper image: '{image_url}'")
-
-        # Always try to extract image from the page, use it if scraper didn't find one
-        if soup:
-            if not image_url:
-                logger.info(f"No image from recipe-scrapers, trying manual extraction for {url}")
+            err_name = type(e).__name__
+            err_text = str(e).lower()
+            unsupported = (
+                'WebsiteNotImplemented' in err_name
+                or 'not supported' in err_text
+                or "isn't currently supported" in err_text
+            )
+            if unsupported:
+                logger.info(f"Host not in recipe-scrapers for {url}; using HTML fallback")
+                scraper = None
             else:
-                logger.info(f"Found image from scraper, but will also check page for better image")
+                # Partial / unknown schema pages: try wild mode, then HTML fallback.
+                try:
+                    scraper = scrape_html(html, org_url=url, supported_only=False)
+                    logger.info(f"Parsed {url} with scrape_html supported_only=False")
+                except TypeError:
+                    logger.warning(f"scrape_html failed for {url}: {e}")
+                    scraper = None
+                except Exception as e2:
+                    logger.warning(f"scrape_html wild mode failed for {url}: {e2}")
+                    scraper = None
 
-            extracted_image = _extract_image_from_soup(soup, url)
-            logger.info(f"DEBUG: Extracted image from soup: '{extracted_image}'")
-
-            # Use extracted image if scraper didn't find one, or if extracted image looks more relevant
-            if extracted_image:
-                if not image_url:
-                    image_url = extracted_image
-                    logger.info(f"Using extracted image from page: {image_url}")
-                else:
-                    # Keep scraper image for now, but log both
-                    logger.info(f"Scraper found image: {image_url}, page found: {extracted_image} (keeping scraper image)")
-
-        logger.info(f"Successfully imported recipe '{title}' using recipe-scrapers")
-
-        recipe_data = {
-            'title': title,
-            'ingredients': ingredients,
-            'instructions': instructions,
-            'servings': _parse_servings(scraper.yields()),
-            'prep_time_minutes': _parse_time(scraper.prep_time()),
-            'cook_time_minutes': _parse_time(scraper.cook_time()),
-            'image_url': image_url,  # Keep original URL for reference and fallback
-            'source_url': url,
-        }
-
-        return recipe_data
-    except Exception as e:
-        logger.warning(f"Recipe scraper failed for URL {url}: {str(e)}")
-        # Fallback to manual parsing with BeautifulSoup
+    if scraper is None and not html:
+        # Last resort: library fetch (may hang briefly on some networks)
         try:
-            logger.info(f"Attempting manual parsing fallback for {url}")
-            result = _parse_recipe_manually(url)
-            if result:
-                logger.info(f"Manual parsing result - Title: '{result.get('title', 'MISSING')}', Ingredients: {len(result.get('ingredients', []))}, Instructions: {len(result.get('instructions', []))}, Image: '{result.get('image_url', 'MISSING')}'")
+            logger.info(f"No HTML fetched; trying scrape_me for {url}")
+            scraper = scrape_me(url)
+        except Exception as e:
+            logger.warning(f"scrape_me failed for {url}: {e}")
+            scraper = None
+            if fetch_error:
+                return None, fetch_error
+            return None, f'Could not download or parse the recipe page ({e}).'
 
-                # If title is still missing or too short, try URL extraction
-                if not result.get('title') or len(result.get('title', '').strip()) < 3:
+    if scraper is not None:
+        def _scraper_get(method_name: str, default=None):
+            """Best of Bridge / partial schema: title/yields/etc. may throw — don't abort."""
+            try:
+                value = getattr(scraper, method_name)()
+                return default if value is None else value
+            except Exception as e:
+                logger.debug(f"scraper.{method_name}() failed for {url}: {e}")
+                return default
+
+        try:
+            title = str(_scraper_get('title', '') or '').strip()
+            ingredients = _scraper_get('ingredients', []) or []
+            if not isinstance(ingredients, list):
+                ingredients = []
+            instructions = _scraper_get('instructions_list', []) or []
+            if not isinstance(instructions, list):
+                instructions = []
+            if not instructions:
+                raw_inst = _scraper_get('instructions', '') or ''
+                if isinstance(raw_inst, str) and raw_inst.strip():
+                    instructions = [s.strip() for s in re.split(r'\n+', raw_inst) if s.strip()]
+
+            logger.info(
+                f"Scraper data for {url}: title={title!r}, "
+                f"ings={len(ingredients)}, inst={len(instructions)}"
+            )
+
+            if title or ingredients or instructions:
+                if soup:
+                    extracted_title = _extract_title_from_soup(soup)
+                    if extracted_title and len(extracted_title.strip()) > 3:
+                        if (
+                            not title
+                            or len(title.strip()) < 3
+                            or any(
+                                g in title.lower()
+                                for g in ['recipe', 'untitled', 'page not found', 'best of bridge']
+                            )
+                        ):
+                            title = extracted_title
+
+                if not title or len(title.strip()) < 3:
                     url_title = _extract_title_from_url(url)
                     if url_title:
-                        result['title'] = url_title
-                        logger.info(f"Fixed title using URL extraction: '{url_title}'")
+                        title = url_title
 
-                logger.info(f"Final result - Title: '{result.get('title', 'MISSING')}'")
-            else:
-                logger.warning(f"Manual parsing returned no data for {url}")
-            return result
-        except Exception as e2:
-            logger.error(f"Manual parsing also failed for URL {url}: {str(e2)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
+                image_url = _scraper_get('image', None) or None
+                if isinstance(image_url, list):
+                    image_url = image_url[0] if image_url else None
+                if soup and not image_url:
+                    image_url = _extract_image_from_soup(soup, url)
+
+                servings = _parse_servings(_scraper_get('yields', None))
+                prep_time_minutes = _parse_time(_scraper_get('prep_time', None))
+                cook_time_minutes = _parse_time(_scraper_get('cook_time', None))
+
+                # Prefer custom HTML parse when scraper gave ingredients but no title/steps
+                # and the page has a stronger manual result (e.g. Best of Bridge).
+                if (not title or not instructions) and soup:
+                    manual_preview = _parse_recipe_manually(url, html=html, soup=soup)
+                    if manual_preview:
+                        if not title and manual_preview.get('title'):
+                            title = manual_preview['title']
+                        if not instructions and manual_preview.get('instructions'):
+                            instructions = manual_preview['instructions']
+                        if not ingredients and manual_preview.get('ingredients'):
+                            ingredients = manual_preview['ingredients']
+                        if not image_url and manual_preview.get('image_url'):
+                            image_url = manual_preview['image_url']
+
+                if not ingredients and not instructions:
+                    raise ValueError('Scraper returned no ingredients or instructions')
+
+                return {
+                    'title': title,
+                    'ingredients': ingredients,
+                    'instructions': instructions,
+                    'servings': servings,
+                    'prep_time_minutes': prep_time_minutes,
+                    'cook_time_minutes': cook_time_minutes,
+                    'image_url': image_url,
+                    'source_url': url,
+                }, None
+        except Exception as e:
+            logger.warning(f"Failed reading scraper fields for {url}: {e}")
+
+    # Fallback: Schema.org / HTML on the page we already have (or re-fetch)
+    try:
+        logger.info(f"Attempting manual parsing fallback for {url}")
+        result = _parse_recipe_manually(url, html=html, soup=soup)
+        if result:
+            if not result.get('title') or len(result.get('title', '').strip()) < 3:
+                url_title = _extract_title_from_url(url)
+                if url_title:
+                    result['title'] = url_title
+            logger.info(
+                f"Manual parse OK for {url}: title={result.get('title')!r}, "
+                f"ings={len(result.get('ingredients') or [])}, "
+                f"inst={len(result.get('instructions') or [])}"
+            )
+            return result, None
+        if fetch_error:
+            return None, fetch_error
+        logger.warning(f"Manual parsing returned no data for {url}")
+        return None, (
+            'Could not find recipe ingredients/instructions on that page. '
+            'Try a different recipe URL, or create the recipe manually.'
+        )
+    except Exception as e2:
+        logger.error(f"Manual parsing also failed for {url}: {e2}", exc_info=True)
+        if fetch_error:
+            return None, fetch_error
+        return None, f'Failed to parse the recipe page ({e2}).'
 
 
 def _parse_time(time_str: Optional[str]) -> Optional[int]:
@@ -193,43 +329,45 @@ def _parse_time(time_str: Optional[str]) -> Optional[int]:
     return None
 
 
-def _parse_recipe_manually(url: str) -> Optional[Dict]:
+def _parse_recipe_manually(
+    url: str,
+    html: Optional[str] = None,
+    soup: Optional[BeautifulSoup] = None,
+) -> Optional[Dict]:
     """Fallback manual parsing using BeautifulSoup and schema.org."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     try:
-        # Use a user-agent to avoid being blocked
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, timeout=15, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        if soup is None:
+            if html:
+                soup = BeautifulSoup(html, 'html.parser')
+            else:
+                fetched_html, soup, _fetch_err = _fetch_recipe_page(url, timeout=15)
+                html = fetched_html
+        if soup is None:
+            return None
 
-        # Try to find schema.org Recipe structured data
-        recipe_json = soup.find('script', type='application/ld+json')
-        if recipe_json:
-            data = json.loads(recipe_json.string)
-            if isinstance(data, list):
-                data = data[0]
+        # Schema.org Recipe (including @graph / multiple ld+json blocks — AllRecipes etc.)
+        data = _find_schema_recipe(soup)
+        if data:
+            image_url = _get_image_url(data)
+            if not image_url:
+                image_url = _extract_image_from_soup(soup, url)
 
-            if data.get('@type') == 'Recipe':
-                image_url = _get_image_url(data)
-                # If no image from schema.org, try HTML extraction
-                if not image_url:
-                    image_url = _extract_image_from_soup(soup, url)
-
-                return {
-                    'title': data.get('name', ''),
-                    'ingredients': _extract_ingredients(data),
-                    'instructions': _extract_instructions(data),
-                    'servings': _parse_servings(data.get('recipeYield')),
-                    'prep_time_minutes': _parse_iso_duration(data.get('prepTime')),
-                    'cook_time_minutes': _parse_iso_duration(data.get('cookTime')),
-                    'image_url': image_url,
-                    'source_url': url,
-                }
+            parsed = {
+                'title': data.get('name', ''),
+                'ingredients': _extract_ingredients(data),
+                'instructions': _extract_instructions(data),
+                'servings': _parse_servings(data.get('recipeYield')),
+                'prep_time_minutes': _parse_iso_duration(data.get('prepTime')),
+                'cook_time_minutes': _parse_iso_duration(data.get('cookTime')),
+                'image_url': image_url,
+                'source_url': url,
+            }
+            # Partial/empty schema (common on Best of Bridge) — fall through to HTML.
+            if parsed['ingredients'] or parsed['instructions']:
+                return parsed
+            logger.info(
+                f"Schema.org Recipe for {url} had no ingredients/instructions; trying HTML fallback"
+            )
 
         # Fallback: try to extract basic info from HTML
         print(f"[RECIPE IMPORT] No Schema.org data found, trying HTML fallback for {url}")
@@ -264,7 +402,7 @@ def _parse_recipe_manually(url: str) -> Optional[Dict]:
                     result['title'] = url_title
                 else:
                     result = {'title': url_title, 'ingredients': [], 'instructions': [], 'image_url': None, 'source_url': url}
-                print(f"[RECIPE IMPORT] ✓ Using URL title: '{url_title}' (HTML title '{current_title}' was rejected as UI text)")
+                print(f"[RECIPE IMPORT] Using URL title: '{url_title}' (HTML title '{current_title}' was rejected as UI text)")
             else:
                 print(f"[RECIPE IMPORT] Keeping HTML title: '{current_title}' (URL title was: '{url_title}')")
 
@@ -452,7 +590,7 @@ def _extract_title_from_soup(soup: BeautifulSoup) -> Optional[str]:
                            'insert', 'edit', 'link', 'close', 'cancel', 'submit']
             if not any(skip in text_lower for skip in skip_patterns):
                 title = text
-                print(f"[RECIPE IMPORT] ✓ Found title from h1: '{title}'")
+                print(f"[RECIPE IMPORT] Found title from h1: '{title}'")
                 logger.debug(f"Found title from h1: {title}")
                 break
 
@@ -475,13 +613,13 @@ def _extract_title_from_soup(soup: BeautifulSoup) -> Optional[str]:
                     print(f"[RECIPE IMPORT] First h2 first word: '{first_word}', length: {len(text)}")
                     if len(text) > 5 and first_word not in ['ingredients', 'instructions', 'directions', 'notes', 'serves', 'first']:
                         title = text
-                        print(f"[RECIPE IMPORT] ✓ Found title from FIRST h2: '{title}'")
+                        print(f"[RECIPE IMPORT] Found title from FIRST h2: '{title}'")
                         break
 
                 # For other h2s, check skip patterns
                 if not any(skip in text_lower for skip in skip_patterns):
                     title = text
-                    print(f"[RECIPE IMPORT] ✓ Found title from h2[{idx}]: '{title}'")
+                    print(f"[RECIPE IMPORT] Found title from h2[{idx}]: '{title}'")
                     break
 
     # Method 3: Try meta tags
@@ -492,7 +630,7 @@ def _extract_title_from_soup(soup: BeautifulSoup) -> Optional[str]:
             # Skip UI elements in meta tags too
             if not any(skip in title_text.lower() for skip in ['insert', 'edit', 'link', 'untitled']):
                 title = title_text
-                print(f"[RECIPE IMPORT] ✓ Found title from og:title: '{title}'")
+                print(f"[RECIPE IMPORT] Found title from og:title: '{title}'")
                 logger.debug(f"Found title from og:title: {title}")
 
     # Method 4: Try title tag and clean it up
@@ -512,7 +650,7 @@ def _extract_title_from_soup(soup: BeautifulSoup) -> Optional[str]:
                     # Skip generic parts
                     if part and len(part) > 3 and not any(skip in part.lower() for skip in ['recipe', 'recipes', 'best of bridge', 'cookbook', 'insert', 'edit', 'link']):
                         title = part
-                        print(f"[RECIPE IMPORT] ✓ Found title from title tag: '{title}'")
+                        print(f"[RECIPE IMPORT] Found title from title tag: '{title}'")
                         logger.debug(f"Found title from title tag: {title}")
                         break
 
@@ -561,7 +699,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                 bg_image_url = url_match.group(1).strip()
                 if bg_image_url and not bg_image_url.startswith('data:'):
                     image_url = _normalize_image_url(bg_image_url, url)
-                    print(f"[RECIPE IMPORT] ✓ Found custom-recipe-header-image (PRIORITY): {image_url}")
+                    print(f"[RECIPE IMPORT] Found custom-recipe-header-image (PRIORITY): {image_url}")
                     return image_url
 
     # Method 1: Open Graph image (og:image)
@@ -684,11 +822,11 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                         if bg_image_url and not bg_image_url.startswith('data:'):
                             if has_recipe_class:
                                 image_url = _normalize_image_url(bg_image_url, url)
-                                print(f"[RECIPE IMPORT] ✓ Found background-image with recipe class: {image_url} (class: {class_str})")
+                                print(f"[RECIPE IMPORT] Found background-image with recipe class: {image_url} (class: {class_str})")
                                 return image_url
                             # Even without recipe class, if it's between title and ingredients, use it
                             image_url = _normalize_image_url(bg_image_url, url)
-                            print(f"[RECIPE IMPORT] ✓ Found FIRST background-image between title and ingredients: {image_url}")
+                            print(f"[RECIPE IMPORT] Found FIRST background-image between title and ingredients: {image_url}")
                             return image_url
 
                 # Get the FIRST img tag in this container
@@ -697,13 +835,13 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                     src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
                     if src and not src.startswith('data:') and not any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'placeholder', 'background']):
                         image_url = _normalize_image_url(src, url)
-                        print(f"[RECIPE IMPORT] ✓ Found FIRST image in container between title and ingredients: {image_url}")
+                        print(f"[RECIPE IMPORT] Found FIRST image in container between title and ingredients: {image_url}")
                         return image_url
             elif current.name == 'img':
                 src = current.get('src') or current.get('data-src') or current.get('data-lazy-src') or current.get('data-original')
                 if src and not src.startswith('data:') and not any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'placeholder', 'background']):
                     image_url = _normalize_image_url(src, url)
-                    print(f"[RECIPE IMPORT] ✓ Found FIRST image between title and ingredients: {image_url}")
+                    print(f"[RECIPE IMPORT] Found FIRST image between title and ingredients: {image_url}")
                     return image_url
             current = current.find_next_sibling()
 
@@ -720,7 +858,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                     bg_image_url = url_match.group(1).strip()
                     if bg_image_url and not bg_image_url.startswith('data:'):
                         image_url = _normalize_image_url(bg_image_url, url)
-                        print(f"[RECIPE IMPORT] ✓ Found background-image in title parent: {image_url}")
+                        print(f"[RECIPE IMPORT] Found background-image in title parent: {image_url}")
                         return image_url
 
             # Check for images in the same container
@@ -729,7 +867,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                 src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
                 if src and not src.startswith('data:') and not any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'placeholder']):
                     image_url = _normalize_image_url(src, url)
-                    print(f"[RECIPE IMPORT] ✓ Found image in title container: {image_url}")
+                    print(f"[RECIPE IMPORT] Found image in title container: {image_url}")
                     return image_url
 
             # Check next siblings
@@ -740,7 +878,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                     src = sibling.get('src') or sibling.get('data-src') or sibling.get('data-lazy-src') or sibling.get('data-original')
                     if src and not src.startswith('data:') and not any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'placeholder']):
                         image_url = _normalize_image_url(src, url)
-                        print(f"[RECIPE IMPORT] ✓ Found image in sibling of title: {image_url}")
+                        print(f"[RECIPE IMPORT] Found image in sibling of title: {image_url}")
                         return image_url
                 elif sibling.name in ['div', 'figure', 'picture']:
                     # Check for background-image FIRST
@@ -751,7 +889,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                             bg_image_url = url_match.group(1).strip()
                             if bg_image_url and not bg_image_url.startswith('data:'):
                                 image_url = _normalize_image_url(bg_image_url, url)
-                                print(f"[RECIPE IMPORT] ✓ Found background-image in sibling near title: {image_url}")
+                                print(f"[RECIPE IMPORT] Found background-image in sibling near title: {image_url}")
                                 return image_url
 
                     img = sibling.find('img')
@@ -759,7 +897,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
                         src = img.get('src') or img.get('data-src') or img.get('data-lazy-src') or img.get('data-original')
                         if src and not src.startswith('data:') and not any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'placeholder']):
                             image_url = _normalize_image_url(src, url)
-                            print(f"[RECIPE IMPORT] ✓ Found image in container near title: {image_url}")
+                            print(f"[RECIPE IMPORT] Found image in container near title: {image_url}")
                             return image_url
 
 
@@ -798,7 +936,7 @@ def _extract_image_from_soup(soup: BeautifulSoup, url: str) -> Optional[str]:
 
                 # TAKE THE FIRST ONE - no size checking
                 image_url = _normalize_image_url(src, url)
-                print(f"[RECIPE IMPORT] ✓ Fallback: Selected FIRST image from main content: {image_url}")
+                print(f"[RECIPE IMPORT] Fallback: Selected FIRST image from main content: {image_url}")
                 return image_url
 
     return None
@@ -878,6 +1016,71 @@ def download_and_save_image(image_url: str, recipe_id: Optional[int] = None) -> 
         return None
 
 
+def attach_recipe_image_from_url(
+    recipe,
+    image_url: str,
+    source_url: Optional[str] = None,
+) -> bool:
+    """
+    Download an external image URL onto recipe.image (and keep original on recipe.image_url).
+    Same behavior as URL import. Returns True if a file was saved.
+    """
+    if not recipe or not image_url:
+        return False
+    image_url = str(image_url).strip()
+    if not image_url.startswith(('http://', 'https://')):
+        logger.warning(f"Image URL is not absolute: {image_url}")
+        return False
+
+    try:
+        referer = (source_url or image_url).strip()
+        if referer and '/' in referer:
+            parsed_referer = urlparse(referer)
+            if parsed_referer.scheme and parsed_referer.netloc:
+                referer = f'{parsed_referer.scheme}://{parsed_referer.netloc}'
+
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': referer if referer else image_url,
+            'Origin': referer.rstrip('/') if referer else image_url,
+        }
+        response = requests.get(image_url, timeout=30, headers=headers)
+        response.raise_for_status()
+
+        content_type = (response.headers.get('Content-Type') or '').split(';')[0].strip()
+        if not content_type.startswith('image/'):
+            logger.warning(f"URL does not point to an image: {content_type}")
+            return False
+
+        parsed_url = urlparse(image_url)
+        ext = os.path.splitext(parsed_url.path)[1].lower().lstrip('.')
+        if not ext:
+            content_type_map = {
+                'image/jpeg': 'jpg',
+                'image/jpg': 'jpg',
+                'image/png': 'png',
+                'image/gif': 'gif',
+                'image/webp': 'webp',
+            }
+            ext = content_type_map.get(content_type, 'jpg')
+
+        # Keep original URL for reference
+        recipe.image_url = image_url
+        filename = f'recipe_{recipe.id}.{ext}'
+        recipe.image.save(filename, ContentFile(response.content), save=True)
+        recipe.refresh_from_db()
+        logger.info(f"Saved image for recipe {recipe.id}: {recipe.image.name}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to attach image for recipe {getattr(recipe, 'id', None)} from {image_url}: {e}")
+        return False
+
+
 def _normalize_image_url(image_url: str, base_url: str) -> str:
     """Normalize image URL: convert relative to absolute, remove query params."""
     from urllib.parse import urljoin, urlparse, urlunparse
@@ -894,6 +1097,50 @@ def _normalize_image_url(image_url: str, base_url: str) -> str:
     return normalized
 
 
+def _parse_yumprint_recipe(soup: BeautifulSoup, url: str, title: str) -> Optional[Dict]:
+    """Best of Bridge (yumprint) widget — reliable class-based extract."""
+    ingredients: List[str] = []
+    for ol in soup.select('ol.blog-yumprint-ingredients, ul.blog-yumprint-ingredients'):
+        for li in ol.find_all('li'):
+            text = li.get_text(' ', strip=True)
+            if text and len(text) > 2:
+                ingredients.append(text)
+        if ingredients:
+            break
+    instructions: List[str] = []
+    for ol in soup.select(
+        'ol.blog-yumprint-instructions, ul.blog-yumprint-instructions, '
+        'div.blog-yumprint-method-section ol, div.blog-yumprint-method-section ul'
+    ):
+        for li in ol.find_all('li'):
+            text = li.get_text(' ', strip=True)
+            if text and len(text) > 10:
+                instructions.append(text)
+        if instructions:
+            break
+    if not (title and (ingredients or instructions)):
+        return None
+    image_url = None
+    try:
+        image_url = _extract_image_from_soup(soup, url)
+    except Exception:
+        image_url = None
+    print(
+        f"[RECIPE IMPORT] yumprint extract title={title!r} "
+        f"ings={len(ingredients)} inst={len(instructions)}"
+    )
+    return {
+        'title': title,
+        'ingredients': ingredients,
+        'instructions': instructions,
+        'servings': None,
+        'prep_time_minutes': None,
+        'cook_time_minutes': None,
+        'image_url': image_url,
+        'source_url': url,
+    }
+
+
 def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
     """Fallback HTML parsing when schema.org is not available."""
     import logging
@@ -904,12 +1151,33 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
         title = _extract_title_from_soup(soup)
         print(f"[RECIPE IMPORT] Extracted title from HTML: '{title}'")
 
+        # Best of Bridge / yumprint — handle before generic heuristics
+        yumprint = _parse_yumprint_recipe(soup, url, title or '')
+        if yumprint:
+            return yumprint
+        if not title or len(title.strip()) < 3:
+            url_title = _extract_title_from_url(url)
+            if url_title:
+                yumprint = _parse_yumprint_recipe(soup, url, url_title)
+                if yumprint:
+                    return yumprint
+
         # Try to find ingredients - look for common patterns
         ingredients = []
 
+        # Method 0: Best of Bridge / yumprint widgets (ol.blog-yumprint-ingredients)
+        for ol in soup.select('ol.blog-yumprint-ingredients, ul.blog-yumprint-ingredients'):
+            for li in ol.find_all('li'):
+                ingredient_text = li.get_text(' ', strip=True)
+                if ingredient_text and len(ingredient_text) > 2:
+                    ingredients.append(ingredient_text)
+            if ingredients:
+                print(f"[RECIPE IMPORT] Found {len(ingredients)} ingredients from yumprint list")
+                break
+
         # Method 1: Look for ingredients section with list items (case-insensitive search)
         ingredients_section = soup.find(string=lambda text: text and text.strip() and 'ingredient' in text.lower())
-        if ingredients_section:
+        if ingredients_section and not ingredients:
             parent = ingredients_section.find_parent()
             if parent:
                 # Look for lists in the same parent or nearby
@@ -965,7 +1233,7 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
 
         # Method 3: Look for divs with class names containing "ingredient"
         if not ingredients:
-            for div in soup.find_all('div', class_=lambda x: x and 'ingredient' in x.lower()):
+            for div in soup.find_all('div', class_=lambda x: x and 'ingredient' in str(x).lower()):
                 for li in div.find_all('li'):
                     ingredient_text = li.get_text().strip()
                     if ingredient_text and len(ingredient_text) > 2:
@@ -976,9 +1244,22 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
         # Try to find instructions
         instructions = []
 
+        # Method 0: Best of Bridge / yumprint method list
+        for ol in soup.select(
+            'ol.blog-yumprint-instructions, ul.blog-yumprint-instructions, '
+            'div.blog-yumprint-method-section ol, div.blog-yumprint-method-section ul'
+        ):
+            for li in ol.find_all('li'):
+                instruction_text = li.get_text(' ', strip=True)
+                if instruction_text and len(instruction_text) > 10:
+                    instructions.append(instruction_text)
+            if instructions:
+                print(f"[RECIPE IMPORT] Found {len(instructions)} instructions from yumprint list")
+                break
+
         # Method 1: Look for instructions section (case-insensitive)
         instructions_section = soup.find(string=lambda text: text and text.strip() and ('instruction' in text.lower() or 'direction' in text.lower() or 'step' in text.lower() or 'method' in text.lower()))
-        if instructions_section:
+        if instructions_section and not instructions:
             parent = instructions_section.find_parent()
             if parent:
                 for ol in parent.find_all(['ol', 'ul'], recursive=False):
@@ -1039,7 +1320,13 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
 
         # Method 3: Look for divs with class names containing "instruction" or "step"
         if not instructions:
-            for div in soup.find_all('div', class_=lambda x: x and any(keyword in x.lower() for keyword in ['instruction', 'direction', 'step', 'method'])):
+            for div in soup.find_all(
+                'div',
+                class_=lambda x: x and any(
+                    keyword in str(x).lower()
+                    for keyword in ['instruction', 'direction', 'step', 'method']
+                ),
+            ):
                 # Check for paragraphs first
                 for p in div.find_all('p'):
                     text = p.get_text().strip()
@@ -1054,8 +1341,12 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> Optional[Dict]:
                 if instructions:
                     break
 
-        # Extract image using the dedicated function
-        image_url = _extract_image_from_soup(soup, url)
+        # Extract image using the dedicated function (never abort the recipe on image errors)
+        image_url = None
+        try:
+            image_url = _extract_image_from_soup(soup, url)
+        except Exception as img_err:
+            logger.warning(f"Image extraction failed during HTML fallback for {url}: {img_err}")
 
         # ALWAYS try URL-based title as fallback
         if not title or len(title.strip()) < 3:
@@ -1364,14 +1655,18 @@ def extract_ingredients_for_shopping_list(recipe_data: Dict) -> List[Dict]:
     """
     Extract ingredients from recipe data for shopping list.
     Returns list of dicts with 'name' and 'quantity' (quantity includes unit, e.g., "3/4 pound").
+    Skips section headers (Sauce, Chicken, For the sauce, …).
     """
     ingredients = recipe_data.get('ingredients', [])
     shopping_items = []
 
     for ingredient in ingredients:
         if isinstance(ingredient, str):
+            line = ingredient.strip()
+            if not line or _is_meta_label(line) or _is_section_header(line):
+                continue
             # Parse ingredient to extract quantity+unit and name
-            quantity_with_unit, ingredient_name = _parse_ingredient_quantity_and_unit(ingredient)
+            quantity_with_unit, ingredient_name = _parse_ingredient_quantity_and_unit(line)
 
             shopping_items.append({
                 'name': ingredient_name,
@@ -1380,3 +1675,53 @@ def extract_ingredients_for_shopping_list(recipe_data: Dict) -> List[Dict]:
 
     return shopping_items
 
+
+
+_META_LABEL_RE = re.compile(
+    r'^(ingredients?|instructions?|directions?|method|steps?|preparation|you.?ll need|what you.?ll need)\s*:?\s*$',
+    re.IGNORECASE,
+)
+_HAS_QTY_RE = re.compile(
+    r'^(\d+\s+\d+/\d+|\d+/\d+|\d+[.,]?\d*|\d+\s*-\s*\d+)',
+)
+
+
+def _is_meta_label(line: str) -> bool:
+    """Top-level Ingredients / Instructions labels (not subgroup titles)."""
+    if not line:
+        return True
+    if _META_LABEL_RE.match(line):
+        return True
+    if re.match(r'^n?gredients?\s*:?\s*$', line, re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_section_header(line: str) -> bool:
+    """
+    Subgroup titles inside ingredients/instructions, e.g. Sauce, Chicken,
+    Make the sauce, For the chicken. Skipped when adding to shopping lists.
+    """
+    if not line or _is_meta_label(line):
+        return False
+    if re.search(r'[.!?]$', line):
+        return False
+    if len(line) > 48:
+        return False
+    if _HAS_QTY_RE.match(line):
+        return False
+    words = [w for w in re.split(r'\s+', line) if w]
+    if not words or len(words) > 6:
+        return False
+    if ',' in line or '(' in line:
+        return False
+    lower = line.lower()
+    if lower.startswith(('make the ', 'for the ', 'to make ', 'to serve')):
+        return True
+    alpha_words = [w for w in words if re.search(r'[A-Za-z]', w)]
+    if not alpha_words:
+        return False
+    return all(
+        (w[0].isupper() or w.lower() in {'and', 'or', 'the', 'a', 'of', 'for', 'to'})
+        for w in alpha_words
+    )

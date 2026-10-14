@@ -345,10 +345,12 @@ class MealsService {
    */
   async importRecipe(url: string, familyId: number): Promise<Recipe> {
     try {
-      const response = await apiClient.post<Recipe>('/recipes/import/', {
-        url,
-        family: familyId,
-      });
+      // Import fetches remote HTML + image; allow longer than the default 60s.
+      const response = await apiClient.post<Recipe>(
+        '/recipes/import/',
+        { url, family: familyId },
+        { timeout: 120000 }
+      );
       return response.data;
     } catch (error) {
       throw handleAPIError(error);

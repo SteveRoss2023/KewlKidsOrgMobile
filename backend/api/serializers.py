@@ -218,22 +218,46 @@ class RecipeSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def _external_image_url_from_request(self) -> str | None:
+        """Read write image_url from request (SerializerMethodField is output-only)."""
+        data = getattr(self, 'initial_data', None) or {}
+        raw = data.get('image_url')
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else None
+        if raw is None:
+            return None
+        url = str(raw).strip()
+        return url or None
+
     def create(self, validated_data):
         """Create recipe with encrypted JSON fields."""
+        from meals.importers import attach_recipe_image_from_url
+
         validated_data.pop('clear_image', None)
         ingredients = validated_data.pop('ingredients', [])
         instructions = validated_data.pop('instructions', [])
+        uploaded_image = validated_data.get('image')
         recipe = Recipe.objects.create(**validated_data)
         recipe.ingredients = ingredients
         recipe.instructions = instructions
         recipe.save()
+
+        # Paste / create with an image link: download + store like URL import.
+        external_url = self._external_image_url_from_request()
+        if external_url and not uploaded_image:
+            source_url = validated_data.get('source_url') or getattr(recipe, 'source_url', None)
+            attach_recipe_image_from_url(recipe, external_url, source_url=source_url)
+
         return recipe
 
     def update(self, instance, validated_data):
         """Update recipe with encrypted JSON fields."""
+        from meals.importers import attach_recipe_image_from_url
+
         ingredients = validated_data.pop('ingredients', None)
         instructions = validated_data.pop('instructions', None)
         clear_image = validated_data.pop('clear_image', False)
+        uploaded_image = validated_data.get('image')
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -248,6 +272,12 @@ class RecipeSerializer(serializers.ModelSerializer):
             instance.image = None
 
         instance.save()
+
+        external_url = self._external_image_url_from_request()
+        if external_url and not uploaded_image:
+            source_url = validated_data.get('source_url') or getattr(instance, 'source_url', None)
+            attach_recipe_image_from_url(instance, external_url, source_url=source_url)
+
         return instance
 
 

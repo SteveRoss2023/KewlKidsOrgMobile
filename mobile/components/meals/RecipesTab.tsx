@@ -103,13 +103,17 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         type: 'success',
       });
     } catch (err: any) {
-      const errorMsg = err.message || 'Failed to import recipe';
+      // Close the import Modal first — AlertModal behind it is not visible on web.
+      setShowImportForm(false);
+      const errorMsg = err?.message || 'Failed to import recipe';
       setNotification({
         isOpen: true,
         title: 'Recipe Import Failed',
         message: errorMsg,
         type: 'error',
       });
+      // Re-throw so ImportRecipeForm does not treat the call as success (e.g. clear URL).
+      throw err;
     }
   };
 
@@ -244,7 +248,10 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
       {filteredRecipes.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={[styles.emptyText, { color: colors.text }]}>
-            No recipes found. {searchTerm ? 'Try a different search term.' : 'Import a recipe from a URL or create a new one!'}
+            No recipes found.{' '}
+            {searchTerm
+              ? 'Try a different search term.'
+              : 'Import from a URL or create a new one!'}
           </Text>
         </View>
       ) : (
@@ -303,8 +310,8 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         title={notification.title}
         message={notification.message}
         type={notification.type}
-        onClose={() => setNotification({ ...notification, isOpen: false })}
         details={notification.details}
+        onClose={() => setNotification({ ...notification, isOpen: false })}
       />
 
       <ConfirmModal

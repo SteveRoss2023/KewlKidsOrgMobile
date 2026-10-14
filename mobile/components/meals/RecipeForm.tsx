@@ -22,6 +22,7 @@ import MealsService, {
   RecipeImageAsset,
 } from '../../services/mealsService';
 import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
+import { isRecipeSectionHeader } from '../../utils/parseRecipeText';
 
 /** RN Web: Alert.alert is often hidden behind a full-screen Modal — use a blocking browser dialog. */
 function notifyAlert(title: string, message?: string) {
@@ -46,26 +47,69 @@ if (Platform.OS !== 'web') {
 }
 
 
+export type RecipeFormDraft = {
+  title?: string;
+  ingredients?: string[];
+  instructions?: string[];
+  source_url?: string;
+  image_url?: string;
+  notes?: string;
+  servings?: number | string;
+  prep_time_minutes?: number | string;
+  cook_time_minutes?: number | string;
+};
+
 interface RecipeFormProps {
   selectedFamily: { id: number; name: string };
   onClose: () => void;
   /** Called with the saved recipe so the parent can update the list (esp. when refetch is slow or fails). */
   onSuccess: (savedRecipe?: Recipe) => void | Promise<void>;
   recipe?: Recipe | null;
+  /** Prefill create mode (e.g. after paste-parse). Ignored when editing an existing recipe. */
+  initialDraft?: RecipeFormDraft | null;
 }
 
-export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe }: RecipeFormProps) {
+export default function RecipeForm({
+  selectedFamily,
+  onClose,
+  onSuccess,
+  recipe,
+  initialDraft,
+}: RecipeFormProps) {
   const { colors } = useTheme();
   const isEdit = !!recipe;
-  const [title, setTitle] = useState(recipe?.title || '');
-  const [servings, setServings] = useState(recipe?.servings?.toString() || '');
-  const [prepTime, setPrepTime] = useState(recipe?.prep_time_minutes?.toString() || '');
-  const [cookTime, setCookTime] = useState(recipe?.cook_time_minutes?.toString() || '');
-  const [imageUrl, setImageUrl] = useState(recipe?.image_url || '');
-  const [sourceUrl, setSourceUrl] = useState(recipe?.source_url || '');
-  const [notes, setNotes] = useState(recipe?.notes || '');
-  const [ingredients, setIngredients] = useState<string[]>(recipe?.ingredients?.length ? [...recipe.ingredients] : ['']);
-  const [instructions, setInstructions] = useState<string[]>(recipe?.instructions?.length ? [...recipe.instructions] : ['']);
+  const draft = !isEdit ? initialDraft : null;
+  const [title, setTitle] = useState(recipe?.title || draft?.title || '');
+  const [servings, setServings] = useState(
+    recipe?.servings?.toString() || (draft?.servings != null ? String(draft.servings) : '') || ''
+  );
+  const [prepTime, setPrepTime] = useState(
+    recipe?.prep_time_minutes?.toString() ||
+      (draft?.prep_time_minutes != null ? String(draft.prep_time_minutes) : '') ||
+      ''
+  );
+  const [cookTime, setCookTime] = useState(
+    recipe?.cook_time_minutes?.toString() ||
+      (draft?.cook_time_minutes != null ? String(draft.cook_time_minutes) : '') ||
+      ''
+  );
+  const [imageUrl, setImageUrl] = useState(recipe?.image_url || draft?.image_url || '');
+  const [sourceUrl, setSourceUrl] = useState(recipe?.source_url || draft?.source_url || '');
+  const [notes, setNotes] = useState(recipe?.notes || draft?.notes || '');
+  const [ingredients, setIngredients] = useState<string[]>(
+    recipe?.ingredients?.length
+      ? [...recipe.ingredients]
+      : draft?.ingredients?.length
+        ? [...draft.ingredients]
+        : ['']
+  );
+  const [instructions, setInstructions] = useState<string[]>(
+    recipe?.instructions?.length
+      ? [...recipe.instructions]
+      : draft?.instructions?.length
+        ? [...draft.instructions]
+        : ['']
+  );
   const [creating, setCreating] = useState(false);
   const [pickedImage, setPickedImage] = useState<RecipeImageAsset | null>(null);
   const [clearImageRequested, setClearImageRequested] = useState(false);
@@ -163,6 +207,7 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
 
   const handleRemovePhoto = () => {
     setPickedImage(null);
+    setImageUrl('');
     if (isEdit) setClearImageRequested(true);
   };
 
@@ -187,8 +232,15 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
     }
   };
 
+  const externalImagePreview =
+    imageUrl.trim().startsWith('http://') || imageUrl.trim().startsWith('https://')
+      ? imageUrl.trim()
+      : null;
   const displayImageUri =
-    pickedImage?.uri ?? (clearImageRequested ? null : resolveRecipeImageUrl(recipe?.image_url));
+    pickedImage?.uri ??
+    (clearImageRequested
+      ? null
+      : resolveRecipeImageUrl(recipe?.image_url) || externalImagePreview);
   const showFilePickerFallback = !ImagePicker;
 
   const handleSubmit = async () => {
@@ -433,22 +485,45 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
                 <Text style={[styles.addButtonText, { color: colors.primary }]}>Add</Text>
               </TouchableOpacity>
             </View>
-            {ingredients.map((ingredient, index) => (
-              <View key={index} style={styles.listItem}>
-                <TextInput
-                  style={[styles.input, styles.listInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                  value={ingredient}
-                  onChangeText={(value) => updateIngredient(index, value)}
-                  placeholder={`Ingredient ${index + 1}`}
-                  placeholderTextColor={colors.textSecondary}
-                />
-                {ingredients.length > 1 && (
-                  <TouchableOpacity onPress={() => removeIngredient(index)} style={styles.removeButton}>
-                    <FontAwesome name="trash" size={16} color={colors.error} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
+            {ingredients.map((ingredient, index) => {
+              const isHeader = isRecipeSectionHeader(ingredient);
+              return (
+                <View
+                  key={index}
+                  style={[
+                    styles.ingredientRow,
+                    isHeader && index > 0 ? styles.groupHeaderSpacing : null,
+                  ]}
+                >
+                  {!isHeader ? (
+                    <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
+                  ) : (
+                    <View style={styles.headerGutter} />
+                  )}
+                  <TextInput
+                    style={[
+                      styles.ingredientInput,
+                      isHeader && styles.groupHeaderInput,
+                      {
+                        backgroundColor: isHeader ? 'transparent' : colors.surface,
+                        color: colors.text,
+                        borderColor: colors.border,
+                        fontWeight: isHeader ? '700' : '400',
+                      },
+                    ]}
+                    value={ingredient}
+                    onChangeText={(value) => updateIngredient(index, value)}
+                    placeholder={isHeader ? 'Section (e.g. Sauce)' : `Ingredient ${index + 1}`}
+                    placeholderTextColor={colors.textSecondary}
+                  />
+                  {ingredients.length > 1 && (
+                    <TouchableOpacity onPress={() => removeIngredient(index)} style={styles.removeButtonCompact}>
+                      <FontAwesome name="trash" size={14} color={colors.error} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
           </View>
 
           <View style={styles.field}>
@@ -459,24 +534,53 @@ export default function RecipeForm({ selectedFamily, onClose, onSuccess, recipe 
                 <Text style={[styles.addButtonText, { color: colors.primary }]}>Add</Text>
               </TouchableOpacity>
             </View>
-            {instructions.map((instruction, index) => (
-              <View key={index} style={styles.listItem}>
-                <TextInput
-                  style={[styles.input, styles.listInput, styles.textArea, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                  value={instruction}
-                  onChangeText={(value) => updateInstruction(index, value)}
-                  placeholder={`Step ${index + 1}`}
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  numberOfLines={3}
-                />
-                {instructions.length > 1 && (
-                  <TouchableOpacity onPress={() => removeInstruction(index)} style={styles.removeButton}>
-                    <FontAwesome name="trash" size={16} color={colors.error} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
+            {(() => {
+              let stepNum = 0;
+              return instructions.map((instruction, index) => {
+                const isHeader = isRecipeSectionHeader(instruction);
+                if (!isHeader) stepNum += 1;
+                const displayStep = stepNum;
+                return (
+                  <View
+                    key={index}
+                    style={[
+                      styles.instructionRow,
+                      isHeader && index > 0 ? styles.groupHeaderSpacing : null,
+                    ]}
+                  >
+                    {isHeader ? (
+                      <View style={styles.headerGutterWide} />
+                    ) : (
+                      <View style={[styles.stepNumber, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.stepNumberText}>{displayStep}</Text>
+                      </View>
+                    )}
+                    <TextInput
+                      style={[
+                        styles.instructionInput,
+                        isHeader && styles.groupHeaderInput,
+                        {
+                          backgroundColor: isHeader ? 'transparent' : colors.surface,
+                          color: colors.text,
+                          borderColor: colors.border,
+                          fontWeight: isHeader ? '700' : '400',
+                        },
+                      ]}
+                      value={instruction}
+                      onChangeText={(value) => updateInstruction(index, value)}
+                      placeholder={isHeader ? 'Section (e.g. Make the sauce)' : `Step ${displayStep}`}
+                      placeholderTextColor={colors.textSecondary}
+                      multiline
+                    />
+                    {instructions.length > 1 && (
+                      <TouchableOpacity onPress={() => removeInstruction(index)} style={styles.removeButtonCompact}>
+                        <FontAwesome name="trash" size={14} color={colors.error} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              });
+            })()}
           </View>
 
           <View style={styles.field}>
@@ -585,8 +689,79 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 8,
   },
+  /** Match RecipeDetail: bullet + compact single-line ingredient. */
+  ingredientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+    paddingLeft: 4,
+  },
+  bullet: {
+    fontSize: 16,
+    fontWeight: '700',
+    width: 14,
+  },
+  headerGutter: {
+    width: 14,
+  },
+  headerGutterWide: {
+    width: 28,
+  },
+  groupHeaderSpacing: {
+    marginTop: 12,
+  },
+  groupHeaderInput: {
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+  },
+  ingredientInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  /** Match RecipeDetail: numbered step + body text. */
+  instructionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    gap: 10,
+  },
+  stepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  stepNumberText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  instructionInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    lineHeight: 22,
+    minHeight: 44,
+    textAlignVertical: 'top',
+  },
   removeButton: {
     padding: 8,
+    marginTop: 2,
+  },
+  removeButtonCompact: {
+    padding: 6,
     marginTop: 2,
   },
   imageSection: {

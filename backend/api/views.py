@@ -1265,9 +1265,12 @@ class RecipeViewSet(viewsets.ModelViewSet):
             return Response({'error': 'URL and family are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Import recipe
-        recipe_data = import_recipe_from_url(url)
+        recipe_data, import_error = import_recipe_from_url(url)
         if not recipe_data:
-            return Response({'error': 'Failed to import recipe'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': import_error or 'Failed to import recipe'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Create recipe
         family = get_object_or_404(Family, id=family_id)
@@ -1463,7 +1466,7 @@ class RecipeImportView(APIView):
             return Response({'error': 'You are not a member of this family'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            recipe_data = import_recipe_from_url(url)
+            recipe_data, import_error = import_recipe_from_url(url)
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
@@ -1475,8 +1478,12 @@ class RecipeImportView(APIView):
 
         if not recipe_data:
             return Response({
-                'error': 'Failed to import recipe. The URL may not contain a valid recipe, or the site is not supported.',
-                'suggestion': 'Try a recipe from sites like AllRecipes, Food Network, BBC Good Food, or any site with Schema.org recipe markup.'
+                'error': import_error or (
+                    'Failed to import recipe. The URL may not contain a valid recipe, or the site is not supported.'
+                ),
+                'suggestion': (
+                    'Some sites block automated import. Retry once, or try a different recipe URL.'
+                ),
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if not recipe_data.get('title'):
@@ -1492,7 +1499,9 @@ class RecipeImportView(APIView):
             return Response({
                 'error': 'Failed to import recipe: Could not extract ingredients or instructions from the URL',
                 'detail': 'The recipe may not be in a supported format, or the website structure is not recognized.',
-                'suggestion': 'Try a recipe from sites like AllRecipes, Food Network, BBC Good Food, or any site with Schema.org recipe markup.'
+                'suggestion': (
+                    'Some sites block automated import. Retry once, or try a different recipe URL.'
+                ),
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if not ingredients:

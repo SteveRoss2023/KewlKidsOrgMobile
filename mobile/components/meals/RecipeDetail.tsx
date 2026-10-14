@@ -15,6 +15,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import MealsService, { Recipe } from '../../services/mealsService';
 import { resolveRecipeImageUrl } from '../../utils/recipeImageUrl';
+import { isRecipeSectionHeader } from '../../utils/parseRecipeText';
 import { List } from '../../types/lists';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 
@@ -176,26 +177,64 @@ export default function RecipeDetail({
           {recipe.ingredients && recipe.ingredients.length > 0 && (
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Ingredients</Text>
-              {recipe.ingredients.map((ingredient, index) => (
-                <View key={index} style={styles.listItem}>
-                  <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                  <Text style={[styles.listItemText, { color: colors.text }]}>{ingredient}</Text>
-                </View>
-              ))}
+              {recipe.ingredients.map((ingredient, index) => {
+                const isHeader = isRecipeSectionHeader(ingredient);
+                if (isHeader) {
+                  return (
+                    <Text
+                      key={index}
+                      style={[
+                        styles.groupHeader,
+                        index > 0 && styles.groupHeaderSpacing,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {ingredient}
+                    </Text>
+                  );
+                }
+                return (
+                  <View key={index} style={styles.listItem}>
+                    <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
+                    <Text style={[styles.listItemText, { color: colors.text }]}>{ingredient}</Text>
+                  </View>
+                );
+              })}
             </View>
           )}
 
           {recipe.instructions && recipe.instructions.length > 0 && (
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Instructions</Text>
-              {recipe.instructions.map((instruction, index) => (
-                <View key={index} style={styles.instructionItem}>
-                  <View style={[styles.stepNumber, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.stepNumberText}>{index + 1}</Text>
-                  </View>
-                  <Text style={[styles.instructionText, { color: colors.text }]}>{instruction}</Text>
-                </View>
-              ))}
+              {(() => {
+                let stepNum = 0;
+                return recipe.instructions.map((instruction, index) => {
+                  const isHeader = isRecipeSectionHeader(instruction);
+                  if (isHeader) {
+                    return (
+                      <Text
+                        key={index}
+                        style={[
+                          styles.groupHeader,
+                          index > 0 && styles.groupHeaderSpacing,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {instruction}
+                      </Text>
+                    );
+                  }
+                  stepNum += 1;
+                  return (
+                    <View key={index} style={styles.instructionItem}>
+                      <View style={[styles.stepNumber, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.stepNumberText}>{stepNum}</Text>
+                      </View>
+                      <Text style={[styles.instructionText, { color: colors.text }]}>{instruction}</Text>
+                    </View>
+                  );
+                });
+              })()}
             </View>
           )}
 
@@ -331,6 +370,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 12,
+  },
+  groupHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+    paddingLeft: 4,
+  },
+  groupHeaderSpacing: {
+    marginTop: 14,
   },
   listItem: {
     flexDirection: 'row',
