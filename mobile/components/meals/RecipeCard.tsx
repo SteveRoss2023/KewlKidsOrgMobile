@@ -41,35 +41,51 @@ export default function RecipeCard({ recipe, shoppingLists, cardWidth, onPress, 
   const [addedToList, setAddedToList] = useState<{ id: number; name: string } | null>(null);
   const [imageError, setImageError] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageRetryCount, setImageRetryCount] = useState(0);
+
+  // Keep image URL updates separate from shopping-list checks. Re-running the
+  // image effect when lists load remounts <Image> mid-fetch and can fire a
+  // spurious onError — then the card stuck on the placeholder while detail
+  // (fresh mount, quiet network) still loads the same URL.
+  useEffect(() => {
+    setImageError(false);
+    setImageRetryCount(0);
+    setImageUri(resolveRecipeImageUrl(recipe.image_url));
+  }, [recipe.id, recipe.image_url]);
 
   useEffect(() => {
-    checkRecipeInLists();
-    // Reset image error when recipe changes
-    setImageError(false);
-    // Set image URI when recipe changes
-    setImageUri(resolveRecipeImageUrl(recipe.image_url));
-  }, [recipe, shoppingLists]);
+    let cancelled = false;
 
-  const checkRecipeInLists = async () => {
-    if (shoppingLists.length === 0) return;
-
-    for (const list of shoppingLists) {
-      try {
-        const items = await ListService.getListItems(list.id);
-        const hasRecipeItems = items.some(item =>
-          item.notes && item.notes.includes(`From recipe: ${recipe.title}`)
-        );
-
-        if (hasRecipeItems) {
-          setAddedToList({ id: list.id, name: list.name });
-          return;
-        }
-      } catch (err) {
-        console.error(`Error checking items for list ${list.id}:`, err);
+    const checkRecipeInLists = async () => {
+      if (shoppingLists.length === 0) {
+        if (!cancelled) setAddedToList(null);
+        return;
       }
-    }
-    setAddedToList(null);
-  };
+
+      for (const list of shoppingLists) {
+        try {
+          const items = await ListService.getListItems(list.id);
+          if (cancelled) return;
+          const hasRecipeItems = items.some(
+            (item) => item.notes && item.notes.includes(`From recipe: ${recipe.title}`)
+          );
+
+          if (hasRecipeItems) {
+            if (!cancelled) setAddedToList({ id: list.id, name: list.name });
+            return;
+          }
+        } catch (err) {
+          console.error(`Error checking items for list ${list.id}:`, err);
+        }
+      }
+      if (!cancelled) setAddedToList(null);
+    };
+
+    checkRecipeInLists();
+    return () => {
+      cancelled = true;
+    };
+  }, [recipe.id, recipe.title, shoppingLists]);
 
   const handleAddToList = async () => {
     if (!selectedListId) return;
@@ -102,18 +118,20 @@ export default function RecipeCard({ recipe, shoppingLists, cardWidth, onPress, 
             style={StyleSheet.absoluteFillObject}
             resizeMode="cover"
             onError={(error) => {
-            const errorMessage = error.nativeEvent?.error || 'Unknown error';
-            console.log('Image failed to load:', imageUri);
-            console.log('Error details:', errorMessage);
-            console.log('Platform:', Platform.OS);
-            setImageError(true);
-          }}
-          onLoadStart={() => {
-            // Reset error state when starting to load a new image
-            if (imageError) {
-              setImageError(false);
-            }
-          }}
+              const errorMessage = error.nativeEvent?.error || 'Unknown error';
+              console.log('Image failed to load:', imageUri);
+              console.log('Error details:', errorMessage);
+              console.log('Platform:', Platform.OS);
+              // One cache-bust retry before giving up (common when grid loads
+              // many images at once and a request is cancelled/aborted).
+              if (imageRetryCount < 1 && imageUri) {
+                setImageRetryCount((n) => n + 1);
+                const sep = imageUri.includes('?') ? '&' : '?';
+                setImageUri(`${imageUri}${sep}_retry=${Date.now()}`);
+                return;
+              }
+              setImageError(true);
+            }}
           />
         </View>
       ) : (
