@@ -26,6 +26,10 @@ import {
   onMoneyChange,
   parseMoneyDisplay,
 } from '../../utils/moneyInput';
+import {
+  mergeReceiptNotes,
+  receiptLanguageFxSuffix,
+} from '../../utils/receiptParseNote';
 import LineItemsEditor, {
   DraftLineItem,
   draftLinesFromExpenseItems,
@@ -131,7 +135,9 @@ export default function ExpenseForm({
       setLines((prev) => {
         const hasNamed = prev.some((l) => l.name.trim());
         if (hasNamed) return prev;
-        return draftLinesFromExpenseItems(expense.line_items);
+        return draftLinesFromExpenseItems(expense.line_items, {
+          originalCurrency: expense.original_currency,
+        });
       });
       if (expense.receipt_url) {
         setReceipt({
@@ -333,7 +339,9 @@ export default function ExpenseForm({
           : parseMoneyDisplay(amount);
       const nextDate = parsed?.expense_date || expenseDate || new Date().toISOString().split('T')[0];
       const draft = parsed?.line_items?.length
-        ? draftLinesFromExpenseItems(parsed.line_items)
+        ? draftLinesFromExpenseItems(parsed.line_items, {
+            originalCurrency: parsed.currency,
+          })
         : lines.filter((l) => l.name.trim());
 
       setDescription(nextDescription);
@@ -347,6 +355,11 @@ export default function ExpenseForm({
       if (draft.length) {
         setLines(draft);
       }
+      let nextNotes = notes;
+      if (parsed && !parsed.error && parsed.ocr_available !== false) {
+        nextNotes = mergeReceiptNotes(notes, parsed);
+        setNotes(nextNotes);
+      }
 
       let ocrNote = 'Receipt uploaded.';
       if (parsed?.error || parsed?.ocr_available === false) {
@@ -355,12 +368,13 @@ export default function ExpenseForm({
           'Receipt uploaded, but OCR is not available. Fill in details and save.';
       } else if (parsed) {
         const n = draft.length;
+        const fx = receiptLanguageFxSuffix(parsed);
         ocrNote =
           n > 0 && nextAmount != null
-            ? `Receipt read. Amount ${formatMoneyDisplay(nextAmount)}, ${n} line item${n === 1 ? '' : 's'} — review before closing.`
+            ? `Receipt read. Amount ${formatMoneyDisplay(nextAmount)}, ${n} line item${n === 1 ? '' : 's'} — review before closing.${fx}`
             : nextAmount != null
-              ? `Receipt read. Amount set to ${formatMoneyDisplay(nextAmount)} — review before closing.`
-              : 'Receipt uploaded. Could not read the total — enter an amount and save.';
+              ? `Receipt read. Amount set to ${formatMoneyDisplay(nextAmount)} — review before closing.${fx}`
+              : `Receipt uploaded. Could not read the total — enter an amount and save.${fx}`;
       }
 
       if (!categoryForSave) {
@@ -373,6 +387,17 @@ export default function ExpenseForm({
           Alert.alert('Receipt', ocrNote);
           return;
         }
+        const fxPayload =
+          parsed?.currency &&
+          parsed.currency !== 'CAD' &&
+          parsed.original_total != null
+            ? {
+                original_currency: parsed.currency,
+                original_amount: parsed.original_total,
+                fx_rate: parsed.fx_rate ?? undefined,
+                fx_as_of: parsed.fx_as_of ?? undefined,
+              }
+            : {};
         const saved = await Promise.resolve(
           onSubmit(
             {
@@ -382,9 +407,10 @@ export default function ExpenseForm({
               description: nextDescription,
               expense_date: nextDate,
               payment_method: paymentMethod,
-              notes: notes.trim() || undefined,
+              notes: nextNotes.trim() || undefined,
               tags: selectedTags.length > 0 ? selectedTags : undefined,
               line_items_input: toLineItemsInput(draft),
+              ...fxPayload,
             },
             { stayOpen: true }
           )
@@ -400,12 +426,25 @@ export default function ExpenseForm({
         }
       } else {
         try {
+          const fxUpdate =
+            parsed?.currency &&
+            parsed.currency !== 'CAD' &&
+            parsed.original_total != null
+              ? {
+                  original_currency: parsed.currency,
+                  original_amount: parsed.original_total,
+                  fx_rate: parsed.fx_rate ?? undefined,
+                  fx_as_of: parsed.fx_as_of ?? undefined,
+                }
+              : {};
           await expenseService.updateExpense(existingId, {
             description: nextDescription,
             ...(nextAmount != null && nextAmount > 0 ? { amount: nextAmount } : {}),
             expense_date: nextDate,
             ...(categoryForSave ? { category: categoryForSave } : {}),
+            ...(nextNotes.trim() ? { notes: nextNotes.trim() } : {}),
             line_items_input: toLineItemsInput(draft),
+            ...fxUpdate,
           });
         } catch {
           // Form still has OCR values locally

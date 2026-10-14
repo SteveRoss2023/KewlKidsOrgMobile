@@ -169,7 +169,7 @@ class Expense(models.Model):
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='expenses')
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name='created_expenses')
     category = models.ForeignKey(ExpenseCategory, on_delete=models.CASCADE, related_name='expenses')
-    amount = EncryptedCharField(max_length=20)  # Store as string, convert to Decimal when needed
+    amount = EncryptedCharField(max_length=20)  # CAD (or family currency) after conversion
     description = EncryptedCharField(max_length=200)
     notes = EncryptedTextField(blank=True, null=True)
     expense_date = models.DateField()
@@ -178,6 +178,11 @@ class Expense(models.Model):
     is_recurring = models.BooleanField(default=False)
     is_paid = models.BooleanField(default=True)
     recurring_expense = models.ForeignKey(RecurringExpense, on_delete=models.CASCADE, null=True, blank=True, related_name='generated_expenses')
+    # Original foreign-currency receipt amounts (amount above is CAD after conversion)
+    original_currency = models.CharField(max_length=3, blank=True, null=True)
+    original_amount = EncryptedCharField(max_length=20, blank=True, null=True)
+    fx_rate = models.DecimalField(max_digits=14, decimal_places=6, blank=True, null=True)
+    fx_as_of = models.DateField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -197,9 +202,14 @@ class ExpenseLineItem(models.Model):
     """Manual (or future OCR) line item on an expense."""
     expense = models.ForeignKey(Expense, on_delete=models.CASCADE, related_name='line_items')
     name = EncryptedCharField(max_length=200)
+    # Printed name before English translation (when different from name)
+    original_name = EncryptedCharField(max_length=200, blank=True, null=True)
     quantity = EncryptedCharField(max_length=20, blank=True, null=True)
-    unit_price = EncryptedCharField(max_length=20, blank=True, null=True)
+    unit_price = EncryptedCharField(max_length=20, blank=True, null=True)  # CAD after conversion
     line_total = EncryptedCharField(max_length=20, blank=True, null=True)
+    # Pre-conversion prices in expense.original_currency
+    original_unit_price = EncryptedCharField(max_length=20, blank=True, null=True)
+    original_line_total = EncryptedCharField(max_length=20, blank=True, null=True)
     order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

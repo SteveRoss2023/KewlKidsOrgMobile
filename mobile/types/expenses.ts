@@ -42,6 +42,11 @@ export interface Expense {
   payment_method: PaymentMethod;
   tags: number[];
   tag_names: string[];
+  /** ISO currency of the receipt before CAD conversion. */
+  original_currency?: string | null;
+  original_amount?: number | null;
+  fx_rate?: number | null;
+  fx_as_of?: string | null;
   receipt_url: string | null;
   receipt_id?: number | null;
   is_recurring: boolean;
@@ -56,9 +61,14 @@ export interface ExpenseLineItem {
   id?: number;
   expense?: number;
   name: string;
+  /** Printed name before English translation. */
+  original_name?: string | null;
   quantity: number | null;
   unit_price: number | null;
   line_total: number | null;
+  /** Pre-conversion prices in expense.original_currency. */
+  original_unit_price?: number | null;
+  original_line_total?: number | null;
   order: number;
 }
 
@@ -68,9 +78,12 @@ export interface ReceiptParseResult {
   total: number | null;
   line_items?: Array<{
     name: string;
+    original_name?: string | null;
     quantity?: number | null;
     unit_price?: number | null;
     line_total?: number | null;
+    original_unit_price?: number | null;
+    original_line_total?: number | null;
     order?: number;
   }>;
   raw_text: string;
@@ -86,6 +99,15 @@ export interface ReceiptParseResult {
   ocr_available: boolean;
   engine?: 'gemini' | 'tesseract' | string;
   error?: string;
+  /** Detected language of printed receipt text (Gemini). */
+  source_language?: string | null;
+  /** Original ISO currency before CAD conversion. */
+  currency?: string | null;
+  original_total?: number | null;
+  fx_rate?: number | null;
+  fx_as_of?: string | null;
+  converted_to?: string | null;
+  fx_error?: string | null;
 }
 
 export interface Budget {
@@ -156,11 +178,18 @@ export interface CreateExpenseData {
   is_recurring?: boolean;
   recurring_expense?: number | null;
   is_paid?: boolean;
+  original_currency?: string | null;
+  original_amount?: number | null;
+  fx_rate?: number | null;
+  fx_as_of?: string | null;
   line_items_input?: Array<{
     name: string;
+    original_name?: string | null;
     quantity?: number | null;
     unit_price?: number | null;
     line_total?: number | null;
+    original_unit_price?: number | null;
+    original_line_total?: number | null;
     order?: number;
   }>;
 }
@@ -174,11 +203,18 @@ export interface UpdateExpenseData {
   payment_method?: PaymentMethod;
   tags?: number[];
   is_paid?: boolean;
+  original_currency?: string | null;
+  original_amount?: number | null;
+  fx_rate?: number | null;
+  fx_as_of?: string | null;
   line_items_input?: Array<{
     name: string;
+    original_name?: string | null;
     quantity?: number | null;
     unit_price?: number | null;
     line_total?: number | null;
+    original_unit_price?: number | null;
+    original_line_total?: number | null;
     order?: number;
   }>;
 }

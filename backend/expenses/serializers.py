@@ -92,6 +92,8 @@ class ExpenseLineItemSerializer(serializers.ModelSerializer):
     quantity = serializers.SerializerMethodField()
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
+    original_unit_price = serializers.SerializerMethodField()
+    original_line_total = serializers.SerializerMethodField()
     quantity_input = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     unit_price_input = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     line_total_input = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
@@ -104,6 +106,12 @@ class ExpenseLineItemSerializer(serializers.ModelSerializer):
 
     def get_line_total(self, obj):
         return _dec_money(obj.line_total)
+
+    def get_original_unit_price(self, obj):
+        return _dec_money(obj.original_unit_price)
+
+    def get_original_line_total(self, obj):
+        return _dec_money(obj.original_line_total)
 
     def to_internal_value(self, data):
         data = data.copy() if hasattr(data, 'copy') else dict(data)
@@ -139,11 +147,17 @@ class ExpenseLineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExpenseLineItem
         fields = [
-            'id', 'expense', 'name', 'quantity', 'unit_price', 'line_total',
+            'id', 'expense', 'name', 'original_name',
+            'quantity', 'unit_price', 'line_total',
+            'original_unit_price', 'original_line_total',
             'quantity_input', 'unit_price_input', 'line_total_input',
             'order', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'quantity', 'unit_price', 'line_total']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at',
+            'quantity', 'unit_price', 'line_total',
+            'original_unit_price', 'original_line_total',
+        ]
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
@@ -156,6 +170,10 @@ class ExpenseSerializer(serializers.ModelSerializer):
     # Amount - use CharField for writing (maps to EncryptedCharField), SerializerMethodField for reading
     amount = serializers.SerializerMethodField()
     amount_input = serializers.CharField(write_only=True, required=False, source='amount')
+    original_amount = serializers.SerializerMethodField()
+    original_amount_input = serializers.CharField(
+        write_only=True, required=False, allow_null=True, source='original_amount'
+    )
     line_items = ExpenseLineItemSerializer(many=True, required=False, read_only=True)
     line_items_input = serializers.ListField(
         child=serializers.DictField(),
@@ -171,6 +189,14 @@ class ExpenseSerializer(serializers.ModelSerializer):
             except (ValueError, InvalidOperation):
                 return 0.0
         return 0.0
+
+    def get_original_amount(self, obj):
+        if obj.original_amount:
+            try:
+                return float(Decimal(str(obj.original_amount)))
+            except (ValueError, InvalidOperation):
+                return None
+        return None
 
     def get_category_name(self, obj):
         return obj.category.name if obj.category else None
@@ -210,6 +236,21 @@ class ExpenseSerializer(serializers.ModelSerializer):
                 data.pop('amount', None)
             except (ValueError, InvalidOperation):
                 raise serializers.ValidationError({'amount': 'Invalid amount format'})
+
+        orig_value = data.get('original_amount') or data.get('original_amount_input')
+        if orig_value is not None and orig_value != '':
+            try:
+                if isinstance(orig_value, (int, float)):
+                    data['original_amount_input'] = str(
+                        Decimal(str(orig_value)).quantize(Decimal('0.01'))
+                    )
+                elif isinstance(orig_value, str):
+                    data['original_amount_input'] = str(
+                        Decimal(orig_value).quantize(Decimal('0.01'))
+                    )
+                data.pop('original_amount', None)
+            except (ValueError, InvalidOperation):
+                raise serializers.ValidationError({'original_amount': 'Invalid amount format'})
         return super().to_internal_value(data)
 
     def _sync_line_items(self, expense, items_data):
@@ -223,12 +264,20 @@ class ExpenseSerializer(serializers.ModelSerializer):
             qty = raw.get('quantity')
             unit = raw.get('unit_price')
             total = raw.get('line_total')
+            orig_name = (raw.get('original_name') or '').strip() or None
+            if orig_name and orig_name.casefold() == name.casefold():
+                orig_name = None
+            orig_unit = raw.get('original_unit_price')
+            orig_total = raw.get('original_line_total')
             ExpenseLineItem.objects.create(
                 expense=expense,
                 name=name[:200],
+                original_name=orig_name[:200] if orig_name else None,
                 quantity=_enc_money_str(qty) if qty not in (None, '') else None,
                 unit_price=_enc_money_str(unit) if unit not in (None, '') else None,
                 line_total=_enc_money_str(total) if total not in (None, '') else None,
+                original_unit_price=_enc_money_str(orig_unit) if orig_unit not in (None, '') else None,
+                original_line_total=_enc_money_str(orig_total) if orig_total not in (None, '') else None,
                 order=raw.get('order', idx),
             )
 
@@ -258,12 +307,13 @@ class ExpenseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'family', 'created_by', 'created_by_username', 'category', 'category_name',
             'amount', 'amount_input', 'description', 'notes', 'expense_date', 'payment_method', 'tags', 'tag_names',
+            'original_currency', 'original_amount', 'original_amount_input', 'fx_rate', 'fx_as_of',
             'receipt_url', 'receipt_id', 'is_recurring', 'is_paid', 'recurring_expense', 'line_items', 'line_items_input',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'category_name', 'tag_names', 'receipt_url', 'receipt_id',
-            'created_by_username', 'amount', 'line_items',
+            'created_by_username', 'amount', 'original_amount', 'line_items',
         ]
 
 

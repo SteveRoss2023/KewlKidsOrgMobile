@@ -24,6 +24,11 @@ import {
   onMoneyChange,
   parseMoneyDisplay,
 } from '../../utils/moneyInput';
+import {
+  mergeReceiptNotes,
+  receiptConversionSummary,
+  receiptLanguageFxSuffix,
+} from '../../utils/receiptParseNote';
 import LineItemsEditor, {
   DraftLineItem,
   draftLinesFromExpenseItems,
@@ -159,27 +164,34 @@ export default function ReceiptScanWizard({
               'Tesseract OCR is not available on the server. Enter details manually; the image is still attached.'
           );
         } else if (parsed.confidence === 'low') {
-          setOcrNote('Could not read the receipt clearly — please confirm or fill in the fields.');
+          setOcrNote(
+            `Could not read the receipt clearly — please confirm or fill in the fields.${receiptLanguageFxSuffix(parsed)}`
+          );
         } else {
           const n = parsed.line_items?.length || 0;
           const engine =
-            (parsed as any).engine === 'gemini'
+            parsed.engine === 'gemini'
               ? 'Gemini'
-              : (parsed as any).engine === 'tesseract'
+              : parsed.engine === 'tesseract'
                 ? 'Tesseract'
                 : 'OCR';
-          setOcrNote(
+          const base =
             n > 0
               ? `${engine}: ${parsed.confidence} confidence, ${n} line item${n === 1 ? '' : 's'} — review before saving.`
-              : `${engine} confidence: ${parsed.confidence}. Review and edit before saving.`
-          );
+              : `${engine} confidence: ${parsed.confidence}. Review and edit before saving.`;
+          setOcrNote(`${base}${receiptLanguageFxSuffix(parsed)}`);
         }
         if (parsed.merchant) setDescription(parsed.merchant);
         if (parsed.total != null) setAmount(formatMoneyDisplay(parsed.total));
         if (parsed.expense_date) setExpenseDate(parsed.expense_date);
         if (parsed.line_items?.length) {
-          setLines(draftLinesFromExpenseItems(parsed.line_items));
+          setLines(
+            draftLinesFromExpenseItems(parsed.line_items, {
+              originalCurrency: parsed.currency,
+            })
+          );
         }
+        setNotes((prev) => mergeReceiptNotes(prev, parsed));
       }
 
       if (!categoryId && defaultCategoryId) setCategoryId(defaultCategoryId);
@@ -219,6 +231,18 @@ export default function ReceiptScanWizard({
     try {
       const line_items_input = toLineItemsInput(lines);
 
+      const fxPayload =
+        parseInfo?.currency &&
+        parseInfo.currency !== 'CAD' &&
+        parseInfo.original_total != null
+          ? {
+              original_currency: parseInfo.currency,
+              original_amount: parseInfo.original_total,
+              fx_rate: parseInfo.fx_rate ?? undefined,
+              fx_as_of: parseInfo.fx_as_of ?? undefined,
+            }
+          : {};
+
       const expense = await expenseService.createExpense({
         family: familyId,
         category: categoryId,
@@ -228,6 +252,7 @@ export default function ReceiptScanWizard({
         expense_date: expenseDate,
         payment_method: paymentMethod,
         line_items_input,
+        ...fxPayload,
       });
 
       if (receipt?.id) {
@@ -346,7 +371,7 @@ export default function ReceiptScanWizard({
                   editable={!saving}
                 />
 
-                <Text style={[styles.label, { color: colors.text }]}>Total *</Text>
+                <Text style={[styles.label, { color: colors.text }]}>Total (CAD) *</Text>
                 <TextInput
                   style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
                   value={amount}
@@ -356,6 +381,17 @@ export default function ReceiptScanWizard({
                   placeholderTextColor={colors.textSecondary}
                   editable={!saving}
                 />
+                {!!receiptConversionSummary(parseInfo) && (
+                  <Text style={[styles.fxHint, { color: colors.textSecondary }]}>
+                    {receiptConversionSummary(parseInfo)}
+                  </Text>
+                )}
+                {!!parseInfo?.source_language &&
+                  !/^english$/i.test(parseInfo.source_language.trim()) && (
+                    <Text style={[styles.fxHint, { color: colors.textSecondary }]}>
+                      Receipt language: {parseInfo.source_language} (names translated to English)
+                    </Text>
+                  )}
 
                 <Text style={[styles.label, { color: colors.text }]}>Category *</Text>
                 <ThemeAwarePicker
@@ -501,6 +537,12 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     marginBottom: 8,
+  },
+  fxHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -2,
+    marginBottom: 4,
   },
   label: { fontSize: 14, fontWeight: '600', marginTop: 8, marginBottom: 6 },
   input: {

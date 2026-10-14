@@ -26,9 +26,12 @@ Extract the purchase details and return ONLY valid JSON (no markdown) with this 
   "total": number or null,
   "subtotal": number or null,
   "tax": number or null,
+  "source_language": "English name of the receipt language or null",
+  "currency": "ISO 4217 code like CAD EUR USD THB or null",
   "line_items": [
     {
-      "name": "product name",
+      "name": "product name in English",
+      "original_name": "product name as printed on the receipt or null",
       "quantity": number or null,
       "unit_price": number or null,
       "line_total": number
@@ -39,8 +42,12 @@ Extract the purchase details and return ONLY valid JSON (no markdown) with this 
 Rules:
 - The receipt may be in any language.
 - Return merchant and each line_items[].name in English. Translate when the receipt text is not English.
+- original_name: exact product text as printed on the receipt. Set null when it is already English and identical to name.
 - Keep well-known brand names as commonly written (e.g. Coca-Cola) when a natural English form is unclear.
 - Do not invent items; only extract what appears on the receipt, translated as needed.
+- source_language: primary language of printed text on the receipt (e.g. "Thai", "French", "English").
+- currency: ISO 4217 from symbols/labels/country context. If "$" is ambiguous, prefer CAD for Canada, USD for US, AUD for Australia, etc.
+- Do NOT convert currencies or invent exchange rates; return amounts in the receipt's original currency.
 - Include every product/fee line (plastic bag, recycle fee, etc.).
 - Exclude payment method lines, change, rewards marketing, survey text.
 - Prefer BALANCE DUE / amount due for total (not "you could have saved").
@@ -110,6 +117,13 @@ def _normalize_gemini_payload(data: Dict[str, Any]) -> Dict[str, Any]:
             name = (raw.get('name') or '').strip()
             if len(name) < 2:
                 continue
+            original_name = raw.get('original_name')
+            if isinstance(original_name, str):
+                original_name = original_name.strip()[:200] or None
+            else:
+                original_name = None
+            if original_name and original_name.casefold() == name.casefold():
+                original_name = None
             qty = raw.get('quantity')
             try:
                 quantity = float(qty) if qty not in (None, '') else 1.0
@@ -123,15 +137,30 @@ def _normalize_gemini_payload(data: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             if unit_price is None:
                 unit_price = line_total if quantity == 1 else round(line_total / quantity, 2)
-            line_items.append(
-                {
-                    'name': name[:200],
-                    'quantity': quantity,
-                    'unit_price': unit_price,
-                    'line_total': line_total,
-                    'order': idx,
-                }
-            )
+            item: Dict[str, Any] = {
+                'name': name[:200],
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'line_total': line_total,
+                'order': idx,
+            }
+            if original_name:
+                item['original_name'] = original_name
+            line_items.append(item)
+
+    source_language = data.get('source_language')
+    if isinstance(source_language, str):
+        source_language = source_language.strip()[:80] or None
+    else:
+        source_language = None
+
+    currency = data.get('currency')
+    if isinstance(currency, str):
+        currency = re.sub(r'[^A-Za-z]', '', currency.strip().upper())[:3] or None
+        if currency and len(currency) != 3:
+            currency = None
+    else:
+        currency = None
 
     found = {
         'merchant': bool(merchant),
@@ -150,6 +179,8 @@ def _normalize_gemini_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         'expense_date': expense_date,
         'total': total,
         'line_items': line_items,
+        'source_language': source_language,
+        'currency': currency,
         'raw_text': json.dumps(data, ensure_ascii=False)[:8000],
         'found': found,
         'confidence': confidence,

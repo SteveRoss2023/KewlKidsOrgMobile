@@ -370,12 +370,14 @@ def _parse_line_items(lines: list[str]) -> List[Dict[str, Any]]:
 def parse_receipt_image(image: Image.Image) -> Dict[str, Any]:
     """
     Prefer Gemini vision when GEMINI_API_KEY is set; fall back to Tesseract.
+    Gemini results get language/currency metadata and optional CAD conversion.
     """
+    from .receipt_fx import apply_cad_conversion
     from .receipt_gemini import try_parse_receipt_gemini
 
     gemini = try_parse_receipt_gemini(image)
     if gemini is not None:
-        return gemini
+        return apply_cad_conversion(gemini)
 
     raw_text = _ocr_text(image)
     lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
