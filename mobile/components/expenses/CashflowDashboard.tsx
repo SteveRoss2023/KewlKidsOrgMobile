@@ -496,7 +496,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     >
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly cashflow</Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Tap a month · one bar: spent + unpaid + income left
+        Hover or tap a month · spent + unpaid + income
       </Text>
       <MonthCashflowBars
         points={barPoints}
@@ -509,6 +509,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         textColor={colors.text}
         mutedColor={colors.textSecondary}
         selectedBorderColor={colors.primary}
+        formatAmount={displayMoney}
       />
     </View>
   );

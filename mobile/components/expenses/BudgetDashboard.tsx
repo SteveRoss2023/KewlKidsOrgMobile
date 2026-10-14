@@ -562,7 +562,7 @@ export default function BudgetDashboard({
     >
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly budgets</Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Tap a month · dots highlight near / over limit
+        Hover or tap a month · dots highlight near / over limit
       </Text>
       <MonthBudgetBars
         points={barPoints}
@@ -575,6 +575,7 @@ export default function BudgetDashboard({
         textColor={colors.text}
         mutedColor={colors.textSecondary}
         selectedBorderColor={colors.primary}
+        formatAmount={displayMoney}
       />
     </View>
   );

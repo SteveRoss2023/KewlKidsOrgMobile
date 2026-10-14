@@ -90,9 +90,18 @@ function occAmount(o: IncomeOccurrence): number {
   return Number(o.actual_amount ?? o.estimated_amount ?? 0) || 0;
 }
 
-/** Open-ended streams: list/generate through end of (current calendar year + 1). */
-function openEndedPayHorizonEnd(now = new Date()): string {
-  return `${now.getFullYear() + 1}-12-31`;
+/** Open-ended streams: list/generate through Dec 31 of the selected Overview year. */
+function openEndedHorizonEnd(year: number): string {
+  return `${year}-12-31`;
+}
+
+function maxOccurrenceYear(occs: IncomeOccurrence[]): number {
+  let max = 0;
+  for (const o of occs) {
+    const y = parseInt(String(o.due_date).slice(0, 4), 10);
+    if (!Number.isNaN(y) && y > max) max = y;
+  }
+  return max;
 }
 
 /** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
@@ -119,31 +128,16 @@ export function invalidateIncomeBoardCache(familyId?: number | null) {
   incomeBoardCache.delete(familyId);
 }
 
-function openEndedPayHorizonYear(now = new Date()): number {
-  return now.getFullYear() + 1;
-}
-
-/** Payments shown for a stream: through end_date, or rolling 1y-forward if open-ended. */
+/** Payments for Streams management: all loaded pays for the stream (honor end_date). */
 function paymentsForStream(
   stream: IncomeStream,
-  allOccs: IncomeOccurrence[],
-  now = new Date()
-): { items: IncomeOccurrence[]; truncatedOpenEnded: boolean; horizonYear: number } {
-  const horizonYear = openEndedPayHorizonYear(now);
-  const horizonEnd = openEndedPayHorizonEnd(now);
+  allOccs: IncomeOccurrence[]
+): IncomeOccurrence[] {
   const all = allOccs.filter((o) => o.stream === stream.id);
   if (stream.end_date) {
-    return {
-      items: all.filter((o) => o.due_date <= stream.end_date!),
-      truncatedOpenEnded: false,
-      horizonYear,
-    };
+    return all.filter((o) => o.due_date <= stream.end_date!);
   }
-  return {
-    items: all.filter((o) => o.due_date <= horizonEnd),
-    truncatedOpenEnded: true,
-    horizonYear,
-  };
+  return all;
 }
 
 interface IncomeDashboardProps {
@@ -246,14 +240,13 @@ export default function IncomeDashboard({
 
   /**
    * Generate pays through stream end_date, or for open-ended streams through
-   * max(Overview year, current year + 1) Dec 31.
+   * the selected Overview year Dec 31.
    */
   const ensureStreamSchedules = useCallback(
     async (y: number, streamList: IncomeStream[], familyId: number) => {
       if (streamList.length === 0) return false;
       if (streamList.some((s) => s.family !== familyId)) return false;
-      const openHorizonYear = Math.max(y, new Date().getFullYear() + 1);
-      const openHorizonEnd = `${openHorizonYear}-12-31`;
+      const openHorizonEnd = openEndedHorizonEnd(y);
       const key = `${familyId}:${openHorizonEnd}:${streamList.map((s) => s.id).join(',')}`;
       if (ensuredYearRef.current === key || ensuredIncomeScheduleKeys.has(key)) {
         ensuredYearRef.current = key;
@@ -317,7 +310,7 @@ export default function IncomeDashboard({
       setError('');
       try {
         const demoEnabled = await readDemoPortfolioPref();
-        const horizonEnd = openEndedPayHorizonEnd();
+        const horizonEnd = openEndedHorizonEnd(yearRef.current);
         // Paint from streams + payments first; schedule fill runs after (was blocking).
         const [streamListRaw, occListRaw] = await Promise.all([
           moneyService.getStreams(familyId),
@@ -355,8 +348,9 @@ export default function IncomeDashboard({
           return;
         }
         if (createdAny) {
+          const refreshHorizon = openEndedHorizonEnd(yearRef.current);
           const refreshed = forFamily(
-            await moneyService.getOccurrences(familyId, { end_date: horizonEnd }),
+            await moneyService.getOccurrences(familyId, { end_date: refreshHorizon }),
             familyId
           );
           if (
@@ -450,17 +444,22 @@ export default function IncomeDashboard({
     });
   }, [selectedFamily, dataFamilyId, year, boardTab, selectedMonthIndex]);
 
-  // When Overview year moves past the prior ensure horizon, fill pays (no full reload).
+  const occurrencesRef = useRef(occurrences);
+  occurrencesRef.current = occurrences;
+
+  // When Overview year moves past loaded pays, generate + fetch through that year.
   useEffect(() => {
     if (!selectedFamily || dataFamilyId !== selectedFamily.id) return;
     if (streams.length === 0) return;
     const familyId = selectedFamily.id;
-    const horizonEnd = `${Math.max(year, new Date().getFullYear() + 1)}-12-31`;
     let cancelled = false;
     void (async () => {
+      const localMax = maxOccurrenceYear(occurrencesRef.current);
       const createdAny = await ensureStreamSchedules(year, streams, familyId);
-      if (!createdAny || cancelled) return;
-      if (selectedFamilyIdRef.current !== familyId) return;
+      if (cancelled || selectedFamilyIdRef.current !== familyId) return;
+      // Refetch when new pays were created, or selected year is beyond what we have loaded.
+      if (!createdAny && year <= localMax) return;
+      const horizonEnd = openEndedHorizonEnd(Math.max(year, localMax));
       try {
         const refreshed = forFamily(
           await moneyService.getOccurrences(familyId, { end_date: horizonEnd }),
@@ -644,35 +643,35 @@ export default function IncomeDashboard({
     );
   }
 
-  const renderOverview = () => {
-    const yearNav = (
-      <View style={styles.yearNav}>
+  const yearNav = (
+    <View style={styles.yearNav}>
+      <TouchableOpacity
+        style={styles.navBtn}
+        onPress={() => setYear((y) => y - 1)}
+        accessibilityLabel="Previous year"
+      >
+        <FontAwesome name="chevron-left" size={16} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={[styles.yearLabel, { color: colors.text }]}>{year}</Text>
+      <TouchableOpacity
+        style={styles.navBtn}
+        onPress={() => setYear((y) => y + 1)}
+        accessibilityLabel="Next year"
+      >
+        <FontAwesome name="chevron-right" size={16} color={colors.text} />
+      </TouchableOpacity>
+      {year !== now.getFullYear() ? (
         <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => setYear((y) => y - 1)}
-          accessibilityLabel="Previous year"
+          style={[styles.todayBtn, { borderColor: colors.border }]}
+          onPress={() => setYear(now.getFullYear())}
         >
-          <FontAwesome name="chevron-left" size={16} color={colors.text} />
+          <Text style={[styles.todayBtnText, { color: colors.primary }]}>This year</Text>
         </TouchableOpacity>
-        <Text style={[styles.yearLabel, { color: colors.text }]}>{year}</Text>
-        <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => setYear((y) => y + 1)}
-          accessibilityLabel="Next year"
-        >
-          <FontAwesome name="chevron-right" size={16} color={colors.text} />
-        </TouchableOpacity>
-        {year !== now.getFullYear() ? (
-          <TouchableOpacity
-            style={[styles.todayBtn, { borderColor: colors.border }]}
-            onPress={() => setYear(now.getFullYear())}
-          >
-            <Text style={[styles.todayBtnText, { color: colors.primary }]}>This year</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    );
+      ) : null}
+    </View>
+  );
 
+  const renderOverview = () => {
     if (streams.length === 0) {
       return (
         <ScrollView
@@ -798,7 +797,7 @@ export default function IncomeDashboard({
       >
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly income</Text>
         <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-          Tap a month to see payments
+          Hover or tap a month to see values
         </Text>
         <MonthIncomeBars
           points={barPoints}
@@ -809,6 +808,7 @@ export default function IncomeDashboard({
           textColor={colors.text}
           mutedColor={colors.textSecondary}
           selectedBorderColor={colors.primary}
+          formatAmount={displayMoney}
         />
       </View>
     );
@@ -964,8 +964,7 @@ export default function IncomeDashboard({
         ) : null}
       </View>
       <Text style={[styles.sectionHint, { color: colors.textSecondary, marginTop: -6 }]}>
-        Manage paycheck and pension streams. Open-ended streams list through{' '}
-        {openEndedPayHorizonYear()} (1 year forward).
+        Manage paycheck and pension streams. Use Overview year to generate pays further out.
       </Text>
 
       <View
@@ -982,10 +981,7 @@ export default function IncomeDashboard({
           streams.map((s, index) => {
             const expanded = expandedStreamIds.includes(s.id);
             const color = streamColor(s.id);
-            const { items, truncatedOpenEnded, horizonYear } = paymentsForStream(
-              s,
-              displayOccurrences
-            );
+            const items = paymentsForStream(s, displayOccurrences);
             return (
               <View
                 key={s.id}
@@ -1069,21 +1065,6 @@ export default function IncomeDashboard({
                     </Text>
                   ) : (
                     <View style={styles.streamPays}>
-                      {truncatedOpenEnded ? (
-                        <Text
-                          style={[
-                            styles.meta,
-                            {
-                              color: colors.textSecondary,
-                              paddingHorizontal: 2,
-                              paddingBottom: 4,
-                            },
-                          ]}
-                        >
-                          Showing through {horizonYear} only (1 year forward). Edit the stream to
-                          set an end date if needed.
-                        </Text>
-                      ) : null}
                       <View
                         style={[
                           styles.streamPayHeader,
