@@ -28,6 +28,13 @@ import {
   rollupBudgetSeries,
 } from '../../utils/budgetSeries';
 import { invalidateCashflowYearCache } from './CashflowDashboard';
+import {
+  applyBillExpensesForYear,
+  ensureYearHasChanges,
+  previewBillExpensesForYear,
+} from '../../utils/ensureBillYear';
+import EnsureYearModal from './EnsureYearModal';
+import type { EnsureYearResult } from '../../types/expenses';
 
 const MONTH_NAMES = [
   'January',
@@ -109,6 +116,9 @@ export default function BudgetDashboard({
   const [paidToggleId, setPaidToggleId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
+  const ensuredYearsRef = useRef<Set<string>>(new Set());
+  const [ensurePreview, setEnsurePreview] = useState<EnsureYearResult | null>(null);
+  const [ensureApplying, setEnsureApplying] = useState(false);
   const [budgetPendingDelete, setBudgetPendingDelete] = useState<Budget | null>(null);
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
     initialCache && selectedFamily ? selectedFamily.id : null
@@ -128,9 +138,11 @@ export default function BudgetDashboard({
 
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
+    ensuredYearsRef.current.clear();
     setBudgetsByMonth({});
     setExpensesByMonth({});
     setError('');
+    setEnsurePreview(null);
     setDataFamilyId(null);
     setLoadedYear(null);
     monthInitYearRef.current = null;
@@ -164,8 +176,26 @@ export default function BudgetDashboard({
       const soft = !!opts?.soft;
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
-      const cached = budgetYearCache.get(budgetCacheKey(familyId, y));
-      if (cached) {
+      let cached = budgetYearCache.get(budgetCacheKey(familyId, y));
+
+      // Preview bill expense reconcile for this year (confirm before apply).
+      const ensureKey = `${familyId}:${y}`;
+      if (!ensuredYearsRef.current.has(ensureKey)) {
+        try {
+          const preview = await previewBillExpensesForYear(familyId, y);
+          if (generation !== fetchGenerationRef.current) return;
+          if (ensureYearHasChanges(preview)) {
+            setEnsurePreview(preview);
+          } else {
+            ensuredYearsRef.current.add(ensureKey);
+          }
+        } catch {
+          // Don't block the board if preview fails.
+          ensuredYearsRef.current.add(ensureKey);
+        }
+      }
+
+      if (cached && soft) {
         setBudgetsByMonth(cached.budgetsByMonth);
         setExpensesByMonth(cached.expensesByMonth);
         setSelectedMonthIndex(cached.selectedMonthIndex);
@@ -173,9 +203,7 @@ export default function BudgetDashboard({
         setLoadedYear(y);
         monthInitYearRef.current = y;
         setYearLoading(false);
-        // Tab return with fresh cache: do not re-fire 12 budget calls (that made quick
-        // flipping slow). Mutations clear the cache via invalidateBudgetYearCache.
-        if (soft) return;
+        return;
       } else if (!soft) {
         setYearLoading(true);
       }
@@ -769,6 +797,37 @@ export default function BudgetDashboard({
           const b = budgetPendingDelete;
           setBudgetPendingDelete(null);
           if (b && onBudgetDelete) void Promise.resolve(onBudgetDelete(b));
+        }}
+      />
+
+      <EnsureYearModal
+        visible={!!ensurePreview}
+        preview={ensurePreview}
+        applying={ensureApplying}
+        onCancel={() => {
+          if (ensurePreview && selectedFamily) {
+            ensuredYearsRef.current.add(`${selectedFamily.id}:${ensurePreview.through_year}`);
+          }
+          setEnsurePreview(null);
+        }}
+        onApply={() => {
+          void (async () => {
+            if (!selectedFamily || !ensurePreview) return;
+            const y = ensurePreview.through_year;
+            const familyId = selectedFamily.id;
+            setEnsureApplying(true);
+            try {
+              await applyBillExpensesForYear(familyId, y);
+              ensuredYearsRef.current.add(`${familyId}:${y}`);
+              setEnsurePreview(null);
+              budgetYearCache.delete(budgetCacheKey(familyId, y));
+              await loadYear(y, { soft: false });
+            } catch (err: any) {
+              setError(err.message || 'Failed to apply bill expenses for year');
+            } finally {
+              setEnsureApplying(false);
+            }
+          })();
         }}
       />
     </>

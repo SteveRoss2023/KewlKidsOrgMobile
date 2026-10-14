@@ -33,6 +33,21 @@ const FREQUENCIES: { label: string; value: RecurringFrequency }[] = [
   { label: 'Yearly', value: 'yearly' },
 ];
 
+const MONTH_OPTIONS = [
+  { label: 'January', value: '1' },
+  { label: 'February', value: '2' },
+  { label: 'March', value: '3' },
+  { label: 'April', value: '4' },
+  { label: 'May', value: '5' },
+  { label: 'June', value: '6' },
+  { label: 'July', value: '7' },
+  { label: 'August', value: '8' },
+  { label: 'September', value: '9' },
+  { label: 'October', value: '10' },
+  { label: 'November', value: '11' },
+  { label: 'December', value: '12' },
+];
+
 const PAYMENT_METHODS: { label: string; value: PaymentMethod }[] = [
   { label: 'Cash', value: 'cash' },
   { label: 'Credit Card', value: 'credit_card' },
@@ -63,6 +78,9 @@ export default function RecurringExpenseForm({
   const [nextDueDate, setNextDueDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [isSeasonal, setIsSeasonal] = useState(false);
+  const [seasonStartMonth, setSeasonStartMonth] = useState<number | null>(null);
+  const [seasonEndMonth, setSeasonEndMonth] = useState<number | null>(null);
 
   // Calculate next_due_date from start_date and frequency
   const calculateNextDueDate = (start: string, freq: RecurringFrequency): string => {
@@ -141,6 +159,9 @@ export default function RecurringExpenseForm({
       setNextDueDate(calculateNextDueDate(today, 'monthly'));
       setNotes('');
       setIsActive(true);
+      setIsSeasonal(false);
+      setSeasonStartMonth(null);
+      setSeasonEndMonth(null);
       return;
     }
 
@@ -156,6 +177,9 @@ export default function RecurringExpenseForm({
       setNextDueDate(calculateNextDueDate(recurringExpense.start_date, recurringExpense.frequency));
       setNotes(recurringExpense.notes || '');
       setIsActive(recurringExpense.is_active);
+      setIsSeasonal(!!recurringExpense.is_seasonal);
+      setSeasonStartMonth(recurringExpense.season_start_month ?? null);
+      setSeasonEndMonth(recurringExpense.season_end_month ?? null);
     } else {
       setDescription('');
       setAmount('');
@@ -168,6 +192,9 @@ export default function RecurringExpenseForm({
       setNextDueDate(calculateNextDueDate(today, 'monthly'));
       setNotes('');
       setIsActive(true);
+      setIsSeasonal(false);
+      setSeasonStartMonth(null);
+      setSeasonEndMonth(null);
     }
   }, [recurringExpense, categories, visible]);
 
@@ -219,6 +246,24 @@ export default function RecurringExpenseForm({
     const resolvedEnd =
       isActive && endTrimmed && endTrimmed < todayKey ? null : endTrimmed || null;
 
+    const seasonalOn = frequency === 'monthly' && isSeasonal;
+    if (seasonalOn && (seasonStartMonth == null || seasonEndMonth == null)) {
+      Alert.alert('Validation Error', 'Please select season start and end months');
+      return;
+    }
+
+    const seasonalPayload = seasonalOn
+      ? {
+          is_seasonal: true,
+          season_start_month: seasonStartMonth,
+          season_end_month: seasonEndMonth,
+        }
+      : {
+          is_seasonal: false,
+          season_start_month: null,
+          season_end_month: null,
+        };
+
     if (recurringExpense) {
       onSubmit({
         category: categoryId,
@@ -230,6 +275,7 @@ export default function RecurringExpenseForm({
         end_date: resolvedEnd,
         notes: notes.trim() || undefined,
         is_active: isActive,
+        ...seasonalPayload,
       });
     } else {
       onSubmit({
@@ -243,6 +289,7 @@ export default function RecurringExpenseForm({
         ...(resolvedEnd ? { end_date: resolvedEnd } : {}),
         notes: notes.trim() || undefined,
         is_active: true,
+        ...seasonalPayload,
       });
     }
   };
@@ -303,13 +350,81 @@ export default function RecurringExpenseForm({
               <Text style={[styles.label, { color: colors.text }]}>Frequency *</Text>
               <ThemeAwarePicker
                 selectedValue={frequency}
-                onValueChange={(value) => setFrequency(value as RecurringFrequency)}
+                onValueChange={(value) => {
+                  const next = value as RecurringFrequency;
+                  setFrequency(next);
+                  if (next !== 'monthly') {
+                    setIsSeasonal(false);
+                    setSeasonStartMonth(null);
+                    setSeasonEndMonth(null);
+                  }
+                }}
                 options={FREQUENCIES.map((f) => ({
                   label: f.label,
                   value: f.value,
                 }))}
               />
             </View>
+
+            {frequency === 'monthly' && (
+              <View style={styles.formGroup}>
+                <TouchableOpacity
+                  style={[styles.checkboxContainer, { borderColor: colors.border }]}
+                  onPress={() => {
+                    const next = !isSeasonal;
+                    setIsSeasonal(next);
+                    if (!next) {
+                      setSeasonStartMonth(null);
+                      setSeasonEndMonth(null);
+                    }
+                  }}
+                  disabled={loading}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      {
+                        backgroundColor: isSeasonal ? colors.primary : 'transparent',
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    {isSeasonal && <FontAwesome name="check" size={14} color="#fff" />}
+                  </View>
+                  <Text style={[styles.checkboxLabel, { color: colors.text }]}>Seasonal</Text>
+                </TouchableOpacity>
+                <Text style={[styles.readOnlyHint, { color: colors.textSecondary, marginTop: 6 }]}>
+                  Repeats only in selected months each year (e.g. Apr–Sep)
+                </Text>
+              </View>
+            )}
+
+            {frequency === 'monthly' && isSeasonal && (
+              <>
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: colors.text }]}>Season start *</Text>
+                  <ThemeAwarePicker
+                    selectedValue={seasonStartMonth?.toString() || ''}
+                    onValueChange={(value) =>
+                      setSeasonStartMonth(value ? parseInt(value, 10) : null)
+                    }
+                    options={MONTH_OPTIONS}
+                    placeholder="Select start month"
+                  />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: colors.text }]}>Season end *</Text>
+                  <ThemeAwarePicker
+                    selectedValue={seasonEndMonth?.toString() || ''}
+                    onValueChange={(value) =>
+                      setSeasonEndMonth(value ? parseInt(value, 10) : null)
+                    }
+                    options={MONTH_OPTIONS}
+                    placeholder="Select end month"
+                  />
+                </View>
+              </>
+            )}
 
             <View style={styles.formGroup}>
               <Text style={[styles.label, { color: colors.text }]}>Payment Method</Text>
@@ -334,6 +449,10 @@ export default function RecurringExpenseForm({
                 placeholder="Select start date"
                 disabled={loading}
               />
+              <Text style={[styles.readOnlyHint, { color: colors.textSecondary, marginTop: 6 }]}>
+                Start in the past: unpaid expenses will be created for each due date from start
+                through this year-end.
+              </Text>
             </View>
 
             <View style={styles.formGroup}>
@@ -352,11 +471,14 @@ export default function RecurringExpenseForm({
               <ThemeAwareDatePicker
                 value={endDate}
                 onChange={setEndDate}
-                label="End Date (Optional)"
-                placeholder="Select end date"
+                label="Stop after (optional)"
+                placeholder="Leave empty for ongoing"
                 minimumDate={new Date(startDate || new Date().toISOString().split('T')[0])}
                 disabled={loading}
               />
+              <Text style={[styles.readOnlyHint, { color: colors.textSecondary, marginTop: 6 }]}>
+                Permanent end of this bill series — not the seasonal window
+              </Text>
             </View>
 
             <View style={styles.formGroup}>

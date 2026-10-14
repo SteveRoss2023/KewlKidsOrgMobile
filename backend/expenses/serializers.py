@@ -528,6 +528,40 @@ class RecurringExpenseSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'amount': 'Invalid amount format'})
         return super().to_internal_value(data)
 
+    def validate(self, attrs):
+        frequency = attrs.get('frequency', getattr(self.instance, 'frequency', None))
+        is_seasonal = attrs.get(
+            'is_seasonal',
+            getattr(self.instance, 'is_seasonal', False) if self.instance else False,
+        )
+        start_m = attrs.get(
+            'season_start_month',
+            getattr(self.instance, 'season_start_month', None) if self.instance else None,
+        )
+        end_m = attrs.get(
+            'season_end_month',
+            getattr(self.instance, 'season_end_month', None) if self.instance else None,
+        )
+
+        if 'is_seasonal' in attrs or 'season_start_month' in attrs or 'season_end_month' in attrs or 'frequency' in attrs:
+            if is_seasonal:
+                if frequency != 'monthly':
+                    raise serializers.ValidationError(
+                        {'is_seasonal': 'Seasonal bills must use monthly frequency.'}
+                    )
+                if start_m is None or end_m is None:
+                    raise serializers.ValidationError(
+                        {'season_start_month': 'Season start and end months are required when Seasonal is on.'}
+                    )
+                if not (1 <= int(start_m) <= 12) or not (1 <= int(end_m) <= 12):
+                    raise serializers.ValidationError(
+                        {'season_start_month': 'Season months must be between 1 and 12.'}
+                    )
+            else:
+                attrs['season_start_month'] = None
+                attrs['season_end_month'] = None
+        return attrs
+
     def create(self, validated_data):
         """Create recurring expense and calculate next_due_date from start_date and frequency."""
         from datetime import timedelta
@@ -579,6 +613,7 @@ class RecurringExpenseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'family', 'created_by', 'created_by_username', 'category', 'category_name',
             'amount', 'amount_input', 'description', 'notes', 'frequency', 'start_date', 'end_date', 'next_due_date',
-            'is_active', 'payment_method', 'tags', 'tag_names', 'created_at', 'updated_at'
+            'is_active', 'is_seasonal', 'season_start_month', 'season_end_month',
+            'payment_method', 'tags', 'tag_names', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'category_name', 'tag_names', 'created_by_username', 'amount', 'next_due_date']

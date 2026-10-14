@@ -108,6 +108,10 @@ class RecurringExpense(models.Model):
     end_date = models.DateField(null=True, blank=True)
     next_due_date = models.DateField()
     is_active = models.BooleanField(default=True)
+    # Seasonal monthly: only months in [season_start_month, season_end_month] each year
+    is_seasonal = models.BooleanField(default=False)
+    season_start_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    season_end_month = models.PositiveSmallIntegerField(null=True, blank=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='credit_card')
     tags = models.ManyToManyField(ExpenseTag, blank=True, related_name='recurring_expenses')
     created_at = models.DateTimeField(auto_now_add=True)

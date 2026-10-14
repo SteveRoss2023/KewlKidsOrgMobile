@@ -145,6 +145,9 @@ export interface RecurringExpense {
   end_date: string | null;
   next_due_date: string;
   is_active: boolean;
+  is_seasonal: boolean;
+  season_start_month: number | null;
+  season_end_month: number | null;
   payment_method: PaymentMethod;
   tags: number[];
   tag_names: string[];
@@ -269,6 +272,9 @@ export interface CreateRecurringExpenseData {
   payment_method: PaymentMethod;
   tags?: number[];
   is_active?: boolean;
+  is_seasonal?: boolean;
+  season_start_month?: number | null;
+  season_end_month?: number | null;
 }
 
 export interface UpdateRecurringExpenseData {
@@ -283,6 +289,33 @@ export interface UpdateRecurringExpenseData {
   payment_method?: PaymentMethod;
   tags?: number[];
   is_active?: boolean;
+  is_seasonal?: boolean;
+  season_start_month?: number | null;
+  season_end_month?: number | null;
+}
+
+export interface EnsureYearItem {
+  recurring_id: number;
+  description: string;
+  category_name: string | null;
+  amount: number;
+  expense_date: string;
+  frequency: string;
+  action: string;
+  reason?: string;
+  expense_id?: number;
+}
+
+export interface EnsureYearResult {
+  dry_run?: boolean;
+  through_year: number;
+  created: number;
+  updated: number;
+  removed: number;
+  message?: string;
+  created_items?: EnsureYearItem[];
+  updated_items?: EnsureYearItem[];
+  removed_items?: EnsureYearItem[];
 }
 
 export interface CreateExpenseTagData {

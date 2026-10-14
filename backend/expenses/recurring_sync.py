@@ -94,18 +94,74 @@ def _next_occurrence(current: date, frequency: str) -> date:
     return _add_months(current, 1)
 
 
-def iter_occurrence_dates(start_date: date, frequency: str, end_bound: date, template_end=None):
-    """Yield occurrence dates from start_date while <= end_bound."""
+def month_in_season(month: int, season_start: int, season_end: int) -> bool:
+    """Return True if month is inside [season_start, season_end], supporting wrap (e.g. Nov–Feb)."""
+    if season_start <= season_end:
+        return season_start <= month <= season_end
+    return month >= season_start or month <= season_end
+
+
+def seasonal_params(recurring):
+    """Return (is_seasonal_monthly, start_month, end_month) or (False, None, None)."""
+    if not recurring:
+        return False, None, None
+    if (
+        getattr(recurring, 'is_seasonal', False)
+        and getattr(recurring, 'frequency', None) == 'monthly'
+        and getattr(recurring, 'season_start_month', None)
+        and getattr(recurring, 'season_end_month', None)
+    ):
+        return True, int(recurring.season_start_month), int(recurring.season_end_month)
+    return False, None, None
+
+
+def iter_occurrence_dates(
+    start_date: date,
+    frequency: str,
+    end_bound: date,
+    template_end=None,
+    is_seasonal=False,
+    season_start_month=None,
+    season_end_month=None,
+):
+    """Yield occurrence dates from start_date while <= end_bound.
+
+    When is_seasonal and monthly, only months in the season window are yielded.
+    """
     if start_date is None:
         return
+    use_season = (
+        bool(is_seasonal)
+        and frequency == 'monthly'
+        and season_start_month is not None
+        and season_end_month is not None
+    )
     current = start_date
     for _ in range(2000):
         if template_end and current > template_end:
             break
         if current > end_bound:
             break
-        yield current
+        if use_season:
+            if month_in_season(current.month, int(season_start_month), int(season_end_month)):
+                yield current
+        else:
+            yield current
         current = _next_occurrence(current, frequency)
+
+
+def iter_recurring_occurrence_dates(recurring, end_bound: date):
+    """Yield occurrence dates for a RecurringExpense template through end_bound."""
+    seasonal, s_start, s_end = seasonal_params(recurring)
+    yield from iter_occurrence_dates(
+        recurring.start_date,
+        recurring.frequency,
+        end_bound,
+        template_end=recurring.end_date,
+        is_seasonal=seasonal,
+        season_start_month=s_start,
+        season_end_month=s_end,
+    )
 
 
 def _parse_amount(raw) -> Decimal:
@@ -127,12 +183,7 @@ def recurring_due_in_window(family_id: int, category_id: int, window_start: date
     )
     for recurring in qs:
         amount = _parse_amount(recurring.amount)
-        for occ in iter_occurrence_dates(
-            recurring.start_date,
-            recurring.frequency,
-            window_end,
-            template_end=recurring.end_date,
-        ):
+        for occ in iter_recurring_occurrence_dates(recurring, window_end):
             if window_start <= occ <= window_end:
                 total += amount
     return total
@@ -191,17 +242,15 @@ def build_budget_period_caches(family_id: int, window_start: date, window_end: d
     for recurring in RecurringExpense.objects.filter(
         family_id=family_id,
         is_active=True,
-    ).only('id', 'category_id', 'amount', 'frequency', 'start_date', 'end_date'):
+    ).only(
+        'id', 'category_id', 'amount', 'frequency', 'start_date', 'end_date',
+        'is_seasonal', 'season_start_month', 'season_end_month',
+    ):
         if recurring.category_id is None:
             continue
         recurring_categories.add(recurring.category_id)
         amount = _parse_amount(recurring.amount)
-        for occ in iter_occurrence_dates(
-            recurring.start_date,
-            recurring.frequency,
-            window_end,
-            template_end=recurring.end_date,
-        ):
+        for occ in iter_recurring_occurrence_dates(recurring, window_end):
             if window_start <= occ <= window_end:
                 recurring_due_by_category[recurring.category_id] += amount
 

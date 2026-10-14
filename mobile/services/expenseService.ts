@@ -23,6 +23,7 @@ import {
   ExpenseByPeriod,
   BudgetAlert,
   GenerateExpensesResult,
+  EnsureYearResult,
   CreateBudgetsFromRecurringResult,
   SyncPlanResult,
 } from '../types/expenses';
@@ -490,6 +491,29 @@ class ExpenseService {
       const response = await apiClient.post<GenerateExpensesResult>(
         '/recurring-expenses/generate_expenses/',
         { family: familyId, dry_run: !!options?.dryRun }
+      );
+      return response.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
+   * Reconcile bill expense rows through Dec 31 of throughYear (create/update/remove unpaid).
+   */
+  async ensureYear(
+    familyId: number,
+    throughYear: number,
+    options?: { dryRun?: boolean }
+  ): Promise<EnsureYearResult> {
+    try {
+      const response = await apiClient.post<EnsureYearResult>(
+        '/recurring-expenses/ensure_year/',
+        {
+          family: familyId,
+          through_year: throughYear,
+          dry_run: !!options?.dryRun,
+        }
       );
       return response.data;
     } catch (error) {

@@ -45,12 +45,24 @@ export default function RecurringExpenseRow({
 }: RecurringExpenseRowProps) {
   const { colors } = useTheme();
   const { displayMoney } = useShowAmounts();
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
   const frequency =
     recurring.frequency.charAt(0).toUpperCase() + recurring.frequency.slice(1);
+  const isSeasonal =
+    !!recurring.is_seasonal &&
+    recurring.season_start_month != null &&
+    recurring.season_end_month != null;
+  const seasonLabel = isSeasonal
+    ? `${monthNames[recurring.season_start_month! - 1]}–${monthNames[recurring.season_end_month! - 1]}`
+    : null;
   const startLabel = formatDate(recurring.start_date);
   const endLabel = recurring.end_date ? formatDate(recurring.end_date) : 'no end';
   const metaParts = [
     frequency,
+    seasonLabel ? `seasonal ${seasonLabel}` : null,
     dateLabel ? `due ${dateLabel}` : null,
     `start ${startLabel}`,
     `end ${endLabel}`,
@@ -63,7 +75,7 @@ export default function RecurringExpenseRow({
       onPress={onPress}
       activeOpacity={0.65}
       accessibilityRole="button"
-      accessibilityLabel={`${recurring.description}, ${displayMoney(recurring.amount)}, ${frequency}`}
+      accessibilityLabel={`${recurring.description}, ${displayMoney(recurring.amount)}, ${frequency}${seasonLabel ? `, seasonal ${seasonLabel}` : ''}`}
     >
       <View style={styles.main}>
         <View style={styles.topLine}>
@@ -80,6 +92,13 @@ export default function RecurringExpenseRow({
             {metaParts.join(' · ')}
           </Text>
           <View style={styles.chips}>
+            {isSeasonal ? (
+              <View style={[styles.chip, { backgroundColor: '#0ea5e922' }]}>
+                <Text style={[styles.chipText, { color: '#0284c7' }]}>
+                  Seasonal {seasonLabel}
+                </Text>
+              </View>
+            ) : null}
             <View
               style={[
                 styles.chip,

@@ -1211,9 +1211,17 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         # Debug logging for date calculation
         logger.info(f"Starting expense generation for {recurring.id}: recurring.start_date={recurring.start_date}, start_date={start_date}, end_date={end_date}, frequency={recurring.frequency}")
 
+        from .recurring_sync import seasonal_params, month_in_season
+        is_seasonal, season_start_m, season_end_m = seasonal_params(recurring)
+
         # Generate expenses for each period from start_date to end_date
         # Works for all frequencies: daily, weekly, monthly, yearly
         while current_date <= end_date:
+            # Seasonal monthly: skip months outside the season window
+            if is_seasonal and not month_in_season(current_date.month, season_start_m, season_end_m):
+                current_date = self._get_next_date(current_date, recurring.frequency)
+                continue
+
             # Check if expense already exists for this recurring expense and date
             existing = Expense.objects.filter(
                 family=recurring.family,
@@ -1412,53 +1420,95 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
     def _expected_occurrence_dates(self, recurring, end_date):
         """Return the set of occurrence dates from recurring.start_date through end_date."""
+        from .recurring_sync import iter_recurring_occurrence_dates
+
         dates = set()
         if not recurring.start_date or recurring.start_date > end_date:
             return dates
-        current = recurring.start_date
-        for _ in range(1000):
-            if recurring.end_date and current > recurring.end_date:
-                break
-            if current > end_date:
-                break
-            dates.add(current)
-            current = self._get_next_date(current, recurring.frequency)
+        for occ in iter_recurring_occurrence_dates(recurring, end_date):
+            dates.add(occ)
         return dates
 
-    def _reconcile_generated_schedule(self, recurring, member):
+    def _reconcile_generated_schedule(self, recurring, member, through_year=None, dry_run=False):
         """Align unpaid generated expenses with the template schedule.
 
         - Deletes unpaid rows whose date is not on the new schedule
         - Creates missing schedule dates through year-end / end_date
         Paid expenses are left alone.
+
+        through_year: optional calendar year to extend open-ended horizon to Dec 31 of that year.
+        dry_run: preview only — no writes.
         """
         import logging
+        from decimal import Decimal, InvalidOperation
         logger = logging.getLogger(__name__)
 
         today = timezone.now().date()
         # Honor template end; for open-ended, generate through end of the later of
-        # current year and template start year (so future starts still get rows).
+        # current year (or through_year) and template start year.
         if recurring.end_date:
             gen_end = recurring.end_date
         else:
-            horizon_year = max(today.year, recurring.start_date.year if recurring.start_date else today.year)
+            horizon_year = max(
+                today.year,
+                through_year or today.year,
+                recurring.start_date.year if recurring.start_date else today.year,
+            )
             gen_end = date(horizon_year, 12, 31)
         expected = self._expected_occurrence_dates(recurring, gen_end)
+
+        try:
+            amount_val = float(Decimal(str(recurring.amount))) if recurring.amount else 0.0
+        except (ValueError, InvalidOperation, TypeError):
+            amount_val = 0.0
+        category_name = recurring.category.name if recurring.category else None
 
         unpaid = list(
             Expense.objects.filter(recurring_expense=recurring, is_paid=False)
         )
-        orphan_ids = [e.id for e in unpaid if e.expense_date not in expected]
-        if orphan_ids:
-            deleted, _ = Expense.objects.filter(id__in=orphan_ids).delete()
+        # Only treat unpaid rows within the generation window as orphans.
+        # Rows after gen_end (e.g. 2027 created while viewing 2027, then user
+        # returns to 2026) must not be deleted just because this pass's horizon
+        # is shorter.
+        orphans = [
+            e
+            for e in unpaid
+            if e.expense_date not in expected and e.expense_date <= gen_end
+        ]
+        removed_items = []
+        for e in orphans:
+            removed_items.append({
+                'recurring_id': recurring.id,
+                'description': recurring.description,
+                'category_name': category_name,
+                'amount': amount_val,
+                'expense_date': e.expense_date.isoformat(),
+                'frequency': recurring.frequency,
+                'action': 'would_remove' if dry_run else 'removed',
+                'expense_id': e.id,
+                'reason': 'off-schedule unpaid',
+            })
+        removed_count = len(orphans)
+        if orphans and not dry_run:
+            deleted, _ = Expense.objects.filter(id__in=[e.id for e in orphans]).delete()
+            removed_count = deleted
             logger.info(
                 f"Recurring {recurring.id}: removed {deleted} unpaid expenses off-schedule "
                 f"(expected {sorted(expected)[:5]}{'...' if len(expected) > 5 else ''})"
             )
 
+        empty = {
+            'removed': removed_count,
+            'generated_count': 0,
+            'updated_count': 0,
+            'created': [],
+            'updated': [],
+            'removed_items': removed_items,
+        }
+
         if member is None:
             logger.warning(f"No member to regenerate expenses for recurring {recurring.id}")
-            return {'removed': len(orphan_ids), 'generated_count': 0}
+            return empty
 
         if recurring.start_date and recurring.start_date <= gen_end:
             result = self._generate_expenses_for_recurring(
@@ -1466,13 +1516,17 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 member,
                 end_date=gen_end,
                 start_date=recurring.start_date,
+                dry_run=dry_run,
             )
             return {
-                'removed': len(orphan_ids),
+                'removed': removed_count,
                 'generated_count': result.get('generated_count', 0),
                 'updated_count': result.get('updated_count', 0),
+                'created': result.get('created', []),
+                'updated': result.get('updated', []),
+                'removed_items': removed_items,
             }
-        return {'removed': len(orphan_ids), 'generated_count': 0}
+        return empty
 
     def perform_update(self, serializer):
         """Update recurring expense, sync fields, and realign unpaid generated expense dates."""
@@ -1656,8 +1710,12 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                             generation_start = generation_start + timedelta(weeks=1)
                     elif recurring.frequency == 'monthly':
                         from calendar import monthrange
+                        from .recurring_sync import seasonal_params, month_in_season
                         start_day = recurring.start_date.day
+                        is_seasonal, season_start_m, season_end_m = seasonal_params(recurring)
                         for month in range(1, 13):
+                            if is_seasonal and not month_in_season(month, season_start_m, season_end_m):
+                                continue
                             last_day = monthrange(current_year, month)[1]
                             if start_day <= last_day:
                                 generation_start = date(current_year, month, start_day)
@@ -1766,6 +1824,85 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         )
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def ensure_year(self, request):
+        """Reconcile bill-generated unpaid expenses through Dec 31 of through_year.
+
+        Body: { family, through_year: int, dry_run?: bool }
+        Creates missing schedule rows, removes unpaid off-schedule rows, syncs unpaid fields.
+        Paid expenses are never modified. dry_run previews without writes.
+        """
+        family_id = request.data.get('family')
+        through_year_raw = request.data.get('through_year')
+        if not family_id:
+            return Response({'error': 'family is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if through_year_raw is None:
+            return Response({'error': 'through_year is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            through_year = int(through_year_raw)
+        except (TypeError, ValueError):
+            return Response({'error': 'through_year must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dry_run_raw = request.data.get('dry_run', False)
+        dry_run = (
+            str(dry_run_raw).lower() in ('1', 'true', 'yes')
+            if not isinstance(dry_run_raw, bool)
+            else dry_run_raw
+        )
+
+        today = timezone.now().date()
+        # Cap far-future navigation
+        if through_year > today.year + 5:
+            return Response(
+                {'error': f'through_year cannot be more than {today.year + 5}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        family = get_object_or_404(Family, id=family_id, members__user=request.user)
+        member = get_object_or_404(Member, user=request.user, family=family)
+
+        created = 0
+        updated = 0
+        removed = 0
+        created_items = []
+        updated_items = []
+        removed_items = []
+        for recurring in RecurringExpense.objects.filter(family=family, is_active=True):
+            if not dry_run:
+                self._sync_all_generated_from_template(recurring)
+            result = self._reconcile_generated_schedule(
+                recurring, member, through_year=through_year, dry_run=dry_run
+            )
+            created += result.get('generated_count', 0) or 0
+            updated += result.get('updated_count', 0) or 0
+            removed += result.get('removed', 0) or 0
+            created_items.extend(result.get('created') or [])
+            updated_items.extend(result.get('updated') or [])
+            removed_items.extend(result.get('removed_items') or [])
+
+        def by_date(rows):
+            return sorted(rows, key=lambda r: r.get('expense_date') or '')
+
+        verb = 'Would change' if dry_run else 'Changed'
+        message = (
+            f'{verb} {through_year}: {created} create, {updated} update, {removed} remove'
+        )
+
+        return Response(
+            {
+                'dry_run': dry_run,
+                'through_year': through_year,
+                'created': created,
+                'updated': updated,
+                'removed': removed,
+                'message': message,
+                'created_items': by_date(created_items),
+                'updated_items': by_date(updated_items),
+                'removed_items': by_date(removed_items),
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=['post'])
     def sync_plan(self, request):
