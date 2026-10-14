@@ -176,6 +176,21 @@ export function buildMonthlyCashflowSeries(
   });
 }
 
+/**
+ * First month index (0–11) that has income in the year, or -1 if none.
+ * Months before this are treated as outside tracking (incomplete / no income entered).
+ */
+export function cashflowTrackingStartMonthIndex(months: CashflowMonthPoint[]): number {
+  return months.findIndex((m) => m.incomeTotal > 0);
+}
+
+/** Months from first income month through year-end (empty if no income months). */
+export function monthsInCashflowTracking(months: CashflowMonthPoint[]): CashflowMonthPoint[] {
+  const start = cashflowTrackingStartMonthIndex(months);
+  if (start < 0) return [];
+  return months.slice(start);
+}
+
 /** Sum monthly points into a year-level summary (breakdowns merged). */
 export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMonthSummary {
   const incomeByStreamMap = new Map<string, CashflowBreakdownRow>();

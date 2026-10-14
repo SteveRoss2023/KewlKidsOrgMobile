@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
 export type DonutSlice = {
@@ -18,6 +18,10 @@ type DonutChartProps = {
   textColor: string;
   mutedColor: string;
   trackColor: string;
+  /** Currently selected slice key; null = show all */
+  selectedKey?: string | null;
+  /** Tap the pie to clear filter (legend handles selecting a slice) */
+  onSelectSlice?: (key: string | null) => void;
 };
 
 export default function DonutChart({
@@ -29,11 +33,14 @@ export default function DonutChart({
   textColor,
   mutedColor,
   trackColor,
+  selectedKey = null,
+  onSelectSlice,
 }: DonutChartProps) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const cx = size / 2;
   const cy = size / 2;
+  const interactive = typeof onSelectSlice === 'function';
 
   const { arcs, total } = useMemo(() => {
     const positive = slices.filter((s) => s.amount > 0);
@@ -56,9 +63,9 @@ export default function DonutChart({
     return { arcs: built, total: sum };
   }, [slices, circumference]);
 
-  return (
+  const chart = (
     <View style={[styles.wrap, { width: size, height: size }]}>
-      <Svg width={size} height={size}>
+      <Svg width={size} height={size} pointerEvents="none">
         <Circle
           cx={cx}
           cy={cy}
@@ -68,20 +75,24 @@ export default function DonutChart({
           fill="none"
         />
         <G rotation={-90} origin={`${cx}, ${cy}`}>
-          {arcs.map((arc) => (
-            <Circle
-              key={arc.key}
-              cx={cx}
-              cy={cy}
-              r={radius}
-              stroke={arc.color}
-              strokeWidth={strokeWidth}
-              strokeDasharray={arc.dash}
-              strokeDashoffset={arc.offset}
-              strokeLinecap="butt"
-              fill="none"
-            />
-          ))}
+          {arcs.map((arc) => {
+            const dimmed = selectedKey != null && selectedKey !== arc.key;
+            return (
+              <Circle
+                key={arc.key}
+                cx={cx}
+                cy={cy}
+                r={radius}
+                stroke={arc.color}
+                strokeWidth={strokeWidth}
+                strokeDasharray={arc.dash}
+                strokeDashoffset={arc.offset}
+                strokeLinecap="butt"
+                fill="none"
+                opacity={dimmed ? 0.28 : 1}
+              />
+            );
+          })}
         </G>
       </Svg>
       <View style={styles.center} pointerEvents="none">
@@ -99,6 +110,18 @@ export default function DonutChart({
         ) : null}
       </View>
     </View>
+  );
+
+  if (!interactive) return chart;
+
+  return (
+    <Pressable
+      onPress={() => onSelectSlice(null)}
+      accessibilityRole="button"
+      accessibilityLabel="Clear donut filter"
+    >
+      {chart}
+    </Pressable>
   );
 }
 

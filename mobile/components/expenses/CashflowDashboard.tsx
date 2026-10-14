@@ -19,7 +19,9 @@ import { Expense } from '../../types/expenses';
 import { IncomeOccurrence, IncomeStream, IncomeStreamType } from '../../types/money';
 import {
   buildMonthlyCashflowSeries,
+  cashflowTrackingStartMonthIndex,
   defaultDashboardMonthIndex,
+  monthsInCashflowTracking,
   rollupCashflowSeries,
 } from '../../utils/cashflow';
 import AuthService from '../../services/authService';
@@ -83,6 +85,8 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
+  /** Donut slice filter: spent | unpaid | income | null (all) */
+  const [donutFilter, setDonutFilter] = useState<string | null>(null);
 
   const initialCache =
     selectedFamily != null
@@ -358,7 +362,13 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     [displayOccurrences, expenses, year]
   );
 
-  const yearSummary = useMemo(() => rollupCashflowSeries(months), [months]);
+  // Months before the first income month are incomplete / not tracked — exclude from year totals.
+  const trackingStartMonth = useMemo(
+    () => cashflowTrackingStartMonthIndex(months),
+    [months]
+  );
+  const trackedMonths = useMemo(() => monthsInCashflowTracking(months), [months]);
+  const yearSummary = useMemo(() => rollupCashflowSeries(trackedMonths), [trackedMonths]);
 
   useEffect(() => {
     if (loading) return;
@@ -367,18 +377,36 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     setSelectedMonthIndex(defaultDashboardMonthIndex(year, months, now));
   }, [loading, year, months, now]);
 
+  useEffect(() => {
+    setDonutFilter(null);
+  }, [selectedMonthIndex, year]);
+
   const selectedMonth = months[selectedMonthIndex] || months[0];
 
   const barPoints = useMemo(
     () =>
-      months.map((m) => ({
-        monthIndex: m.monthIndex,
-        label: m.label,
-        income: m.incomeTotal,
-        spent: m.spentTotal + m.unpaidTotal,
-        netAfterUnpaid: m.netAfterUnpaid,
-      })),
-    [months]
+      months.map((m) => {
+        const tracked = trackingStartMonth < 0 || m.monthIndex >= trackingStartMonth;
+        if (!tracked) {
+          return {
+            monthIndex: m.monthIndex,
+            label: m.label,
+            income: 0,
+            spent: 0,
+            unpaid: 0,
+            netAfterUnpaid: 0,
+          };
+        }
+        return {
+          monthIndex: m.monthIndex,
+          label: m.label,
+          income: m.incomeTotal,
+          spent: m.spentTotal,
+          unpaid: m.unpaidTotal,
+          netAfterUnpaid: m.netAfterUnpaid,
+        };
+      }),
+    [months, trackingStartMonth]
   );
 
   const donutSlices = useMemo(() => {
@@ -416,9 +444,21 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     );
   }
 
+  const trackingHint =
+    trackingStartMonth > 0
+      ? `Totals from ${months[trackingStartMonth]?.label ?? ''}–Dec (months before first income ignored)`
+      : trackingStartMonth < 0
+        ? 'No income months yet — year totals are empty'
+        : null;
+
   const yearHero = (
     <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Year overview</Text>
+      {trackingHint ? (
+        <Text style={[styles.sectionHint, { color: colors.textSecondary, marginBottom: 8 }]}>
+          {trackingHint}
+        </Text>
+      ) : null}
       <View style={styles.heroGrid}>
         <View style={styles.heroCell}>
           <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Income</Text>
@@ -456,7 +496,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     >
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly cashflow</Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Tap a month · dots show net after unpaid
+        Tap a month · one bar: spent + unpaid + income left
       </Text>
       <MonthCashflowBars
         points={barPoints}
@@ -464,6 +504,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         onSelectMonth={setSelectedMonthIndex}
         incomeColor={colors.success}
         spentColor={spentColor}
+        unpaidColor={UNPAID_COLOR}
         trackColor={colors.border}
         textColor={colors.text}
         mutedColor={colors.textSecondary}
@@ -511,48 +552,86 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           textColor={colors.text}
           mutedColor={colors.textSecondary}
           trackColor={colors.border}
+          selectedKey={donutFilter}
+          onSelectSlice={setDonutFilter}
           centerLabel={displayMoney(
             selectedMonth.incomeTotal ||
               selectedMonth.spentTotal + selectedMonth.unpaidTotal
           )}
-          centerSubLabel="Activity"
+          centerSubLabel={
+            donutFilter
+              ? donutSlices.find((s) => s.key === donutFilter)?.label || 'Filtered'
+              : 'Activity'
+          }
         />
         <View style={styles.donutLegend}>
-          {donutSlices.map((s) => (
-            <View key={s.key} style={styles.donutLegendRow}>
-              <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-              <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
-              <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                {displayMoney(s.amount)}
-              </Text>
-            </View>
-          ))}
+          {donutSlices.map((s) => {
+            const active = donutFilter === s.key;
+            const dimmed = donutFilter != null && !active;
+            return (
+              <TouchableOpacity
+                key={s.key}
+                style={[styles.donutLegendRow, dimmed && { opacity: 0.4 }]}
+                onPress={() => setDonutFilter(active ? null : s.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
+                <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                  {displayMoney(s.amount)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
-
-      <Text style={[styles.subSectionTitle, { color: colors.text }]}>Spent by category</Text>
-      <CategoryHBars
-        rows={selectedMonth.spentByCategory}
-        emptyText="No paid expenses this month"
-        barColor={spentColor}
-        trackColor={colors.border}
-        textColor={colors.text}
-        mutedColor={colors.textSecondary}
-        formatAmount={displayMoney}
-      />
-
-      <Text style={[styles.subSectionTitle, { color: colors.text, marginTop: 16 }]}>
-        Unpaid by category
+      <Text style={[styles.donutHint, { color: colors.textSecondary }]}>
+        Tap a legend item to filter · tap the chart to show all
       </Text>
-      <CategoryHBars
-        rows={selectedMonth.unpaidByCategory}
-        emptyText="No unpaid expenses this month"
-        barColor={UNPAID_COLOR}
-        trackColor={colors.border}
-        textColor={colors.text}
-        mutedColor={colors.textSecondary}
-        formatAmount={displayMoney}
-      />
+
+      {donutFilter === null || donutFilter === 'spent' ? (
+        <>
+          <Text style={[styles.subSectionTitle, { color: colors.text }]}>Spent by category</Text>
+          <CategoryHBars
+            rows={selectedMonth.spentByCategory}
+            emptyText="No paid expenses this month"
+            barColor={spentColor}
+            trackColor={colors.border}
+            textColor={colors.text}
+            mutedColor={colors.textSecondary}
+            formatAmount={displayMoney}
+          />
+        </>
+      ) : null}
+
+      {donutFilter === null || donutFilter === 'unpaid' ? (
+        <>
+          <Text
+            style={[
+              styles.subSectionTitle,
+              { color: colors.text, marginTop: donutFilter === null ? 16 : 0 },
+            ]}
+          >
+            Unpaid by category
+          </Text>
+          <CategoryHBars
+            rows={selectedMonth.unpaidByCategory}
+            emptyText="No unpaid expenses this month"
+            barColor={UNPAID_COLOR}
+            trackColor={colors.border}
+            textColor={colors.text}
+            mutedColor={colors.textSecondary}
+            formatAmount={displayMoney}
+          />
+        </>
+      ) : null}
+
+      {donutFilter === 'income' ? (
+        <Text style={[styles.emptyHint, { color: colors.textSecondary }]}>
+          Income has no category breakdown — tap the donut center to show all.
+        </Text>
+      ) : null}
     </View>
   ) : null;
 
@@ -701,6 +780,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sectionTitle: { fontSize: 16, fontWeight: '800', alignSelf: 'stretch' },
+  emptyHint: { fontSize: 13, fontWeight: '500', marginTop: 8 },
   sectionHint: {
     fontSize: 12,
     fontWeight: '500',
@@ -720,6 +800,7 @@ const styles = StyleSheet.create({
   },
   kpiLabel: { fontSize: 11, fontWeight: '600' },
   kpiValue: { fontSize: 14, fontWeight: '800' },
+  donutHint: { fontSize: 11, fontWeight: '500', opacity: 0.75, marginTop: -2 },
   donutBlock: {
     flexDirection: 'row',
     alignItems: 'center',

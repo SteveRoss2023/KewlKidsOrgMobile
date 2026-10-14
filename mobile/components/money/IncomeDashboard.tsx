@@ -280,6 +280,9 @@ export default function IncomeDashboard({
     []
   );
 
+  const dataFamilyIdRef = useRef(dataFamilyId);
+  dataFamilyIdRef.current = dataFamilyId;
+
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
       if (!selectedFamily) {
@@ -291,15 +294,20 @@ export default function IncomeDashboard({
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
       const cached = incomeBoardCache.get(familyId);
+      const alreadyOnFamily = dataFamilyIdRef.current === familyId;
       if (cached) {
         setStreams(cached.streams);
         setOccurrences(cached.occurrences);
         setDemoPortfolio(cached.demoPortfolio);
-        setYear(cached.year);
-        setBoardTab(cached.boardTab);
-        setSelectedMonthIndex(cached.selectedMonthIndex);
+        // Only restore year/tab/month on cold family entry — never while already
+        // viewing this family (year changes must not fight the persist effect).
+        if (!alreadyOnFamily) {
+          setYear(cached.year);
+          setBoardTab(cached.boardTab);
+          setSelectedMonthIndex(cached.selectedMonthIndex);
+          monthInitYearRef.current = cached.year;
+        }
         setDataFamilyId(familyId);
-        monthInitYearRef.current = cached.year;
         setLoading(false);
         // Tab return with warm cache: skip network (mutations clear via invalidate).
         if (soft) return;
@@ -334,7 +342,12 @@ export default function IncomeDashboard({
           demoPortfolio: demoEnabled,
         });
 
-        const createdAny = await ensureStreamSchedules(year, streamList, familyId);
+        // Use yearRef so year navigation does not recreate `load` / re-fire focus.
+        const createdAny = await ensureStreamSchedules(
+          yearRef.current,
+          streamList,
+          familyId
+        );
         if (
           generation !== fetchGenerationRef.current ||
           selectedFamilyIdRef.current !== familyId
@@ -379,7 +392,7 @@ export default function IncomeDashboard({
         }
       }
     },
-    [selectedFamily, year, clearState, readDemoPortfolioPref, ensureStreamSchedules, writeCache]
+    [selectedFamily, clearState, readDemoPortfolioPref, ensureStreamSchedules, writeCache]
   );
 
   useEffect(() => {
@@ -436,6 +449,46 @@ export default function IncomeDashboard({
       selectedMonthIndex,
     });
   }, [selectedFamily, dataFamilyId, year, boardTab, selectedMonthIndex]);
+
+  // When Overview year moves past the prior ensure horizon, fill pays (no full reload).
+  useEffect(() => {
+    if (!selectedFamily || dataFamilyId !== selectedFamily.id) return;
+    if (streams.length === 0) return;
+    const familyId = selectedFamily.id;
+    const horizonEnd = `${Math.max(year, new Date().getFullYear() + 1)}-12-31`;
+    let cancelled = false;
+    void (async () => {
+      const createdAny = await ensureStreamSchedules(year, streams, familyId);
+      if (!createdAny || cancelled) return;
+      if (selectedFamilyIdRef.current !== familyId) return;
+      try {
+        const refreshed = forFamily(
+          await moneyService.getOccurrences(familyId, { end_date: horizonEnd }),
+          familyId
+        );
+        if (cancelled || selectedFamilyIdRef.current !== familyId) return;
+        setOccurrences(refreshed);
+        writeCache(familyId, {
+          streams,
+          occurrences: refreshed,
+          demoPortfolio,
+        });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    year,
+    selectedFamily,
+    dataFamilyId,
+    streams,
+    demoPortfolio,
+    ensureStreamSchedules,
+    writeCache,
+  ]);
 
   const streamTypeById = useMemo(() => {
     const map = new Map<number, IncomeStreamType>();

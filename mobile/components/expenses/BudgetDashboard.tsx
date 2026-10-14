@@ -105,6 +105,8 @@ export default function BudgetDashboard({
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(
     () => initialCache?.selectedMonthIndex ?? now.getMonth()
   );
+  /** Donut slice filter: spent | left | over | null (all) */
+  const [donutFilter, setDonutFilter] = useState<string | null>(null);
   const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, Budget[]>>(
     () => initialCache?.budgetsByMonth ?? {}
   );
@@ -388,6 +390,7 @@ export default function BudgetDashboard({
   const expensesReady = selectedKey != null && expensesByMonth[selectedKey] != null;
 
   const handleSelectMonth = (monthIndex: number) => {
+    setDonutFilter(null);
     setSelectedMonthIndex(monthIndex);
     if (selectedFamily && loadedYear === year) {
       writeCache(selectedFamily.id, year, budgetsByMonth, expensesByMonth, monthIndex);
@@ -458,10 +461,40 @@ export default function BudgetDashboard({
 
   const sortedBudgets = useMemo(() => {
     if (!selectedMonth) return [];
-    return [...selectedMonth.budgets].sort((a, b) =>
+    let list = [...selectedMonth.budgets].sort((a, b) =>
       (a.category_name || '').localeCompare(b.category_name || '')
     );
-  }, [selectedMonth]);
+    if (!donutFilter) return list;
+
+    const spentFor = (b: Budget) => {
+      if (expensesReady) {
+        return expensesForCategory(selectedExpenses, b.category).reduce(
+          (sum, exp) => sum + (exp.is_paid !== false ? Number(exp.amount) || 0 : 0),
+          0
+        );
+      }
+      return Number(b.spent_amount) || 0;
+    };
+
+    if (donutFilter === 'spent') {
+      list = list.filter((b) => spentFor(b) > 0);
+    } else if (donutFilter === 'left') {
+      list = list.filter((b) => {
+        const amount = Number(b.amount) || 0;
+        return amount - spentFor(b) > 0;
+      });
+    } else if (donutFilter === 'over') {
+      list = list.filter((b) => {
+        const amount = Number(b.amount) || 0;
+        return spentFor(b) > amount;
+      });
+    }
+    return list;
+  }, [selectedMonth, donutFilter, expensesReady, selectedExpenses]);
+
+  useEffect(() => {
+    setDonutFilter(null);
+  }, [year]);
 
   const toneRemaining = (n: number) =>
     n > 0 ? okColor : n < 0 ? spentColor : colors.text;
@@ -596,34 +629,56 @@ export default function BudgetDashboard({
           textColor={colors.text}
           mutedColor={colors.textSecondary}
           trackColor={colors.border}
+          selectedKey={donutFilter}
+          onSelectSlice={setDonutFilter}
           centerLabel={
             selectedMonth.budgeted > 0
               ? `${Math.round(selectedMonth.percentageUsed)}%`
               : displayMoney(selectedMonth.spent)
           }
           centerSubLabel={
-            selectedMonth.remaining < 0 ? 'Over budget' : 'Of limit'
+            donutFilter
+              ? donutSlices.find((s) => s.key === donutFilter)?.label || 'Filtered'
+              : selectedMonth.remaining < 0
+                ? 'Over budget'
+                : 'Of limit'
           }
         />
         <View style={styles.donutLegend}>
-          {donutSlices.map((s) => (
-            <View key={s.key} style={styles.donutLegendRow}>
-              <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-              <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                {s.label}
-              </Text>
-              <Text
-                style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
+          {donutSlices.map((s) => {
+            const active = donutFilter === s.key;
+            const dimmed = donutFilter != null && !active;
+            return (
+              <TouchableOpacity
+                key={s.key}
+                style={[styles.donutLegendRow, dimmed && { opacity: 0.4 }]}
+                onPress={() => setDonutFilter(active ? null : s.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
               >
-                {displayMoney(s.amount)}
-              </Text>
-            </View>
-          ))}
+                <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                  {s.label}
+                </Text>
+                <Text
+                  style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
+                >
+                  {displayMoney(s.amount)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
+      <Text style={[styles.donutHint, { color: colors.textSecondary }]}>
+        Tap a legend item to filter · tap the chart to show all
+      </Text>
 
       <Text style={[styles.subSectionTitle, { color: colors.text }]}>
         Categories
+        {donutFilter
+          ? ` · ${donutSlices.find((s) => s.key === donutFilter)?.label || 'filtered'}`
+          : ''}
       </Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
         Tap a category to see items · pencil / trash to edit
@@ -931,6 +986,7 @@ const styles = StyleSheet.create({
   },
   kpiLabel: { fontSize: 11, fontWeight: '600' },
   kpiValue: { fontSize: 14, fontWeight: '800' },
+  donutHint: { fontSize: 11, fontWeight: '500', opacity: 0.75, marginTop: -2 },
   donutBlock: {
     flexDirection: 'row',
     alignItems: 'center',

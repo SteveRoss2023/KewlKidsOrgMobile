@@ -6,7 +6,10 @@ export type MonthBarPoint = {
   monthIndex: number;
   label: string;
   income: number;
+  /** Paid expenses only */
   spent: number;
+  /** Unpaid expense rows */
+  unpaid: number;
   netAfterUnpaid: number;
 };
 
@@ -16,6 +19,7 @@ type MonthCashflowBarsProps = {
   onSelectMonth: (monthIndex: number) => void;
   incomeColor: string;
   spentColor: string;
+  unpaidColor: string;
   trackColor: string;
   textColor: string;
   mutedColor: string;
@@ -33,26 +37,28 @@ export default function MonthCashflowBars({
   onSelectMonth,
   incomeColor,
   spentColor,
+  unpaidColor,
   trackColor,
   textColor,
   mutedColor,
   selectedBorderColor,
 }: MonthCashflowBarsProps) {
   const [containerWidth, setContainerWidth] = useState(0);
-  // Fit the parent column; never size from window width (clips in 2-col layouts).
   const chartWidth = containerWidth > 0 ? containerWidth : MIN_CHART_W;
 
   const maxVal = useMemo(() => {
     let m = 1;
     for (const p of points) {
-      m = Math.max(m, p.income, p.spent);
+      m = Math.max(m, p.income, p.spent + p.unpaid);
     }
     return m;
   }, [points]);
 
   const slotW = chartWidth / 12;
-  const barW = Math.max(4, Math.min(10, slotW * 0.28));
-  const gap = 2;
+  // Pair: income | spent+unpaid — keeps green visible even when unpaid > income
+  const pairGap = 2;
+  const barW = Math.max(5, Math.min(8, (slotW * 0.55 - pairGap) / 2));
+  const pairW = barW * 2 + pairGap;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = Math.floor(e.nativeEvent.layout.width);
@@ -70,37 +76,96 @@ export default function MonthCashflowBars({
           <View style={[styles.legendDot, { backgroundColor: spentColor }]} />
           <Text style={[styles.legendText, { color: mutedColor }]}>Spent</Text>
         </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: unpaidColor }]} />
+          <Text style={[styles.legendText, { color: mutedColor }]}>Unpaid</Text>
+        </View>
       </View>
 
       {containerWidth > 0 ? (
         <View style={{ width: chartWidth }}>
           <Svg width={chartWidth} height={CHART_H}>
             {points.map((p) => {
-              const xCenter = p.monthIndex * slotW + slotW / 2;
-              const incomeH = Math.max(0, (p.income / maxVal) * (CHART_H - 4));
-              const spentH = Math.max(0, (p.spent / maxVal) * (CHART_H - 4));
-              const incomeX = xCenter - barW - gap / 2;
-              const spentX = xCenter + gap / 2;
+              const pairX = p.monthIndex * slotW + slotW / 2 - pairW / 2;
+              const incomeX = pairX;
+              const outflowX = pairX + barW + pairGap;
+              const spent = Math.max(0, p.spent);
+              const unpaid = Math.max(0, p.unpaid);
+              const income = Math.max(0, p.income);
+              const scale = (CHART_H - 4) / maxVal;
+              const empty = spent <= 0 && unpaid <= 0 && income <= 0;
+
+              if (empty) {
+                return (
+                  <Rect
+                    key={p.monthIndex}
+                    x={pairX}
+                    y={CHART_H - 2}
+                    width={pairW}
+                    height={2}
+                    rx={1}
+                    fill={trackColor}
+                    opacity={0.5}
+                  />
+                );
+              }
+
+              const incomeH = income * scale;
+              const outflowLayers = [
+                { h: spent * scale, fill: spentColor },
+                { h: unpaid * scale, fill: unpaidColor },
+              ].filter((l) => l.h > 0);
+
+              let outflowY = CHART_H;
               return (
                 <React.Fragment key={p.monthIndex}>
-                  <Rect
-                    x={incomeX}
-                    y={CHART_H - incomeH}
-                    width={barW}
-                    height={incomeH || 1}
-                    rx={2}
-                    fill={incomeColor}
-                    opacity={p.income > 0 ? 1 : 0.25}
-                  />
-                  <Rect
-                    x={spentX}
-                    y={CHART_H - spentH}
-                    width={barW}
-                    height={spentH || 1}
-                    rx={2}
-                    fill={spentColor}
-                    opacity={p.spent > 0 ? 1 : 0.25}
-                  />
+                  {incomeH > 0 ? (
+                    <Rect
+                      x={incomeX}
+                      y={CHART_H - Math.max(incomeH, 0.5)}
+                      width={barW}
+                      height={Math.max(incomeH, 0.5)}
+                      rx={2}
+                      fill={incomeColor}
+                      opacity={0.9}
+                    />
+                  ) : (
+                    <Rect
+                      x={incomeX}
+                      y={CHART_H - 2}
+                      width={barW}
+                      height={2}
+                      rx={1}
+                      fill={trackColor}
+                      opacity={0.4}
+                    />
+                  )}
+                  {outflowLayers.length === 0 ? (
+                    <Rect
+                      x={outflowX}
+                      y={CHART_H - 2}
+                      width={barW}
+                      height={2}
+                      rx={1}
+                      fill={trackColor}
+                      opacity={0.4}
+                    />
+                  ) : (
+                    outflowLayers.map((layer, i) => {
+                      outflowY -= layer.h;
+                      return (
+                        <Rect
+                          key={`${p.monthIndex}-out-${i}`}
+                          x={outflowX}
+                          y={outflowY}
+                          width={barW}
+                          height={Math.max(layer.h, 0.5)}
+                          rx={i === outflowLayers.length - 1 ? 2 : 0}
+                          fill={layer.fill}
+                        />
+                      );
+                    })
+                  )}
                 </React.Fragment>
               );
             })}
@@ -108,15 +173,23 @@ export default function MonthCashflowBars({
 
           <View style={[styles.netRow, { height: NET_H }]}>
             {points.map((p) => {
+              const empty = p.income === 0 && p.spent === 0 && p.unpaid === 0;
               const positive = p.netAfterUnpaid >= 0;
+              // Unpaid-only months read orange, not red
+              const dotColor =
+                p.spent <= 0 && p.unpaid > 0
+                  ? unpaidColor
+                  : positive
+                    ? incomeColor
+                    : spentColor;
               return (
                 <View key={`net-${p.monthIndex}`} style={[styles.netSlot, { width: slotW }]}>
                   <View
                     style={[
                       styles.netDot,
                       {
-                        backgroundColor: positive ? incomeColor : spentColor,
-                        opacity: p.income === 0 && p.spent === 0 ? 0.2 : 0.85,
+                        backgroundColor: dotColor,
+                        opacity: empty ? 0.2 : 0.9,
                       },
                     ]}
                   />
@@ -158,7 +231,6 @@ export default function MonthCashflowBars({
             })}
           </View>
 
-          {/* Invisible hit targets over bars */}
           <View style={[styles.hitOverlay, { height: CHART_H + NET_H }]} pointerEvents="box-none">
             {points.map((p) => (
               <TouchableOpacity
@@ -180,7 +252,13 @@ export default function MonthCashflowBars({
 
 const styles = StyleSheet.create({
   wrap: { gap: 8, alignItems: 'center', alignSelf: 'stretch', width: '100%' },
-  legend: { flexDirection: 'row', gap: 14, alignItems: 'center', alignSelf: 'stretch' },
+  legend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    alignItems: 'center',
+    alignSelf: 'stretch',
+  },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 2 },
   legendText: { fontSize: 11, fontWeight: '600' },

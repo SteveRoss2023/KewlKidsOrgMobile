@@ -503,14 +503,65 @@ export default function ExpenseDashboard({
     filterPaid !== null
   );
 
+  // Donut + paid/unpaid KPIs ignore the status filter so tapping a slice still shows both segments.
+  const expensesForStatusTotals = useMemo(() => {
+    let list = selectedFamily ? forFamily(expenses, selectedFamily.id) : [];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (exp) =>
+          exp.description.toLowerCase().includes(q) ||
+          (exp.category_name && exp.category_name.toLowerCase().includes(q)) ||
+          (exp.notes && exp.notes.toLowerCase().includes(q)) ||
+          (exp.tag_names || []).some((tag) => tag.toLowerCase().includes(q))
+      );
+    }
+    if (filterCategory) list = list.filter((exp) => exp.category === filterCategory);
+    if (filterPaymentMethod) {
+      list = list.filter((exp) => exp.payment_method === filterPaymentMethod);
+    }
+    if (filterTag) list = list.filter((exp) => exp.tags.includes(filterTag));
+    if (filterRecurring !== null) {
+      list = filterRecurring
+        ? list.filter((exp) => exp.is_recurring && exp.recurring_expense !== null)
+        : list.filter((exp) => !exp.is_recurring || exp.recurring_expense === null);
+    }
+    return list;
+  }, [
+    expenses,
+    selectedFamily,
+    searchQuery,
+    filterCategory,
+    filterPaymentMethod,
+    filterTag,
+    filterRecurring,
+  ]);
+
   const periodPaid = useMemo(
-    () => filteredExpenses.reduce((s, e) => s + (e.is_paid !== false ? toAmt(e.amount) : 0), 0),
-    [filteredExpenses]
+    () =>
+      expensesForStatusTotals.reduce(
+        (s, e) => s + (e.is_paid !== false ? toAmt(e.amount) : 0),
+        0
+      ),
+    [expensesForStatusTotals]
   );
   const periodUnpaid = useMemo(
-    () => filteredExpenses.reduce((s, e) => s + (e.is_paid === false ? toAmt(e.amount) : 0), 0),
-    [filteredExpenses]
+    () =>
+      expensesForStatusTotals.reduce(
+        (s, e) => s + (e.is_paid === false ? toAmt(e.amount) : 0),
+        0
+      ),
+    [expensesForStatusTotals]
   );
+
+  const donutSelectedKey =
+    filterPaid === true ? 'paid' : filterPaid === false ? 'unpaid' : null;
+
+  const handleDonutSelect = (key: string | null) => {
+    if (key === 'paid') setFilterPaid(true);
+    else if (key === 'unpaid') setFilterPaid(false);
+    else setFilterPaid(null);
+  };
   const periodBudgetTotal = useMemo(
     () => budgets.reduce((s, b) => s + toAmt(b.amount), 0),
     [budgets]
@@ -760,23 +811,44 @@ export default function ExpenseDashboard({
             textColor={colors.text}
             mutedColor={colors.textSecondary}
             trackColor={colors.border}
+            selectedKey={donutSelectedKey}
+            onSelectSlice={handleDonutSelect}
             centerLabel={displayMoney(periodPaid + periodUnpaid)}
-            centerSubLabel="Total"
+            centerSubLabel={
+              donutSelectedKey
+                ? donutSlices.find((s) => s.key === donutSelectedKey)?.label || 'Filtered'
+                : 'Total'
+            }
           />
           <View style={styles.donutLegend}>
             {donutSlices
               .filter((s) => s.key !== 'empty')
-              .map((s) => (
-                <View key={s.key} style={styles.donutLegendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                  <Text style={[styles.donutLegendLabel, { color: colors.text }]}>{s.label}</Text>
-                  <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
-                    {displayMoney(s.amount)}
-                  </Text>
-                </View>
-              ))}
+              .map((s) => {
+                const active = donutSelectedKey === s.key;
+                const dimmed = donutSelectedKey != null && !active;
+                return (
+                  <TouchableOpacity
+                    key={s.key}
+                    style={[styles.donutLegendRow, dimmed && { opacity: 0.4 }]}
+                    onPress={() => handleDonutSelect(active ? null : s.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
+                    <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
+                      {s.label}
+                    </Text>
+                    <Text style={[styles.donutLegendAmt, { color: colors.textSecondary }]}>
+                      {displayMoney(s.amount)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
           </View>
         </View>
+        <Text style={[styles.donutHint, { color: colors.textSecondary }]}>
+          Tap a legend item to filter · tap the chart to show all
+        </Text>
       </View>
 
       <View style={styles.actionRow}>
@@ -1224,6 +1296,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   todayBtnText: { fontSize: 12, fontWeight: '700' },
+  donutHint: { fontSize: 11, fontWeight: '500', opacity: 0.75, marginTop: -2 },
   donutBlock: {
     flexDirection: 'row',
     alignItems: 'center',
