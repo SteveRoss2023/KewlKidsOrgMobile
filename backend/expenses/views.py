@@ -1346,16 +1346,15 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
                 calculated_next_due = self._get_next_date(last_occurrence, recurring.frequency)
 
             if recurring.end_date and calculated_next_due > recurring.end_date:
-                # No further occurrences; keep next_due at/after last bill but only
-                # auto-deactivate once the template end date is in the past.
+                # No further occurrences; keep next_due at/after last bill.
+                # Do not flip is_active here — create/update own that decision so
+                # generation side-effects don't surprise-deactivate new bills.
                 recurring.next_due_date = calculated_next_due
-                if recurring.end_date < timezone.now().date():
-                    recurring.is_active = False
             else:
                 logger.info(f"Updating next_due_date from {recurring.next_due_date} to {calculated_next_due} for {recurring.id}")
                 recurring.next_due_date = calculated_next_due
 
-            recurring.save()
+            recurring.save(update_fields=['next_due_date', 'updated_at'])
 
         return {
             'generated_count': generated_count,
@@ -1517,15 +1516,22 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             )
 
         today = timezone.now().date()
-        # Only auto-deactivate when the template has fully ended (end date in the past).
+        update_fields = ['next_due_date', 'is_active', 'updated_at']
+        # Explicit Active wins: clear a past end date so reactivation sticks.
+        # Otherwise auto-deactivate only when the template has fully ended.
         # Having next_due past end while end is still in the future must NOT clear Active —
         # that was flipping Rent/Rogers/Shaw inactive as soon as end dates were set.
-        if recurring.end_date and recurring.end_date < today:
+        if requested_active is True:
+            recurring.is_active = True
+            if recurring.end_date and recurring.end_date < today:
+                recurring.end_date = None
+                update_fields.append('end_date')
+        elif recurring.end_date and recurring.end_date < today:
             recurring.is_active = False
         elif requested_active is not None:
             recurring.is_active = requested_active
 
-        recurring.save(update_fields=['next_due_date', 'is_active', 'updated_at'])
+        recurring.save(update_fields=update_fields)
 
         try:
             from .budget_sync import sync_category_budget_from_bills

@@ -14,6 +14,7 @@ import { RecurringExpense, ExpenseCategory, RecurringFrequency, PaymentMethod, C
 import { useTheme } from '../../contexts/ThemeContext';
 import ThemeAwarePicker from '../lists/ThemeAwarePicker';
 import ThemeAwareDatePicker from '../ThemeAwareDatePicker';
+import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
 
 interface RecurringExpenseFormProps {
   visible: boolean;
@@ -145,7 +146,7 @@ export default function RecurringExpenseForm({
 
     if (recurringExpense) {
       setDescription(recurringExpense.description);
-      setAmount(recurringExpense.amount.toString());
+      setAmount(formatMoneyDisplay(recurringExpense.amount));
       setCategoryId(recurringExpense.category);
       setFrequency(recurringExpense.frequency);
       setPaymentMethod(recurringExpense.payment_method);
@@ -200,13 +201,24 @@ export default function RecurringExpenseForm({
     }
     // next_due_date is calculated automatically, no need to validate
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
+    const amountNum = parseMoneyDisplay(amount);
+    if (amountNum == null || amountNum <= 0) {
       Alert.alert('Validation Error', 'Please enter a valid amount greater than 0');
       return;
     }
 
     // next_due_date is calculated automatically from start_date + frequency, don't send it
+    const endTrimmed = endDate.trim();
+    // Past end dates force inactive on the server; clear them when Active is on.
+    const now = new Date();
+    const todayKey = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+    const resolvedEnd =
+      isActive && endTrimmed && endTrimmed < todayKey ? null : endTrimmed || null;
+
     if (recurringExpense) {
       onSubmit({
         category: categoryId,
@@ -215,7 +227,7 @@ export default function RecurringExpenseForm({
         frequency,
         payment_method: paymentMethod,
         start_date: startDate,
-        end_date: endDate.trim() || null,
+        end_date: resolvedEnd,
         notes: notes.trim() || undefined,
         is_active: isActive,
       });
@@ -228,8 +240,9 @@ export default function RecurringExpenseForm({
         frequency,
         payment_method: paymentMethod,
         start_date: startDate,
-        end_date: endDate.trim() || null,
+        ...(resolvedEnd ? { end_date: resolvedEnd } : {}),
         notes: notes.trim() || undefined,
+        is_active: true,
       });
     }
   };
@@ -265,10 +278,10 @@ export default function RecurringExpenseForm({
               <TextInput
                 style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
                 value={amount}
-                onChangeText={setAmount}
-                placeholder="0.00"
+                onChangeText={(t) => setAmount(onMoneyChange(t))}
+                placeholder="$0.00"
                 placeholderTextColor={colors.textSecondary}
-                keyboardType="decimal-pad"
+                keyboardType="number-pad"
                 editable={!loading}
               />
             </View>

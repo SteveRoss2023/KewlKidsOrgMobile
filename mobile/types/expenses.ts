@@ -268,6 +268,7 @@ export interface CreateRecurringExpenseData {
   next_due_date?: string; // Optional - calculated automatically from start_date + frequency
   payment_method: PaymentMethod;
   tags?: number[];
+  is_active?: boolean;
 }
 
 export interface UpdateRecurringExpenseData {
