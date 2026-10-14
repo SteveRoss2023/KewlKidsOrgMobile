@@ -98,6 +98,27 @@ function openEndedPayHorizonEnd(now = new Date()): string {
 /** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
 const ensuredIncomeScheduleKeys = new Set<string>();
 
+type IncomeBoardCache = {
+  streams: IncomeStream[];
+  occurrences: IncomeOccurrence[];
+  demoPortfolio: boolean;
+  year: number;
+  boardTab: 'overview' | 'streams';
+  selectedMonthIndex: number;
+};
+
+/** Keep last Income payload so YTD/Accounts ↔ Income doesn't cold-reload. */
+const incomeBoardCache = new Map<number, IncomeBoardCache>();
+
+/** Drop cached Income boards after stream/payment mutations. */
+export function invalidateIncomeBoardCache(familyId?: number | null) {
+  if (familyId == null) {
+    incomeBoardCache.clear();
+    return;
+  }
+  incomeBoardCache.delete(familyId);
+}
+
 function openEndedPayHorizonYear(now = new Date()): number {
   return now.getFullYear() + 1;
 }
@@ -148,22 +169,39 @@ export default function IncomeDashboard({
   const isWide = useIsWideLayout();
 
   const now = useMemo(() => new Date(), []);
-  const [year, setYear] = useState(() => now.getFullYear());
-  const [loading, setLoading] = useState(true);
+  const initialCache =
+    selectedFamily != null ? incomeBoardCache.get(selectedFamily.id) : undefined;
+
+  const [year, setYear] = useState(() => initialCache?.year ?? now.getFullYear());
+  const [loading, setLoading] = useState(!initialCache);
   const [error, setError] = useState('');
-  const [streams, setStreams] = useState<IncomeStream[]>([]);
-  const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>([]);
-  const [demoPortfolio, setDemoPortfolio] = useState(false);
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
-  const [boardTab, setBoardTab] = useState<'overview' | 'streams'>('overview');
-  const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
+  const [streams, setStreams] = useState<IncomeStream[]>(() => initialCache?.streams ?? []);
+  const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>(
+    () => initialCache?.occurrences ?? []
+  );
+  const [demoPortfolio, setDemoPortfolio] = useState(() => initialCache?.demoPortfolio ?? false);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    initialCache && selectedFamily ? selectedFamily.id : null
+  );
+  const [boardTab, setBoardTab] = useState<'overview' | 'streams'>(
+    () => initialCache?.boardTab ?? 'overview'
+  );
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(
+    () => initialCache?.selectedMonthIndex ?? now.getMonth()
+  );
   const [expandedStreamIds, setExpandedStreamIds] = useState<number[]>([]);
 
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   const ensuredYearRef = useRef('');
-  const monthInitYearRef = useRef<number | null>(null);
+  const monthInitYearRef = useRef<number | null>(initialCache ? initialCache.year : null);
+  const yearRef = useRef(year);
+  yearRef.current = year;
+  const boardTabRef = useRef(boardTab);
+  boardTabRef.current = boardTab;
+  const selectedMonthIndexRef = useRef(selectedMonthIndex);
+  selectedMonthIndexRef.current = selectedMonthIndex;
 
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
@@ -177,6 +215,25 @@ export default function IncomeDashboard({
     monthInitYearRef.current = null;
     setLoading(true);
   }, []);
+
+  const writeCache = useCallback(
+    (
+      familyId: number,
+      payload: {
+        streams: IncomeStream[];
+        occurrences: IncomeOccurrence[];
+        demoPortfolio: boolean;
+      }
+    ) => {
+      incomeBoardCache.set(familyId, {
+        ...payload,
+        year: yearRef.current,
+        boardTab: boardTabRef.current,
+        selectedMonthIndex: selectedMonthIndexRef.current,
+      });
+    },
+    []
+  );
 
   const readDemoPortfolioPref = useCallback(async (): Promise<boolean> => {
     const user = await AuthService.getUserData();
@@ -233,7 +290,22 @@ export default function IncomeDashboard({
       const soft = !!opts?.soft;
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
-      if (!soft) setLoading(true);
+      const cached = incomeBoardCache.get(familyId);
+      if (cached) {
+        setStreams(cached.streams);
+        setOccurrences(cached.occurrences);
+        setDemoPortfolio(cached.demoPortfolio);
+        setYear(cached.year);
+        setBoardTab(cached.boardTab);
+        setSelectedMonthIndex(cached.selectedMonthIndex);
+        setDataFamilyId(familyId);
+        monthInitYearRef.current = cached.year;
+        setLoading(false);
+        // Tab return with warm cache: skip network (mutations clear via invalidate).
+        if (soft) return;
+      } else if (!soft) {
+        setLoading(true);
+      }
       setError('');
       try {
         const demoEnabled = await readDemoPortfolioPref();
@@ -256,6 +328,11 @@ export default function IncomeDashboard({
         setOccurrences(occList);
         setDataFamilyId(familyId);
         setLoading(false);
+        writeCache(familyId, {
+          streams: streamList,
+          occurrences: occList,
+          demoPortfolio: demoEnabled,
+        });
 
         const createdAny = await ensureStreamSchedules(year, streamList, familyId);
         if (
@@ -276,6 +353,11 @@ export default function IncomeDashboard({
             return;
           }
           setOccurrences(refreshed);
+          writeCache(familyId, {
+            streams: streamList,
+            occurrences: refreshed,
+            demoPortfolio: demoEnabled,
+          });
         }
       } catch (err: any) {
         if (
@@ -297,12 +379,27 @@ export default function IncomeDashboard({
         }
       }
     },
-    [selectedFamily, year, clearState, readDemoPortfolioPref, ensureStreamSchedules]
+    [selectedFamily, year, clearState, readDemoPortfolioPref, ensureStreamSchedules, writeCache]
   );
 
   useEffect(() => {
     clearState();
-    if (!selectedFamily) setLoading(false);
+    if (selectedFamily) {
+      const cached = incomeBoardCache.get(selectedFamily.id);
+      if (cached) {
+        setStreams(cached.streams);
+        setOccurrences(cached.occurrences);
+        setDemoPortfolio(cached.demoPortfolio);
+        setYear(cached.year);
+        setBoardTab(cached.boardTab);
+        setSelectedMonthIndex(cached.selectedMonthIndex);
+        setDataFamilyId(selectedFamily.id);
+        monthInitYearRef.current = cached.year;
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
@@ -312,16 +409,33 @@ export default function IncomeDashboard({
         setLoading(false);
         return;
       }
-      const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily });
+      const cacheHit = incomeBoardCache.has(selectedFamily.id);
+      const soft = cacheHit || dataFamilyId === selectedFamily.id;
+      void load({ soft });
     }, [selectedFamily?.id, load, dataFamilyId])
   );
 
+  const lastRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
-    if (!selectedFamily || refreshKey === 0) return;
+    if (!selectedFamily) return;
+    if (refreshKey === lastRefreshKeyRef.current) return;
+    lastRefreshKeyRef.current = refreshKey;
     void load({ soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
+
+  // Persist year / sub-tab / month so remount restores the same view.
+  useEffect(() => {
+    if (!selectedFamily || dataFamilyId !== selectedFamily.id) return;
+    const prev = incomeBoardCache.get(selectedFamily.id);
+    if (!prev) return;
+    incomeBoardCache.set(selectedFamily.id, {
+      ...prev,
+      year,
+      boardTab,
+      selectedMonthIndex,
+    });
+  }, [selectedFamily, dataFamilyId, year, boardTab, selectedMonthIndex]);
 
   const streamTypeById = useMemo(() => {
     const map = new Map<number, IncomeStreamType>();

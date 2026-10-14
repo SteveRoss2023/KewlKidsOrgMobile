@@ -59,6 +59,7 @@ Hubs unmount inactive tabs via `switch (activeTab)`. Cache is what makes return 
 - Passes accounts/snapshots into YTD / Accounts where possible (less duplicate GETs).
 - Income / Accounts / Forecast (Target) / YTD: soft-load + board refresh keys.
 - `Promise.all` for generate-occurrences style work where it was sequential.
+- **Income remount cache:** `incomeBoardCache` in `IncomeDashboard.tsx` (key `familyId`); export `invalidateIncomeBoardCache`. Soft + cache hit → early return (no streams/occs GETs). Mutations / header refresh invalidate then bump `incomeBoardRefreshKey`.
 
 ### Expenses hub (`mobile/app/(tabs)/expenses-hub.tsx`)
 

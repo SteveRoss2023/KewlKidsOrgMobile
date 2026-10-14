@@ -32,7 +32,9 @@ import UpdateBalancesWizard, {
   firstOfMonthYmd,
 } from '../../components/money/UpdateBalancesWizard';
 import YtdDashboard from '../../components/money/YtdDashboard';
-import IncomeDashboard from '../../components/money/IncomeDashboard';
+import IncomeDashboard, {
+  invalidateIncomeBoardCache,
+} from '../../components/money/IncomeDashboard';
 import AccountsDashboard from '../../components/money/AccountsDashboard';
 import TargetDashboard from '../../components/money/TargetDashboard';
 import TooltipButton from '../../components/TooltipButton';
@@ -262,6 +264,7 @@ export default function MoneyScreen() {
         setDataFamilyId(familyId);
         // Only bump boards after mutations — routine focus load must not re-fetch YTD twice.
         if (opts?.refreshBoards) {
+          invalidateIncomeBoardCache(familyId);
           setYtdBoardRefreshKey((k) => k + 1);
           setIncomeBoardRefreshKey((k) => k + 1);
           setAccountsBoardRefreshKey((k) => k + 1);
@@ -323,6 +326,7 @@ export default function MoneyScreen() {
     if (!selectedFamily || refreshing) return;
     setRefreshing(true);
     try {
+      invalidateIncomeBoardCache(selectedFamily.id);
       // Bump boards first so active tab starts refetching immediately.
       setYtdBoardRefreshKey((k) => k + 1);
       setIncomeBoardRefreshKey((k) => k + 1);
