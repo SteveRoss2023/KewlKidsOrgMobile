@@ -325,7 +325,8 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     if (!selectedFamily) return;
     if (refreshKey === lastRefreshKeyRef.current) return;
     lastRefreshKeyRef.current = refreshKey;
-    void load({ soft: true });
+    // Force network (soft would reuse streams / skip after cache paint).
+    void load({ soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 

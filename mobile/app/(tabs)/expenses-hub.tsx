@@ -61,6 +61,7 @@ export default function ExpensesHubScreen() {
   const [activeTab, setActiveTab] = useState<HubTab>('overview');
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [tags, setTags] = useState<ExpenseTag[]>([]);
   const [error, setError] = useState('');
@@ -173,6 +174,18 @@ export default function ExpensesHubScreen() {
     },
     [selectedFamily, clearExpenseState]
   );
+
+  /** PWA-friendly force refresh — header button (pull-to-refresh is a no-op on web). */
+  const handleRefresh = useCallback(async () => {
+    if (!selectedFamily || refreshing) return;
+    setRefreshing(true);
+    try {
+      bumpExpenseBoards();
+      await load({ soft: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedFamily, refreshing, bumpExpenseBoards, load]);
 
   useEffect(() => {
     clearExpenseState();
@@ -575,23 +588,41 @@ export default function ExpensesHubScreen() {
         ]}
       >
         <Text style={[styles.topTitle, { color: colors.text }]}>Expense Tracker</Text>
-        <TooltipButton
-          tooltip={showAmounts ? 'Hide amounts' : 'Show amounts'}
-          style={styles.amountToggle}
-          onPress={toggleShowAmounts}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: showAmounts }}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <FontAwesome
-            name={showAmounts ? 'eye' : 'eye-slash'}
-            size={16}
-            color={colors.textSecondary}
-          />
-          <Text style={[styles.amountToggleText, { color: colors.textSecondary }]}>
-            {showAmounts ? 'Hide amounts' : 'Show amounts'}
-          </Text>
-        </TooltipButton>
+        <View style={styles.topBarActions}>
+          <TouchableOpacity
+            style={[styles.refreshButton, { borderColor: colors.border }]}
+            onPress={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh expense data"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <FontAwesome name="refresh" size={16} color={colors.text} />
+            )}
+          </TouchableOpacity>
+          <TooltipButton
+            tooltip={showAmounts ? 'Hide amounts' : 'Show amounts'}
+            style={styles.amountToggle}
+            onPress={toggleShowAmounts}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: showAmounts }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <FontAwesome
+              name={showAmounts ? 'eye' : 'eye-slash'}
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.amountToggleText, { color: colors.textSecondary }]}>
+              {showAmounts ? 'Hide amounts' : 'Show amounts'}
+            </Text>
+          </TooltipButton>
+        </View>
       </View>
 
       <View
@@ -775,6 +806,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   topTitle: { fontSize: 16, fontWeight: '700' },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 36,
+    height: 36,
+  },
   amountToggle: {
     flexDirection: 'row',
     alignItems: 'center',

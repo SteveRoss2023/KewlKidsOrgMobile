@@ -15,3 +15,4 @@ Preserve unless the user asks to change them:
 - `lastRefreshKeyRef` so remount does not treat unchanged `refreshKey` as a refresh
 - Budgets year via `GET /budgets/year_board/` / `getBudgetsYearBoard` (not 12× monthly `getBudgets`)
 - Expenses paid toggle: hub API-only; dashboard `writeCache` + invalidate budget/cashflow
+- Force refresh on PWA: Money/Expenses header refresh buttons bump `refreshKey` / invalidate caches then hard-reload boards (RN RefreshControl is a no-op on web — do not rely on pull).

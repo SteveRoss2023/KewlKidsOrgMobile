@@ -319,7 +319,7 @@ export default function IncomeDashboard({
 
   useEffect(() => {
     if (!selectedFamily || refreshKey === 0) return;
-    void load({ soft: true });
+    void load({ soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 

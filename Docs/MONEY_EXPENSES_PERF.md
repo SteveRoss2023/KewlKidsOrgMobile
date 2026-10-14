@@ -20,7 +20,22 @@ Money/Expenses soft-load (Oct 2026) — see Docs/MONEY_EXPENSES_PERF.md:
 5. Budgets year load uses GET /budgets/year_board/?family=&year= (same rows as 12× monthly asOf). Client: expenseService.getBudgetsYearBoard.
 6. refreshKey effects must ignore remount with unchanged key (lastRefreshKeyRef pattern) or remount+invalidate causes random spinners.
 7. Never paint another family’s rows: clear/hard load on family switch; cache keys are family-scoped.
+8. Force refresh on PWA: Money / Expense Tracker header refresh buttons (RN `RefreshControl` is a no-op on web).
 ```
+
+---
+
+## Force refresh (PWA)
+
+React Native `RefreshControl` does **not** work on web. Use the **header refresh button** (circular icon), same idea as Home:
+
+| Screen | Control | Effect |
+|--------|---------|--------|
+| Home | Header refresh | Families + user + chat unread |
+| Money | Header refresh next to eye toggle | Bumps all Money board `refreshKey`s (hard board reload) + reloads parent accounts/snapshots |
+| Expense Tracker | Header refresh next to eye toggle | `bumpExpenseBoards()` (invalidate caches + hard board reload via `refreshKey`) + hub cats/tags |
+
+Normal tab returns still use warm cache / soft load. Header refresh is the explicit “force network” escape hatch.
 
 ---
 
@@ -132,6 +147,7 @@ After `year_board`: restart Django if the process was already running.
 | Paid toggle on Expenses or Budgets → leave → return | Toggle still correct |
 | Create / edit / delete expense or budget | Boards refresh (cache invalidated) |
 | Switch family | No previous family’s amounts; hard load |
+| Tap header refresh on Money/Expenses | Button spinner; boards refetch (Network tab shows GETs) |
 
 ---
 
@@ -145,6 +161,7 @@ After `year_board`: restart Django if the process was already running.
 | Wrong family’s data flash | Family switch didn’t clear state / cache key missing family id |
 | Budgets year slow again (many GETs) | Client fell back to 12× `getBudgets`; or `year_board` 404 (Django not restarted) |
 | Random spinner on remount with no edits | Missing `lastRefreshKeyRef` guard on `refreshKey` effect |
+| Header refresh does nothing visible | Button disabled, or `refreshKey` / invalidate not wired; check Network for GETs |
 
 ---
 

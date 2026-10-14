@@ -319,7 +319,7 @@ export default function BudgetDashboard({
     if (!selectedFamily) return;
     if (refreshKey === lastRefreshKeyRef.current) return;
     lastRefreshKeyRef.current = refreshKey;
-    void loadYear(year, { soft: true });
+    void loadYear(year, { soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 

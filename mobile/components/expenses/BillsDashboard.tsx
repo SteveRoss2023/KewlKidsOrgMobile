@@ -233,7 +233,7 @@ export default function BillsDashboard({
     if (!selectedFamily) return;
     if (refreshKey === lastRefreshKeyRef.current) return;
     lastRefreshKeyRef.current = refreshKey;
-    void load({ soft: true });
+    void load({ soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 

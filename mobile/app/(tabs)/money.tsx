@@ -84,6 +84,7 @@ export default function MoneyScreen() {
   const params = useLocalSearchParams<{ tab?: string; updateBalances?: string }>();
   const [tab, setTab] = useState<MoneyTab>('ytd');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [streams, setStreams] = useState<IncomeStream[]>([]);
   const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
@@ -317,6 +318,22 @@ export default function MoneyScreen() {
     }, [load, selectedFamily?.id, dataFamilyId, accounts.length])
   );
 
+  /** PWA-friendly force refresh — header button (pull-to-refresh is a no-op on web). */
+  const handleRefresh = useCallback(async () => {
+    if (!selectedFamily || refreshing) return;
+    setRefreshing(true);
+    try {
+      // Bump boards first so active tab starts refetching immediately.
+      setYtdBoardRefreshKey((k) => k + 1);
+      setIncomeBoardRefreshKey((k) => k + 1);
+      setAccountsBoardRefreshKey((k) => k + 1);
+      setTargetBoardRefreshKey((k) => k + 1);
+      await load({ soft: true, refreshBoards: false });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedFamily, refreshing, load]);
+
   const openNewStream = () => {
     setEditingStream(null);
     setStreamName('');
@@ -539,23 +556,41 @@ export default function MoneyScreen() {
       <GlobalNavBar />
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <Text style={[styles.topTitle, { color: colors.text }]}>Money</Text>
-        <TooltipButton
-          tooltip={showAmounts ? 'Hide amounts' : 'Show amounts'}
-          style={styles.amountToggle}
-          onPress={toggleShowAmounts}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: showAmounts }}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <FontAwesome
-            name={showAmounts ? 'eye' : 'eye-slash'}
-            size={16}
-            color={colors.textSecondary}
-          />
-          <Text style={[styles.amountToggleText, { color: colors.textSecondary }]}>
-            {showAmounts ? 'Hide amounts' : 'Show amounts'}
-          </Text>
-        </TooltipButton>
+        <View style={styles.topBarActions}>
+          <TouchableOpacity
+            style={[styles.refreshButton, { borderColor: colors.border }]}
+            onPress={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh money data"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <FontAwesome name="refresh" size={16} color={colors.text} />
+            )}
+          </TouchableOpacity>
+          <TooltipButton
+            tooltip={showAmounts ? 'Hide amounts' : 'Show amounts'}
+            style={styles.amountToggle}
+            onPress={toggleShowAmounts}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: showAmounts }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <FontAwesome
+              name={showAmounts ? 'eye' : 'eye-slash'}
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.amountToggleText, { color: colors.textSecondary }]}>
+              {showAmounts ? 'Hide amounts' : 'Show amounts'}
+            </Text>
+          </TooltipButton>
+        </View>
       </View>
       <View style={[styles.tabContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
@@ -947,6 +982,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   topTitle: { fontSize: 16, fontWeight: '700' },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 36,
+    height: 36,
+  },
   amountToggle: {
     flexDirection: 'row',
     alignItems: 'center',

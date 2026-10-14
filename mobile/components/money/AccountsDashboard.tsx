@@ -257,7 +257,7 @@ export default function AccountsDashboard({
   useEffect(() => {
     if (!selectedFamily || refreshKey === 0) return;
     skipNextSoftFetchRef.current = false;
-    void load({ soft: true });
+    void load({ soft: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
