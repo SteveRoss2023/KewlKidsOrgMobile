@@ -29,15 +29,23 @@ import {
   CreateExpenseTagData,
   UpdateExpenseTagData,
 } from '../../types/expenses';
-import BudgetDashboard from '../../components/expenses/BudgetDashboard';
-import ExpenseDashboard from '../../components/expenses/ExpenseDashboard';
-import BillsDashboard from '../../components/expenses/BillsDashboard';
+import BudgetDashboard, {
+  invalidateBudgetYearCache,
+} from '../../components/expenses/BudgetDashboard';
+import ExpenseDashboard, {
+  invalidateExpenseBoardCache,
+} from '../../components/expenses/ExpenseDashboard';
+import BillsDashboard, {
+  invalidateBillsBoardCache,
+} from '../../components/expenses/BillsDashboard';
 import ExpenseForm from '../../components/expenses/ExpenseForm';
 import BudgetForm from '../../components/expenses/BudgetForm';
 import CategoryForm from '../../components/expenses/CategoryForm';
 import TagForm from '../../components/expenses/TagForm';
 import ReceiptScanWizard from '../../components/expenses/ReceiptScanWizard';
-import CashflowDashboard from '../../components/expenses/CashflowDashboard';
+import CashflowDashboard, {
+  invalidateCashflowYearCache,
+} from '../../components/expenses/CashflowDashboard';
 import AlertModal from '../../components/AlertModal';
 import { forFamily } from '../../utils/familyScope';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
@@ -98,8 +106,22 @@ export default function ExpensesHubScreen() {
     setTagPendingDelete(null);
     setDataFamilyId(null);
     setLoading(true);
+    invalidateCashflowYearCache();
+    invalidateBudgetYearCache();
+    invalidateExpenseBoardCache();
+    invalidateBillsBoardCache();
     setBudgetsRefreshKey((k) => k + 1);
   }, []);
+
+  const bumpExpenseBoards = useCallback(() => {
+    if (selectedFamily) {
+      invalidateCashflowYearCache(selectedFamily.id);
+      invalidateBudgetYearCache(selectedFamily.id);
+      invalidateExpenseBoardCache(selectedFamily.id);
+      invalidateBillsBoardCache(selectedFamily.id);
+    }
+    setBudgetsRefreshKey((k) => k + 1);
+  }, [selectedFamily]);
 
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
@@ -208,14 +230,14 @@ export default function ExpensesHubScreen() {
       if (current) {
         await expenseService.updateExpense(current.id, data as UpdateExpenseData);
         closeExpenseForm();
-        setBudgetsRefreshKey((k) => k + 1);
+        bumpExpenseBoards();
         await load({ soft: true });
         return;
       }
 
       const created = await expenseService.createExpense(data as CreateExpenseData);
       const full = await expenseService.getExpense(created.id);
-      setBudgetsRefreshKey((k) => k + 1);
+      bumpExpenseBoards();
       await load({ soft: true });
       if (options?.stayOpen) {
         editingExpenseRef.current = full;
@@ -233,8 +255,9 @@ export default function ExpensesHubScreen() {
 
   const handleTogglePaid = async (expense: Expense, nextPaid: boolean) => {
     try {
+      // API only — ExpenseDashboard writes its board cache and invalidates
+      // Overview/Budgets so a full bump doesn't race the paid toggle.
       await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
-      setBudgetsRefreshKey((k) => k + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update paid status');
       throw err;
@@ -244,7 +267,7 @@ export default function ExpensesHubScreen() {
   const handleDeleteExpense = async (expense: Expense) => {
     try {
       await expenseService.deleteExpense(expense.id);
-      setBudgetsRefreshKey((k) => k + 1);
+      bumpExpenseBoards();
       await load({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete expense');
@@ -262,7 +285,7 @@ export default function ExpensesHubScreen() {
       }
       setShowBudgetForm(false);
       setEditingBudget(null);
-      setBudgetsRefreshKey((k) => k + 1);
+      bumpExpenseBoards();
       await load({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to save budget');
@@ -274,7 +297,7 @@ export default function ExpensesHubScreen() {
   const handleDeleteBudget = async (budget: Budget) => {
     try {
       await expenseService.deleteBudget(budget.id);
-      setBudgetsRefreshKey((k) => k + 1);
+      bumpExpenseBoards();
       await load({ soft: true });
     } catch (err: any) {
       setError(err.message || 'Failed to delete budget');
@@ -344,7 +367,7 @@ export default function ExpensesHubScreen() {
   };
 
   const handlePlanApplied = useCallback(() => {
-    setBudgetsRefreshKey((k) => k + 1);
+    bumpExpenseBoards();
     if (activeTab === 'expenses' || activeTab === 'bills' || activeTab === 'categories') {
       void load({ soft: true });
     }
@@ -463,11 +486,19 @@ export default function ExpensesHubScreen() {
   };
 
   const familyKey = selectedFamily?.id ?? 'none';
-  const familyDataReady =
+  const hubCatalogReady =
     !!selectedFamily && dataFamilyId === selectedFamily.id && !loading;
 
   const renderContent = () => {
-    if (!familyDataReady) {
+    if (!selectedFamily) {
+      return (
+        <View style={styles.center}>
+          <Text style={{ color: colors.textSecondary }}>Select a family first</Text>
+        </View>
+      );
+    }
+    // Categories needs hub cats/tags; other boards load their own data and should not wait.
+    if (activeTab === 'categories' && !hubCatalogReady) {
       return (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -495,6 +526,8 @@ export default function ExpensesHubScreen() {
           <ExpenseDashboard
             key={familyKey}
             refreshKey={budgetsRefreshKey}
+            initialCategories={hubCatalogReady ? categories : undefined}
+            initialTags={hubCatalogReady ? tags : undefined}
             onAdd={() => {
               editingExpenseRef.current = null;
               setEditingExpense(null);
@@ -517,11 +550,14 @@ export default function ExpensesHubScreen() {
           <BillsDashboard
             key={familyKey}
             refreshKey={budgetsRefreshKey}
+            initialCategories={hubCatalogReady ? categories : undefined}
             onPlanApplied={handlePlanApplied}
           />
         );
       case 'overview':
-        return <CashflowDashboard key={familyKey} />;
+        return (
+          <CashflowDashboard key={familyKey} refreshKey={budgetsRefreshKey} />
+        );
       case 'categories':
         return renderCategoriesTab();
       default:
@@ -684,7 +720,7 @@ export default function ExpensesHubScreen() {
             onClose={() => setShowReceiptWizard(false)}
             onSaved={() => {
               setShowReceiptWizard(false);
-              setBudgetsRefreshKey((k) => k + 1);
+              bumpExpenseBoards();
               void load({ soft: true });
             }}
           />

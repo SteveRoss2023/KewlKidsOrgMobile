@@ -310,6 +310,29 @@ class ExpenseService {
   }
 
   /**
+   * Same per-month budget rows as 12× getBudgets(asOf=YYYY-MM-01), one request.
+   * Keys: "YYYY-01" … "YYYY-12".
+   */
+  async getBudgetsYearBoard(
+    familyId: number,
+    year: number,
+    isActive?: boolean
+  ): Promise<Record<string, Budget[]>> {
+    try {
+      const params: Record<string, any> = { family: familyId, year };
+      if (isActive !== undefined) params.is_active = isActive.toString();
+      const response = await apiClient.get<Record<string, Budget[]>>(
+        '/budgets/year_board/',
+        { params }
+      );
+      return response.data || {};
+    } catch (error) {
+      console.error('Error fetching budgets year board:', error);
+      throw handleAPIError(error as any);
+    }
+  }
+
+  /**
    * Create/update monthly budgets from recurring templates (optional expense analysis).
    */
   async createBudgetsFromRecurring(

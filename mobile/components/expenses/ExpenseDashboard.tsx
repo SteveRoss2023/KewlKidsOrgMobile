@@ -38,11 +38,55 @@ import RecurringExpenseRow, { formatOccurrenceDate } from './RecurringExpenseRow
 import ExpenseCategoryRow from './ExpenseCategoryRow';
 import DonutChart from './charts/DonutChart';
 import AlertModal from '../AlertModal';
+import { invalidateCashflowYearCache } from './CashflowDashboard';
+import { invalidateBudgetYearCache } from './BudgetDashboard';
 
 type SortBy = 'date' | 'amount' | 'category';
 type SortOrder = 'asc' | 'desc';
 
 const UNPAID_COLOR = '#f59e0b';
+
+type ExpenseBoardCache = {
+  expenses: Expense[];
+  budgets: Budget[];
+  categories: ExpenseCategory[];
+  tags: ExpenseTag[];
+  recurringExpenses: RecurringExpense[];
+  periodMode: PeriodModeOrAll;
+  viewDateISO: string;
+};
+
+/** Survive Expenses tab remounts (Overview ↔ Expenses). */
+const expenseBoardCache = new Map<string, ExpenseBoardCache>();
+const expenseBoardLastKey = new Map<number, string>();
+
+function expenseBoardRangeKey(periodMode: PeriodModeOrAll, viewDate: Date): string {
+  if (periodMode === 'all') return 'all';
+  const range = periodDateRange(viewDate, periodMode);
+  return `${periodMode}:${range.start_date ?? ''}:${range.end_date ?? ''}`;
+}
+
+function expenseBoardCacheKey(
+  familyId: number,
+  periodMode: PeriodModeOrAll,
+  viewDate: Date
+): string {
+  return `${familyId}:${expenseBoardRangeKey(periodMode, viewDate)}`;
+}
+
+/** Drop cached Expenses boards after expense/budget mutations. */
+export function invalidateExpenseBoardCache(familyId?: number | null) {
+  if (familyId == null) {
+    expenseBoardCache.clear();
+    expenseBoardLastKey.clear();
+    return;
+  }
+  const prefix = `${familyId}:`;
+  for (const key of [...expenseBoardCache.keys()]) {
+    if (key.startsWith(prefix)) expenseBoardCache.delete(key);
+  }
+  expenseBoardLastKey.delete(familyId);
+}
 
 function toAmt(v: number | string | null | undefined): number {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0));
@@ -54,6 +98,10 @@ function parseExpenseDate(dateString: string): Date {
   return new Date(year, month - 1, day);
 }
 
+function toDateISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 interface ExpenseDashboardProps {
   onAdd?: () => void;
   onScan?: () => void;
@@ -62,6 +110,8 @@ interface ExpenseDashboardProps {
   onTogglePaid?: (expense: Expense, nextPaid: boolean) => void | Promise<void>;
   onBudgetPress?: (budget: Budget) => void;
   refreshKey?: number;
+  initialCategories?: ExpenseCategory[];
+  initialTags?: ExpenseTag[];
 }
 
 export default function ExpenseDashboard({
@@ -72,22 +122,42 @@ export default function ExpenseDashboard({
   onTogglePaid,
   onBudgetPress,
   refreshKey = 0,
+  initialCategories,
+  initialTags,
 }: ExpenseDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
 
-  const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>('month');
-  const [viewDate, setViewDate] = useState(() => startOfPeriod(new Date(), 'month'));
-  const [loading, setLoading] = useState(true);
+  const initialCache = (() => {
+    if (!selectedFamily) return undefined;
+    const lastKey = expenseBoardLastKey.get(selectedFamily.id);
+    return lastKey ? expenseBoardCache.get(lastKey) : undefined;
+  })();
+
+  const [periodMode, setPeriodMode] = useState<PeriodModeOrAll>(
+    () => initialCache?.periodMode ?? 'month'
+  );
+  const [viewDate, setViewDate] = useState(() =>
+    initialCache?.viewDateISO
+      ? parseExpenseDate(initialCache.viewDateISO)
+      : startOfPeriod(new Date(), 'month')
+  );
+  const [loading, setLoading] = useState(!initialCache);
   const [error, setError] = useState('');
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
-  const [tags, setTags] = useState<ExpenseTag[]>([]);
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [expenses, setExpenses] = useState<Expense[]>(() => initialCache?.expenses ?? []);
+  const [budgets, setBudgets] = useState<Budget[]>(() => initialCache?.budgets ?? []);
+  const [categories, setCategories] = useState<ExpenseCategory[]>(
+    () => initialCache?.categories ?? []
+  );
+  const [tags, setTags] = useState<ExpenseTag[]>(() => initialCache?.tags ?? []);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(
+    () => initialCache?.recurringExpenses ?? []
+  );
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    initialCache && selectedFamily ? selectedFamily.id : null
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -107,11 +177,28 @@ export default function ExpenseDashboard({
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+  const skipPeriodResetRef = useRef(!!initialCache);
+  const periodModeRef = useRef(periodMode);
+  periodModeRef.current = periodMode;
+  const viewDateRef = useRef(viewDate);
+  viewDateRef.current = viewDate;
+  const budgetsRef = useRef(budgets);
+  budgetsRef.current = budgets;
+  const categoriesRef = useRef(categories);
+  categoriesRef.current = categories;
+  const tagsRef = useRef(tags);
+  tagsRef.current = tags;
+  const recurringRef = useRef(recurringExpenses);
+  recurringRef.current = recurringExpenses;
 
   const paidColor = colors.success || '#10b981';
 
   useEffect(() => {
     if (periodMode === 'all') return;
+    if (skipPeriodResetRef.current) {
+      skipPeriodResetRef.current = false;
+      return;
+    }
     setViewDate(startOfPeriod(new Date(), periodMode));
   }, [periodMode]);
 
@@ -127,6 +214,30 @@ export default function ExpenseDashboard({
     setLoading(true);
   }, []);
 
+  const writeCache = useCallback(
+    (
+      familyId: number,
+      mode: PeriodModeOrAll,
+      date: Date,
+      payload: {
+        expenses: Expense[];
+        budgets: Budget[];
+        categories: ExpenseCategory[];
+        tags: ExpenseTag[];
+        recurringExpenses: RecurringExpense[];
+      }
+    ) => {
+      const key = expenseBoardCacheKey(familyId, mode, date);
+      expenseBoardCache.set(key, {
+        ...payload,
+        periodMode: mode,
+        viewDateISO: toDateISO(date),
+      });
+      expenseBoardLastKey.set(familyId, key);
+    },
+    []
+  );
+
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
       if (!selectedFamily) {
@@ -137,7 +248,21 @@ export default function ExpenseDashboard({
       const soft = !!opts?.soft;
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
-      if (!soft) setLoading(true);
+      const cacheKey = expenseBoardCacheKey(familyId, periodMode, viewDate);
+      const cached = expenseBoardCache.get(cacheKey);
+      if (cached) {
+        setExpenses(cached.expenses);
+        setBudgets(cached.budgets);
+        setCategories(cached.categories);
+        setTags(cached.tags);
+        setRecurringExpenses(cached.recurringExpenses);
+        setDataFamilyId(familyId);
+        setLoading(false);
+        // Tab return with fresh cache: skip network (mutations clear via invalidate).
+        if (soft) return;
+      } else if (!soft) {
+        setLoading(true);
+      }
       setError('');
       try {
         const range = periodDateRange(viewDate, periodMode);
@@ -146,9 +271,19 @@ export default function ExpenseDashboard({
         if (range.start_date) expenseFilters.start_date = range.start_date;
         if (range.end_date) expenseFilters.end_date = range.end_date;
 
+        const reuseCats =
+          initialCategories &&
+          initialCategories.length > 0 &&
+          initialCategories.every((c) => c.family === familyId);
+        const reuseTags =
+          initialTags != null &&
+          (initialTags.length === 0 || initialTags.every((t) => t.family === familyId));
+
         const [cats, tagList, expList, budgetList, recurringList] = await Promise.all([
-          expenseService.getCategories(familyId),
-          expenseService.getTags(familyId),
+          reuseCats
+            ? Promise.resolve(initialCategories!)
+            : expenseService.getCategories(familyId),
+          reuseTags ? Promise.resolve(initialTags!) : expenseService.getTags(familyId),
           expenseService.getExpenses(familyId, expenseFilters),
           expenseService.getBudgets(familyId, true, {
             asOf: range.asOf,
@@ -164,12 +299,24 @@ export default function ExpenseDashboard({
           return;
         }
 
-        setCategories(forFamily(cats, familyId));
-        setTags(forFamily(tagList, familyId));
-        setExpenses(forFamily(expList, familyId));
-        setBudgets(forFamily(budgetList, familyId));
-        setRecurringExpenses(forFamily(recurringList, familyId));
+        const nextCats = forFamily(cats, familyId);
+        const nextTags = forFamily(tagList, familyId);
+        const nextExpenses = forFamily(expList, familyId);
+        const nextBudgets = forFamily(budgetList, familyId);
+        const nextRecurring = forFamily(recurringList, familyId);
+        setCategories(nextCats);
+        setTags(nextTags);
+        setExpenses(nextExpenses);
+        setBudgets(nextBudgets);
+        setRecurringExpenses(nextRecurring);
         setDataFamilyId(familyId);
+        writeCache(familyId, periodMode, viewDate, {
+          expenses: nextExpenses,
+          budgets: nextBudgets,
+          categories: nextCats,
+          tags: nextTags,
+          recurringExpenses: nextRecurring,
+        });
       } catch (err: any) {
         if (
           generation !== fetchGenerationRef.current ||
@@ -193,12 +340,37 @@ export default function ExpenseDashboard({
         }
       }
     },
-    [selectedFamily, viewDate, periodMode, clearState]
+    [
+      selectedFamily,
+      viewDate,
+      periodMode,
+      clearState,
+      initialCategories,
+      initialTags,
+      writeCache,
+    ]
   );
 
   useEffect(() => {
     clearState();
-    if (!selectedFamily) setLoading(false);
+    if (selectedFamily) {
+      const lastKey = expenseBoardLastKey.get(selectedFamily.id);
+      const cached = lastKey ? expenseBoardCache.get(lastKey) : undefined;
+      if (cached) {
+        skipPeriodResetRef.current = true;
+        setPeriodMode(cached.periodMode);
+        setViewDate(parseExpenseDate(cached.viewDateISO));
+        setExpenses(cached.expenses);
+        setBudgets(cached.budgets);
+        setCategories(cached.categories);
+        setTags(cached.tags);
+        setRecurringExpenses(cached.recurringExpenses);
+        setDataFamilyId(selectedFamily.id);
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
@@ -208,13 +380,19 @@ export default function ExpenseDashboard({
         setLoading(false);
         return;
       }
-      const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && expenses.length > 0 });
-    }, [selectedFamily?.id, load, dataFamilyId, expenses.length])
+      const cacheHit = expenseBoardCache.has(
+        expenseBoardCacheKey(selectedFamily.id, periodMode, viewDate)
+      );
+      const soft = cacheHit || dataFamilyId === selectedFamily.id;
+      void load({ soft });
+    }, [selectedFamily?.id, load, dataFamilyId, periodMode, viewDate])
   );
 
+  const lastRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
-    if (!selectedFamily || refreshKey === 0) return;
+    if (!selectedFamily) return;
+    if (refreshKey === lastRefreshKeyRef.current) return;
+    lastRefreshKeyRef.current = refreshKey;
     void load({ soft: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
@@ -367,14 +545,27 @@ export default function ExpenseDashboard({
   const handleTogglePaid = async (expense: Expense, nextPaid: boolean) => {
     setPaidToggleId(expense.id);
     try {
+      let nextExpenses: Expense[];
       if (onTogglePaid) {
         await onTogglePaid(expense, nextPaid);
-        setExpenses((prev) =>
-          prev.map((e) => (e.id === expense.id ? { ...e, is_paid: nextPaid } : e))
+        nextExpenses = expenses.map((e) =>
+          e.id === expense.id ? { ...e, is_paid: nextPaid } : e
         );
       } else {
         const updated = await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
-        setExpenses((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+        nextExpenses = expenses.map((e) => (e.id === updated.id ? updated : e));
+      }
+      setExpenses(nextExpenses);
+      if (selectedFamily) {
+        writeCache(selectedFamily.id, periodModeRef.current, viewDateRef.current, {
+          expenses: nextExpenses,
+          budgets: budgetsRef.current,
+          categories: categoriesRef.current,
+          tags: tagsRef.current,
+          recurringExpenses: recurringRef.current,
+        });
+        invalidateBudgetYearCache(selectedFamily.id);
+        invalidateCashflowYearCache(selectedFamily.id);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to update paid status');

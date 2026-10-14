@@ -95,6 +95,9 @@ function openEndedPayHorizonEnd(now = new Date()): string {
   return `${now.getFullYear() + 1}-12-31`;
 }
 
+/** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
+const ensuredIncomeScheduleKeys = new Set<string>();
+
 function openEndedPayHorizonYear(now = new Date()): number {
   return now.getFullYear() + 1;
 }
@@ -195,16 +198,23 @@ export default function IncomeDashboard({
       const openHorizonYear = Math.max(y, new Date().getFullYear() + 1);
       const openHorizonEnd = `${openHorizonYear}-12-31`;
       const key = `${familyId}:${openHorizonEnd}:${streamList.map((s) => s.id).join(',')}`;
-      if (ensuredYearRef.current === key) return false;
+      if (ensuredYearRef.current === key || ensuredIncomeScheduleKeys.has(key)) {
+        ensuredYearRef.current = key;
+        return false;
+      }
       let createdAny = false;
       try {
-        for (const s of streamList) {
-          const until = s.end_date || openHorizonEnd;
-          if (s.start_date > until) continue;
-          const res = await moneyService.generateOccurrences(s.id, until);
-          if (res.created > 0) createdAny = true;
-        }
+        const results = await Promise.all(
+          streamList.map(async (s) => {
+            const until = s.end_date || openHorizonEnd;
+            if (s.start_date > until) return 0;
+            const res = await moneyService.generateOccurrences(s.id, until);
+            return res.created;
+          })
+        );
+        createdAny = results.some((n) => n > 0);
         ensuredYearRef.current = key;
+        ensuredIncomeScheduleKeys.add(key);
       } catch {
         // ignore auto-fill errors
       }
@@ -227,32 +237,46 @@ export default function IncomeDashboard({
       setError('');
       try {
         const demoEnabled = await readDemoPortfolioPref();
-        const streamList = forFamily(await moneyService.getStreams(familyId), familyId);
+        const horizonEnd = openEndedPayHorizonEnd();
+        // Paint from streams + payments first; schedule fill runs after (was blocking).
+        const [streamListRaw, occListRaw] = await Promise.all([
+          moneyService.getStreams(familyId),
+          moneyService.getOccurrences(familyId, { end_date: horizonEnd }),
+        ]);
         if (
           generation !== fetchGenerationRef.current ||
           selectedFamilyIdRef.current !== familyId
         ) {
           return;
         }
-        await ensureStreamSchedules(year, streamList, familyId);
-        if (
-          generation !== fetchGenerationRef.current ||
-          selectedFamilyIdRef.current !== familyId
-        ) {
-          return;
-        }
-        // All payments (Streams tab); Overview filters by selected year client-side.
-        const occList = forFamily(await moneyService.getOccurrences(familyId), familyId);
-        if (
-          generation !== fetchGenerationRef.current ||
-          selectedFamilyIdRef.current !== familyId
-        ) {
-          return;
-        }
+        const streamList = forFamily(streamListRaw, familyId);
+        const occList = forFamily(occListRaw, familyId);
         setDemoPortfolio(demoEnabled);
         setStreams(streamList);
         setOccurrences(occList);
         setDataFamilyId(familyId);
+        setLoading(false);
+
+        const createdAny = await ensureStreamSchedules(year, streamList, familyId);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        if (createdAny) {
+          const refreshed = forFamily(
+            await moneyService.getOccurrences(familyId, { end_date: horizonEnd }),
+            familyId
+          );
+          if (
+            generation !== fetchGenerationRef.current ||
+            selectedFamilyIdRef.current !== familyId
+          ) {
+            return;
+          }
+          setOccurrences(refreshed);
+        }
       } catch (err: any) {
         if (
           generation !== fetchGenerationRef.current ||
@@ -289,8 +313,8 @@ export default function IncomeDashboard({
         return;
       }
       const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && streams.length > 0 });
-    }, [selectedFamily?.id, load, dataFamilyId, streams.length])
+      void load({ soft: sameFamily });
+    }, [selectedFamily?.id, load, dataFamilyId])
   );
 
   useEffect(() => {

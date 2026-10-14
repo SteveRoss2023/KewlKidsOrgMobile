@@ -230,60 +230,75 @@ export default function MoneyScreen() {
     setLoading(true);
   }, []);
 
-  const load = useCallback(async () => {
-    if (!selectedFamily) {
-      clearMoneyState();
-      setLoading(false);
-      return;
-    }
-    const familyId = selectedFamily.id;
-    const generation = ++fetchGenerationRef.current;
-    setLoading(true);
-    setError('');
-    try {
-      // Streams kept for payment-form stream type; Income board loads its own occs.
-      const [s, a, sn] = await Promise.all([
-        moneyService.getStreams(familyId),
-        moneyService.getAccounts(familyId),
-        moneyService.getSnapshots(familyId),
-      ]);
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
-        return;
-      }
-      setStreams(s);
-      setAccounts(a);
-      setSnapshots(sn);
-      setSelectedAccountId(a[0]?.id ?? null);
-      setDataFamilyId(familyId);
-      setYtdBoardRefreshKey((k) => k + 1);
-      setIncomeBoardRefreshKey((k) => k + 1);
-      setAccountsBoardRefreshKey((k) => k + 1);
-      setTargetBoardRefreshKey((k) => k + 1);
-    } catch (err: any) {
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
-        return;
-      }
-      setError(err.message || 'Failed to load money data');
-      setStreams([]);
-      setAccounts([]);
-      setSnapshots([]);
-      setSelectedAccountId(null);
-      setDataFamilyId(null);
-    } finally {
-      if (
-        generation === fetchGenerationRef.current &&
-        selectedFamilyIdRef.current === familyId
-      ) {
+  const load = useCallback(
+    async (opts?: { soft?: boolean; refreshBoards?: boolean }) => {
+      if (!selectedFamily) {
+        clearMoneyState();
         setLoading(false);
+        return;
       }
-    }
-  }, [selectedFamily, clearMoneyState]);
+      const soft = !!opts?.soft;
+      const familyId = selectedFamily.id;
+      const generation = ++fetchGenerationRef.current;
+      if (!soft) setLoading(true);
+      setError('');
+      try {
+        // Overview/Accounts only need accounts + snapshots. Streams are for the
+        // payment modal demo label — load them after paint so they don't block YTD.
+        const [a, sn] = await Promise.all([
+          moneyService.getAccounts(familyId),
+          moneyService.getSnapshots(familyId),
+        ]);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        setAccounts(a);
+        setSnapshots(sn);
+        setSelectedAccountId(a[0]?.id ?? null);
+        setDataFamilyId(familyId);
+        // Only bump boards after mutations — routine focus load must not re-fetch YTD twice.
+        if (opts?.refreshBoards) {
+          setYtdBoardRefreshKey((k) => k + 1);
+          setIncomeBoardRefreshKey((k) => k + 1);
+          setAccountsBoardRefreshKey((k) => k + 1);
+          setTargetBoardRefreshKey((k) => k + 1);
+        }
+        void moneyService.getStreams(familyId).then((s) => {
+          if (
+            generation !== fetchGenerationRef.current ||
+            selectedFamilyIdRef.current !== familyId
+          ) {
+            return;
+          }
+          setStreams(s);
+        });
+      } catch (err: any) {
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        setError(err.message || 'Failed to load money data');
+        setStreams([]);
+        setAccounts([]);
+        setSnapshots([]);
+        setSelectedAccountId(null);
+        setDataFamilyId(null);
+      } finally {
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
+          setLoading(false);
+        }
+      }
+    },
+    [selectedFamily, clearMoneyState]
+  );
 
   useEffect(() => {
     clearMoneyState();
@@ -293,9 +308,13 @@ export default function MoneyScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (selectedFamily) void load();
-      else setLoading(false);
-    }, [load, selectedFamily])
+      if (!selectedFamily) {
+        setLoading(false);
+        return;
+      }
+      const sameFamily = dataFamilyId === selectedFamily.id;
+      void load({ soft: sameFamily && accounts.length > 0 });
+    }, [load, selectedFamily?.id, dataFamilyId, accounts.length])
   );
 
   const openNewStream = () => {
@@ -349,7 +368,7 @@ export default function MoneyScreen() {
       const until = stream.end_date || `${horizonYear}-12-31`;
       await moneyService.generateOccurrences(stream.id, until);
       setShowStreamForm(false);
-      await load();
+      await load({ refreshBoards: true });
     } catch (err: any) {
       setError(err.message || 'Failed to save stream');
     } finally {
@@ -373,7 +392,7 @@ export default function MoneyScreen() {
         status: act != null ? 'received' : 'estimated',
       });
       setEditingOcc(null);
-      await load();
+      await load({ refreshBoards: true });
     } catch (err: any) {
       setError(err.message || 'Failed to update payment');
     } finally {
@@ -431,7 +450,7 @@ export default function MoneyScreen() {
         setSelectedAccountId(created.id);
       }
       setShowAccountForm(false);
-      await load();
+      await load({ refreshBoards: true });
     } catch (err: any) {
       setError(err.message || 'Failed to save account');
     } finally {
@@ -478,7 +497,7 @@ export default function MoneyScreen() {
       setShowSnapForm(false);
       setSnapDateLocked(false);
       setEditingSnapshotId(null);
-      await load();
+      await load({ refreshBoards: true });
     } catch (err: any) {
       setError(err.message || 'Failed to save balance');
     } finally {
@@ -577,7 +596,7 @@ export default function MoneyScreen() {
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>Select a family first</Text>
         </View>
-      ) : loading || (selectedFamily != null && dataFamilyId !== selectedFamily.id) ? (
+      ) : selectedFamily != null && dataFamilyId !== selectedFamily.id ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -595,6 +614,8 @@ export default function MoneyScreen() {
         <AccountsDashboard
           key={selectedFamily?.id ?? 'none'}
           refreshKey={accountsBoardRefreshKey}
+          initialAccounts={accounts}
+          initialSnapshots={snapshots}
           onUpdateBalances={() => setShowBalancesWizard(true)}
           onAddAccount={openNewAccount}
           onEditAccount={openEditAccount}
@@ -603,11 +624,17 @@ export default function MoneyScreen() {
           onDeleteSnapshot={setPendingDeleteSnapshot}
         />
       ) : tab === 'ytd' ? (
-        <YtdDashboard key={selectedFamily?.id ?? 'none'} refreshKey={ytdBoardRefreshKey} />
+        <YtdDashboard
+          key={selectedFamily?.id ?? 'none'}
+          refreshKey={ytdBoardRefreshKey}
+          initialAccounts={accounts}
+          initialSnapshots={snapshots}
+        />
       ) : (
         <TargetDashboard
           key={selectedFamily?.id ?? 'none'}
           refreshKey={targetBoardRefreshKey}
+          initialAccounts={accounts}
         />
       )}
 
@@ -797,7 +824,7 @@ export default function MoneyScreen() {
         defaultAsOf={firstOfMonthYmd()}
         onClose={() => setShowBalancesWizard(false)}
         onSaved={() => {
-          void load();
+          void load({ refreshBoards: true });
         }}
       />
 
@@ -818,7 +845,7 @@ export default function MoneyScreen() {
           try {
             await moneyService.deleteStream(pendingDeleteStream.id);
             setPendingDeleteStream(null);
-                  await load();
+                  await load({ refreshBoards: true });
           } catch (err: any) {
             setError(err.message || 'Delete failed');
             setPendingDeleteStream(null);
@@ -843,7 +870,7 @@ export default function MoneyScreen() {
           try {
             await moneyService.deleteOccurrence(pendingDeleteOcc.id);
             setPendingDeleteOcc(null);
-            await load();
+            await load({ refreshBoards: true });
           } catch (err: any) {
             setError(err.message || 'Delete failed');
             setPendingDeleteOcc(null);
@@ -869,7 +896,7 @@ export default function MoneyScreen() {
             await moneyService.deleteAccount(pendingDeleteAccount.id);
             setPendingDeleteAccount(null);
             setSelectedAccountId(null);
-            await load();
+            await load({ refreshBoards: true });
           } catch (err: any) {
             setError(err.message || 'Delete failed');
             setPendingDeleteAccount(null);
@@ -894,7 +921,7 @@ export default function MoneyScreen() {
           try {
             await moneyService.deleteSnapshot(pendingDeleteSnapshot.id);
             setPendingDeleteSnapshot(null);
-            await load();
+            await load({ refreshBoards: true });
           } catch (err: any) {
             setError(err.message || 'Delete failed');
             setPendingDeleteSnapshot(null);

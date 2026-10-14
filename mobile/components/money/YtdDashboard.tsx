@@ -92,19 +92,39 @@ function formatShortDate(ymd: string): string {
 
 interface YtdDashboardProps {
   refreshKey?: number;
+  /** Seed from Money parent to avoid a duplicate first fetch. */
+  initialAccounts?: MoneyAccount[];
+  initialSnapshots?: AccountSnapshot[];
 }
 
-export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
+export default function YtdDashboard({
+  refreshKey = 0,
+  initialAccounts,
+  initialSnapshots,
+}: YtdDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
 
-  const [loading, setLoading] = useState(true);
+  const seeded =
+    !!selectedFamily &&
+    Array.isArray(initialAccounts) &&
+    Array.isArray(initialSnapshots) &&
+    initialAccounts.length >= 0 &&
+    (initialAccounts.length === 0 || initialAccounts.every((a) => a.family === selectedFamily.id));
+
+  const [loading, setLoading] = useState(!seeded);
   const [error, setError] = useState('');
-  const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
-  const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<MoneyAccount[]>(() =>
+    seeded && selectedFamily ? forFamily(initialAccounts!, selectedFamily.id) : []
+  );
+  const [snapshots, setSnapshots] = useState<AccountSnapshot[]>(() =>
+    seeded && selectedFamily ? forFamily(initialSnapshots!, selectedFamily.id) : []
+  );
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    seeded && selectedFamily ? selectedFamily.id : null
+  );
   const [demoPortfolio, setDemoPortfolio] = useState(false);
   const [returnsYear, setReturnsYear] = useState(() => new Date().getFullYear());
   const [accountsOpen, setAccountsOpen] = useState(false);
@@ -112,6 +132,8 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+  /** Skip only the first soft fetch right after parent seed (cold paint). Later focuses refresh. */
+  const skipNextSoftFetchRef = useRef(seeded);
 
   const investedColor = colors.primary || '#2563eb';
   const cashColor = '#d97706';
@@ -123,6 +145,7 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
     setError('');
     setDataFamilyId(null);
     setLoading(true);
+    skipNextSoftFetchRef.current = false;
   }, []);
 
   const readDemoPortfolioPref = useCallback(async (): Promise<boolean> => {
@@ -191,20 +214,54 @@ export default function YtdDashboard({ refreshKey = 0 }: YtdDashboardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
+  // Keep Overview in sync when parent reloads after an edit (balances, account, etc.).
+  useEffect(() => {
+    if (!selectedFamily || !Array.isArray(initialAccounts) || !Array.isArray(initialSnapshots)) {
+      return;
+    }
+    if (
+      initialAccounts.length > 0 &&
+      initialAccounts.some((a) => a.family !== selectedFamily.id)
+    ) {
+      return;
+    }
+    setAccounts(forFamily(initialAccounts, selectedFamily.id));
+    setSnapshots(forFamily(initialSnapshots, selectedFamily.id));
+    setDataFamilyId(selectedFamily.id);
+    setLoading(false);
+  }, [initialAccounts, initialSnapshots, selectedFamily?.id]);
+
+  useEffect(() => {
+    if (!seeded) return;
+    let cancelled = false;
+    void readDemoPortfolioPref().then((v) => {
+      if (!cancelled) setDemoPortfolio(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [seeded, readDemoPortfolioPref]);
+
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) {
         setLoading(false);
         return;
       }
-      const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && accounts.length > 0 });
       setAccountsOpen(false);
-    }, [selectedFamily?.id, load, dataFamilyId, accounts.length])
+      const sameFamily = dataFamilyId === selectedFamily.id;
+      if (skipNextSoftFetchRef.current && sameFamily) {
+        skipNextSoftFetchRef.current = false;
+        setLoading(false);
+        return;
+      }
+      void load({ soft: sameFamily });
+    }, [selectedFamily?.id, load, dataFamilyId])
   );
 
   useEffect(() => {
     if (!selectedFamily || refreshKey === 0) return;
+    skipNextSoftFetchRef.current = false;
     void load({ soft: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);

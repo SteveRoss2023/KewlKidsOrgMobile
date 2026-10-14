@@ -30,19 +30,34 @@ const FORECAST_YEARS = 10;
 
 interface TargetDashboardProps {
   refreshKey?: number;
+  /** Seed from Money parent to avoid a duplicate first fetch. */
+  initialAccounts?: MoneyAccount[];
 }
 
-export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps) {
+export default function TargetDashboard({
+  refreshKey = 0,
+  initialAccounts,
+}: TargetDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
 
-  const [loading, setLoading] = useState(true);
+  const seeded =
+    !!selectedFamily &&
+    Array.isArray(initialAccounts) &&
+    (initialAccounts.length === 0 ||
+      initialAccounts.every((a) => a.family === selectedFamily.id));
+
+  const [loading, setLoading] = useState(!seeded);
   const [error, setError] = useState('');
-  const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
+  const [accounts, setAccounts] = useState<MoneyAccount[]>(() =>
+    seeded && selectedFamily ? forFamily(initialAccounts!, selectedFamily.id) : []
+  );
   const [demoPortfolio, setDemoPortfolio] = useState(false);
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    seeded && selectedFamily ? selectedFamily.id : null
+  );
   const [forecastRate, setForecastRate] = useState(DEFAULT_FORECAST_RATE);
   const [horizonYearsAhead, setHorizonYearsAhead] = useState(1);
   const [expandedForecastYears, setExpandedForecastYears] = useState<number[]>([]);
@@ -51,6 +66,7 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+  const skipNextSoftFetchRef = useRef(seeded);
 
   const investedColor = colors.primary;
   const cashColor = colors.warning;
@@ -65,6 +81,7 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
     setForecastRate(DEFAULT_FORECAST_RATE);
     setHorizonYearsAhead(1);
     setLoading(true);
+    skipNextSoftFetchRef.current = false;
   }, []);
 
   const readDemoPortfolioPref = useCallback(async (): Promise<boolean> => {
@@ -128,6 +145,30 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
+  useEffect(() => {
+    if (!selectedFamily || !Array.isArray(initialAccounts)) return;
+    if (
+      initialAccounts.length > 0 &&
+      initialAccounts.some((a) => a.family !== selectedFamily.id)
+    ) {
+      return;
+    }
+    setAccounts(forFamily(initialAccounts, selectedFamily.id));
+    setDataFamilyId(selectedFamily.id);
+    setLoading(false);
+  }, [initialAccounts, selectedFamily?.id]);
+
+  useEffect(() => {
+    if (!seeded) return;
+    let cancelled = false;
+    void readDemoPortfolioPref().then((v) => {
+      if (!cancelled) setDemoPortfolio(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [seeded, readDemoPortfolioPref]);
+
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) {
@@ -135,12 +176,18 @@ export default function TargetDashboard({ refreshKey = 0 }: TargetDashboardProps
         return;
       }
       const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && accounts.length > 0 });
-    }, [selectedFamily?.id, load, dataFamilyId, accounts.length])
+      if (skipNextSoftFetchRef.current && sameFamily) {
+        skipNextSoftFetchRef.current = false;
+        setLoading(false);
+        return;
+      }
+      void load({ soft: sameFamily });
+    }, [selectedFamily?.id, load, dataFamilyId])
   );
 
   useEffect(() => {
     if (!selectedFamily || refreshKey === 0) return;
+    skipNextSoftFetchRef.current = false;
     void load({ soft: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);

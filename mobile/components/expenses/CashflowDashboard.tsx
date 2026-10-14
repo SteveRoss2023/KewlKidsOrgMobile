@@ -34,6 +34,35 @@ import CategoryHBars from './charts/CategoryHBars';
 
 const UNPAID_COLOR = '#f59e0b';
 
+/** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
+const ensuredCashflowScheduleKeys = new Set<string>();
+
+type CashflowYearCache = {
+  streams: IncomeStream[];
+  occurrences: IncomeOccurrence[];
+  expenses: Expense[];
+  demoPortfolio: boolean;
+};
+
+/** Keep last Overview year payload so Budgets → Overview doesn't cold-reload. */
+const cashflowYearCache = new Map<string, CashflowYearCache>();
+
+function cashflowCacheKey(familyId: number, y: number) {
+  return `${familyId}:${y}`;
+}
+
+/** Drop cached Overview years after expense/income mutations so return isn't stale. */
+export function invalidateCashflowYearCache(familyId?: number | null) {
+  if (familyId == null) {
+    cashflowYearCache.clear();
+    return;
+  }
+  const prefix = `${familyId}:`;
+  for (const key of [...cashflowYearCache.keys()]) {
+    if (key.startsWith(prefix)) cashflowYearCache.delete(key);
+  }
+}
+
 function monthTitle(year: number, monthIndex: number): string {
   return new Date(year, monthIndex, 1).toLocaleDateString('en-US', {
     month: 'long',
@@ -41,7 +70,11 @@ function monthTitle(year: number, monthIndex: number): string {
   });
 }
 
-export default function CashflowDashboard() {
+type CashflowDashboardProps = {
+  refreshKey?: number;
+};
+
+export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
@@ -50,17 +83,33 @@ export default function CashflowDashboard() {
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
-  const [loading, setLoading] = useState(true);
+
+  const initialCache =
+    selectedFamily != null
+      ? cashflowYearCache.get(cashflowCacheKey(selectedFamily.id, now.getFullYear()))
+      : undefined;
+
+  const [loading, setLoading] = useState(!initialCache);
   const [error, setError] = useState('');
-  const [streams, setStreams] = useState<IncomeStream[]>([]);
-  const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [demoPortfolio, setDemoPortfolio] = useState(false);
+  const [streams, setStreams] = useState<IncomeStream[]>(() => initialCache?.streams ?? []);
+  const [occurrences, setOccurrences] = useState<IncomeOccurrence[]>(
+    () => initialCache?.occurrences ?? []
+  );
+  const [expenses, setExpenses] = useState<Expense[]>(() => initialCache?.expenses ?? []);
+  const [demoPortfolio, setDemoPortfolio] = useState(() => initialCache?.demoPortfolio ?? false);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    initialCache && selectedFamily ? selectedFamily.id : null
+  );
+  const [loadedYear, setLoadedYear] = useState<number | null>(() =>
+    initialCache ? now.getFullYear() : null
+  );
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
   const ensuredYearRef = useRef('');
   const monthInitYearRef = useRef<number | null>(null);
+  const streamsRef = useRef<IncomeStream[]>(streams);
+  streamsRef.current = streams;
 
   const spentColor = colors.error || '#ef4444';
 
@@ -70,6 +119,8 @@ export default function CashflowDashboard() {
     setOccurrences([]);
     setExpenses([]);
     setError('');
+    setDataFamilyId(null);
+    setLoadedYear(null);
     ensuredYearRef.current = '';
     monthInitYearRef.current = null;
     setLoading(true);
@@ -86,101 +137,197 @@ export default function CashflowDashboard() {
 
   const ensureYearSchedule = useCallback(
     async (y: number, streamList: IncomeStream[], familyId: number) => {
-      if (streamList.length === 0) return;
-      if (streamList.some((s) => s.family !== familyId)) return;
+      if (streamList.length === 0) return false;
+      if (streamList.some((s) => s.family !== familyId)) return false;
       const key = `${familyId}:${y}:${streamList.map((s) => s.id).join(',')}`;
-      if (ensuredYearRef.current === key) return;
+      if (ensuredYearRef.current === key || ensuredCashflowScheduleKeys.has(key)) {
+        ensuredYearRef.current = key;
+        return false;
+      }
       const yearStart = `${y}-01-01`;
       const yearEnd = `${y}-12-31`;
+      let createdAny = false;
       try {
-        for (const s of streamList) {
-          if (s.start_date > yearEnd) continue;
-          if (s.end_date && s.end_date < yearStart) continue;
-          let until = yearEnd;
-          if (s.end_date && s.end_date < until) until = s.end_date;
-          await moneyService.generateOccurrences(s.id, until);
-        }
+        const results = await Promise.all(
+          streamList.map(async (s) => {
+            if (s.start_date > yearEnd) return 0;
+            if (s.end_date && s.end_date < yearStart) return 0;
+            let until = yearEnd;
+            if (s.end_date && s.end_date < until) until = s.end_date;
+            const res = await moneyService.generateOccurrences(s.id, until);
+            return res.created;
+          })
+        );
+        createdAny = results.some((n) => n > 0);
         ensuredYearRef.current = key;
+        ensuredCashflowScheduleKeys.add(key);
       } catch {
         // ignore auto-fill errors
       }
+      return createdAny;
     },
     []
   );
 
-  const load = useCallback(async () => {
-    if (!selectedFamily) {
-      clearState();
-      setLoading(false);
-      return;
-    }
-    const familyId = selectedFamily.id;
-    const generation = ++fetchGenerationRef.current;
-    setLoading(true);
-    setError('');
-    try {
-      const demoEnabled = await readDemoPortfolioPref();
-      const streamList = await moneyService.getStreams(familyId);
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
+  const load = useCallback(
+    async (opts?: { soft?: boolean }) => {
+      if (!selectedFamily) {
+        clearState();
+        setLoading(false);
         return;
       }
-      await ensureYearSchedule(year, streamList, familyId);
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
-        return;
+      const soft = !!opts?.soft;
+      const familyId = selectedFamily.id;
+      const generation = ++fetchGenerationRef.current;
+      const cached = cashflowYearCache.get(cashflowCacheKey(familyId, year));
+      if (cached) {
+        setDemoPortfolio(cached.demoPortfolio);
+        setStreams(cached.streams);
+        setOccurrences(cached.occurrences);
+        setExpenses(cached.expenses);
+        setDataFamilyId(familyId);
+        setLoadedYear(year);
+        setLoading(false);
+        // Cached tab return: skip network (mutations clear cache).
+        if (soft) return;
+      } else if (!soft) {
+        setLoading(true);
       }
-      const start_date = `${year}-01-01`;
-      const end_date = `${year}-12-31`;
-      const [occs, expList] = await Promise.all([
-        moneyService.getOccurrences(familyId, { start_date, end_date }),
-        expenseService.getExpenses(familyId, { start_date, end_date }),
-      ]);
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
-        return;
+      setError('');
+      try {
+        const demoEnabled = await readDemoPortfolioPref();
+        const start_date = `${year}-01-01`;
+        const end_date = `${year}-12-31`;
+        const existingStreams = streamsRef.current;
+        const reuseStreams =
+          soft &&
+          existingStreams.length > 0 &&
+          existingStreams.every((s) => s.family === familyId);
+
+        const [streamList, occs, expList] = await Promise.all([
+          reuseStreams
+            ? Promise.resolve(existingStreams)
+            : moneyService.getStreams(familyId),
+          moneyService.getOccurrences(familyId, { start_date, end_date }),
+          expenseService.getExpenses(familyId, { start_date, end_date }),
+        ]);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        setDemoPortfolio(demoEnabled);
+        setStreams(streamList);
+        setOccurrences(occs);
+        setExpenses(expList);
+        setDataFamilyId(familyId);
+        setLoadedYear(year);
+        setLoading(false);
+        cashflowYearCache.set(cashflowCacheKey(familyId, year), {
+          streams: streamList,
+          occurrences: occs,
+          expenses: expList,
+          demoPortfolio: demoEnabled,
+        });
+
+        const createdAny = await ensureYearSchedule(year, streamList, familyId);
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        if (createdAny) {
+          const refreshed = await moneyService.getOccurrences(familyId, {
+            start_date,
+            end_date,
+          });
+          if (
+            generation !== fetchGenerationRef.current ||
+            selectedFamilyIdRef.current !== familyId
+          ) {
+            return;
+          }
+          setOccurrences(refreshed);
+          const prev = cashflowYearCache.get(cashflowCacheKey(familyId, year));
+          if (prev) {
+            cashflowYearCache.set(cashflowCacheKey(familyId, year), {
+              ...prev,
+              occurrences: refreshed,
+            });
+          }
+        }
+      } catch (err: any) {
+        if (
+          generation !== fetchGenerationRef.current ||
+          selectedFamilyIdRef.current !== familyId
+        ) {
+          return;
+        }
+        setError(err.message || 'Failed to load dashboard');
+        if (!cached) {
+          setStreams([]);
+          setOccurrences([]);
+          setExpenses([]);
+          setDataFamilyId(null);
+          setLoadedYear(null);
+        }
+      } finally {
+        if (
+          generation === fetchGenerationRef.current &&
+          selectedFamilyIdRef.current === familyId
+        ) {
+          setLoading(false);
+        }
       }
-      setDemoPortfolio(demoEnabled);
-      setStreams(streamList);
-      setOccurrences(occs);
-      setExpenses(expList);
-    } catch (err: any) {
-      if (
-        generation !== fetchGenerationRef.current ||
-        selectedFamilyIdRef.current !== familyId
-      ) {
-        return;
-      }
-      setError(err.message || 'Failed to load dashboard');
-      setStreams([]);
-      setOccurrences([]);
-      setExpenses([]);
-    } finally {
-      if (
-        generation === fetchGenerationRef.current &&
-        selectedFamilyIdRef.current === familyId
-      ) {
+    },
+    [selectedFamily, year, clearState, ensureYearSchedule, readDemoPortfolioPref]
+  );
+
+  useEffect(() => {
+    // Family switch: drop in-memory board state; year cache entries for other families stay.
+    clearState();
+    if (selectedFamily) {
+      const cached = cashflowYearCache.get(
+        cashflowCacheKey(selectedFamily.id, year)
+      );
+      if (cached) {
+        setDemoPortfolio(cached.demoPortfolio);
+        setStreams(cached.streams);
+        setOccurrences(cached.occurrences);
+        setExpenses(cached.expenses);
+        setDataFamilyId(selectedFamily.id);
+        setLoadedYear(year);
         setLoading(false);
       }
     }
-  }, [selectedFamily, year, clearState, ensureYearSchedule, readDemoPortfolioPref]);
-
-  useEffect(() => {
-    clearState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      if (!selectedFamily) return;
+      const cacheHit = cashflowYearCache.has(
+        cashflowCacheKey(selectedFamily.id, year)
+      );
+      // Soft when we already showed this family (tab return / year change) or have cache.
+      const soft =
+        cacheHit || dataFamilyId === selectedFamily.id || loadedYear != null;
+      void load({ soft });
+    }, [selectedFamily?.id, load, dataFamilyId, loadedYear, year])
   );
+
+  // Only react when refreshKey actually changes — not on every remount (refreshKey is
+  // often > 0). Remount + invalidate was wiping the tab cache and causing random spinners.
+  const lastRefreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (!selectedFamily) return;
+    if (refreshKey === lastRefreshKeyRef.current) return;
+    lastRefreshKeyRef.current = refreshKey;
+    void load({ soft: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const streamTypeById = useMemo(() => {
     const map = new Map<number, IncomeStreamType>();
@@ -440,7 +587,7 @@ export default function CashflowDashboard() {
         <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
       ) : null}
 
-      {loading ? (
+      {loading && !(dataFamilyId === selectedFamily?.id && loadedYear === year) ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>

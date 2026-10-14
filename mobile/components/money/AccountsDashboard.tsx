@@ -72,6 +72,9 @@ function formatShortDate(ymd: string): string {
 
 interface AccountsDashboardProps {
   refreshKey?: number;
+  /** Seed from Money parent to avoid a duplicate first fetch. */
+  initialAccounts?: MoneyAccount[];
+  initialSnapshots?: AccountSnapshot[];
   onUpdateBalances?: () => void;
   onAddAccount?: () => void;
   onEditAccount?: (account: MoneyAccount) => void;
@@ -82,6 +85,8 @@ interface AccountsDashboardProps {
 
 export default function AccountsDashboard({
   refreshKey = 0,
+  initialAccounts,
+  initialSnapshots,
   onUpdateBalances,
   onAddAccount,
   onEditAccount,
@@ -95,18 +100,32 @@ export default function AccountsDashboard({
   const isWide = useIsWideLayout();
   const isDark = theme === 'dark';
 
-  const [loading, setLoading] = useState(true);
+  const seeded =
+    !!selectedFamily &&
+    Array.isArray(initialAccounts) &&
+    Array.isArray(initialSnapshots) &&
+    (initialAccounts.length === 0 || initialAccounts.every((a) => a.family === selectedFamily.id));
+
+  const [loading, setLoading] = useState(!seeded);
   const [error, setError] = useState('');
-  const [accounts, setAccounts] = useState<MoneyAccount[]>([]);
-  const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
+  const [accounts, setAccounts] = useState<MoneyAccount[]>(() =>
+    seeded && selectedFamily ? forFamily(initialAccounts!, selectedFamily.id) : []
+  );
+  const [snapshots, setSnapshots] = useState<AccountSnapshot[]>(() =>
+    seeded && selectedFamily ? forFamily(initialSnapshots!, selectedFamily.id) : []
+  );
   const [demoPortfolio, setDemoPortfolio] = useState(false);
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    seeded && selectedFamily ? selectedFamily.id : null
+  );
   const [boardTab, setBoardTab] = useState<'overview' | 'accounts'>('overview');
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
 
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
+  /** Skip only the first soft fetch right after parent seed (cold paint). */
+  const skipNextSoftFetchRef = useRef(seeded);
 
   const investedColor = colors.primary;
   const cashColor = colors.warning;
@@ -122,6 +141,7 @@ export default function AccountsDashboard({
     setExpandedAccountId(null);
     setBoardTab('overview');
     setLoading(true);
+    skipNextSoftFetchRef.current = false;
   }, []);
 
   const readDemoPortfolioPref = useCallback(async (): Promise<boolean> => {
@@ -190,6 +210,34 @@ export default function AccountsDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
+  // Stay in sync when parent reloads after balance/account edits.
+  useEffect(() => {
+    if (!selectedFamily || !Array.isArray(initialAccounts) || !Array.isArray(initialSnapshots)) {
+      return;
+    }
+    if (
+      initialAccounts.length > 0 &&
+      initialAccounts.some((a) => a.family !== selectedFamily.id)
+    ) {
+      return;
+    }
+    setAccounts(forFamily(initialAccounts, selectedFamily.id));
+    setSnapshots(forFamily(initialSnapshots, selectedFamily.id));
+    setDataFamilyId(selectedFamily.id);
+    setLoading(false);
+  }, [initialAccounts, initialSnapshots, selectedFamily?.id]);
+
+  useEffect(() => {
+    if (!seeded) return;
+    let cancelled = false;
+    void readDemoPortfolioPref().then((v) => {
+      if (!cancelled) setDemoPortfolio(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [seeded, readDemoPortfolioPref]);
+
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) {
@@ -197,12 +245,18 @@ export default function AccountsDashboard({
         return;
       }
       const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && accounts.length > 0 });
-    }, [selectedFamily?.id, load, dataFamilyId, accounts.length])
+      if (skipNextSoftFetchRef.current && sameFamily) {
+        skipNextSoftFetchRef.current = false;
+        setLoading(false);
+        return;
+      }
+      void load({ soft: sameFamily });
+    }, [selectedFamily?.id, load, dataFamilyId])
   );
 
   useEffect(() => {
     if (!selectedFamily || refreshKey === 0) return;
+    skipNextSoftFetchRef.current = false;
     void load({ soft: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);

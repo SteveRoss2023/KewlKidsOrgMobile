@@ -33,26 +33,53 @@ function toAmt(v: number | string | null | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
+type BillsBoardCache = {
+  bills: RecurringExpense[];
+  budgets: Budget[];
+  categories: ExpenseCategory[];
+};
+
+/** Survive Bills tab remounts (Overview ↔ Bills). */
+const billsBoardCache = new Map<number, BillsBoardCache>();
+
+/** Drop cached Bills boards after expense/bill mutations. */
+export function invalidateBillsBoardCache(familyId?: number | null) {
+  if (familyId == null) {
+    billsBoardCache.clear();
+    return;
+  }
+  billsBoardCache.delete(familyId);
+}
+
 interface BillsDashboardProps {
   onPlanApplied?: () => void;
   refreshKey?: number;
+  initialCategories?: ExpenseCategory[];
 }
 
 export default function BillsDashboard({
   onPlanApplied,
   refreshKey = 0,
+  initialCategories,
 }: BillsDashboardProps) {
   const { colors } = useTheme();
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
 
-  const [loading, setLoading] = useState(true);
-  const [bills, setBills] = useState<RecurringExpense[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const initialCache =
+    selectedFamily != null ? billsBoardCache.get(selectedFamily.id) : undefined;
+
+  const [loading, setLoading] = useState(!initialCache);
+  const [bills, setBills] = useState<RecurringExpense[]>(() => initialCache?.bills ?? []);
+  const [budgets, setBudgets] = useState<Budget[]>(() => initialCache?.budgets ?? []);
+  const [categories, setCategories] = useState<ExpenseCategory[]>(
+    () => initialCache?.categories ?? []
+  );
   const [error, setError] = useState('');
-  const [dataFamilyId, setDataFamilyId] = useState<number | null>(null);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    initialCache && selectedFamily ? selectedFamily.id : null
+  );
 
   const [showWizard, setShowWizard] = useState(false);
   const [showBillForm, setShowBillForm] = useState(false);
@@ -84,6 +111,22 @@ export default function BillsDashboard({
     setLoading(true);
   }, []);
 
+  const writeCache = useCallback(
+    (
+      familyId: number,
+      nextBills: RecurringExpense[],
+      nextBudgets: Budget[],
+      nextCats: ExpenseCategory[]
+    ) => {
+      billsBoardCache.set(familyId, {
+        bills: nextBills,
+        budgets: nextBudgets,
+        categories: nextCats,
+      });
+    },
+    []
+  );
+
   const load = useCallback(
     async (opts?: { soft?: boolean }) => {
       if (!selectedFamily) {
@@ -94,13 +137,29 @@ export default function BillsDashboard({
       const soft = !!opts?.soft;
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
-      if (!soft) setLoading(true);
+      const cached = billsBoardCache.get(familyId);
+      if (cached) {
+        setBills(cached.bills);
+        setBudgets(cached.budgets);
+        setCategories(cached.categories);
+        setDataFamilyId(familyId);
+        setLoading(false);
+        if (soft) return;
+      } else if (!soft) {
+        setLoading(true);
+      }
       setError('');
       try {
+        const reuseCats =
+          initialCategories &&
+          initialCategories.length > 0 &&
+          initialCategories.every((c) => c.family === familyId);
         const [billsData, budgetsData, cats] = await Promise.all([
           expenseService.getRecurringExpenses(familyId),
           expenseService.getBudgets(familyId, true),
-          expenseService.getCategories(familyId),
+          reuseCats
+            ? Promise.resolve(initialCategories!)
+            : expenseService.getCategories(familyId),
         ]);
         if (
           generation !== fetchGenerationRef.current ||
@@ -108,10 +167,14 @@ export default function BillsDashboard({
         ) {
           return;
         }
-        setBills(forFamily(billsData, familyId));
-        setBudgets(forFamily(budgetsData, familyId));
-        setCategories(forFamily(cats, familyId));
+        const nextBills = forFamily(billsData, familyId);
+        const nextBudgets = forFamily(budgetsData, familyId);
+        const nextCats = forFamily(cats, familyId);
+        setBills(nextBills);
+        setBudgets(nextBudgets);
+        setCategories(nextCats);
         setDataFamilyId(familyId);
+        writeCache(familyId, nextBills, nextBudgets, nextCats);
       } catch (err: any) {
         if (
           generation !== fetchGenerationRef.current ||
@@ -133,12 +196,23 @@ export default function BillsDashboard({
         }
       }
     },
-    [selectedFamily, clearState]
+    [selectedFamily, clearState, initialCategories, writeCache]
   );
 
   useEffect(() => {
     clearState();
-    if (!selectedFamily) setLoading(false);
+    if (selectedFamily) {
+      const cached = billsBoardCache.get(selectedFamily.id);
+      if (cached) {
+        setBills(cached.bills);
+        setBudgets(cached.budgets);
+        setCategories(cached.categories);
+        setDataFamilyId(selectedFamily.id);
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
@@ -148,13 +222,17 @@ export default function BillsDashboard({
         setLoading(false);
         return;
       }
-      const sameFamily = dataFamilyId === selectedFamily.id;
-      void load({ soft: sameFamily && bills.length > 0 });
-    }, [selectedFamily?.id, load, dataFamilyId, bills.length])
+      const cacheHit = billsBoardCache.has(selectedFamily.id);
+      const soft = cacheHit || dataFamilyId === selectedFamily.id;
+      void load({ soft });
+    }, [selectedFamily?.id, load, dataFamilyId])
   );
 
+  const lastRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
-    if (!selectedFamily || refreshKey === 0) return;
+    if (!selectedFamily) return;
+    if (refreshKey === lastRefreshKeyRef.current) return;
+    lastRefreshKeyRef.current = refreshKey;
     void load({ soft: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
@@ -238,6 +316,7 @@ export default function BillsDashboard({
       }
       setShowBillForm(false);
       setEditingBill(null);
+      invalidateBillsBoardCache(selectedFamily.id);
       await load({ soft: true });
       onPlanApplied?.();
     } catch (err: any) {
@@ -254,6 +333,7 @@ export default function BillsDashboard({
     setError('');
     try {
       await expenseService.deleteRecurringExpense(bill.id);
+      if (selectedFamily) invalidateBillsBoardCache(selectedFamily.id);
       await load({ soft: true });
       onPlanApplied?.();
     } catch (err: any) {

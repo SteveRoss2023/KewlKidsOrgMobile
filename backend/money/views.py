@@ -124,12 +124,12 @@ class IncomeStreamViewSet(viewsets.ModelViewSet):
 
         updated = _sync_estimated_occurrences(stream)
 
-        occurrences = IncomeOccurrence.objects.filter(stream=stream).order_by('due_date')
+        # Clients only need counts; skip serializing every occurrence (large/slow).
         return Response(
             {
                 'created': created,
                 'updated': updated,
-                'occurrences': IncomeOccurrenceSerializer(occurrences, many=True).data,
+                'occurrences': [],
             }
         )
 

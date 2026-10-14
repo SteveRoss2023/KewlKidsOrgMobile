@@ -496,6 +496,46 @@ class BudgetViewSet(viewsets.ModelViewSet):
         ]
         return Response(data)
 
+    @action(detail=False, methods=['get'], url_path='year_board')
+    def year_board(self, request):
+        """One response with the same per-month budget rows as 12× list?as_of=YYYY-MM-01.
+
+        Returns { "YYYY-01": [...], ..., "YYYY-12": [...] } — identical filtering and
+        effective amounts/spent as the existing monthly list calls (no behavior change).
+        """
+        from .recurring_sync import build_budget_period_caches
+
+        year_raw = request.query_params.get('year')
+        try:
+            year = int(year_raw)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'year is required (integer YYYY)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if year < 1970 or year > 2100:
+            return Response({'error': 'year out of range'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = list(self.filter_queryset(self.get_queryset()))
+        family_ids = {b.family_id for b in queryset}
+        family_id = next(iter(family_ids)) if len(family_ids) == 1 else None
+
+        board: dict[str, list] = {}
+        for month in range(1, 13):
+            as_of = date(year, month, 1)
+            start, end = self._monthly_window_for_as_of(as_of)
+            context = dict(self.get_serializer_context())
+            context['as_of'] = as_of
+            context['period_window'] = (start, end)
+            if family_id is not None:
+                context.update(build_budget_period_caches(family_id, start, end))
+            serializer = self.get_serializer(queryset, many=True, context=context)
+            board[f'{year}-{month:02d}'] = [
+                row for row in serializer.data
+                if float(row.get('amount') or 0) > 0 or float(row.get('spent_amount') or 0) > 0
+            ]
+        return Response(board)
+
     def perform_create(self, serializer):
         """Create budget with family validation."""
         family_id = self.request.data.get('family')

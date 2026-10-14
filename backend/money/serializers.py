@@ -89,12 +89,20 @@ class AccountSerializer(serializers.ModelSerializer):
             'id', 'family', 'latest_balance', 'latest_as_of', 'created_at', 'updated_at',
         ]
 
+    def _latest_snap(self, obj):
+        # Prefer prefetched cache — order_by().first() bypasses prefetch and N+1s.
+        snaps = list(obj.snapshots.all())
+        if not snaps:
+            return None
+        snaps.sort(key=lambda s: (s.as_of_date, s.id), reverse=True)
+        return snaps[0]
+
     def get_latest_balance(self, obj):
-        snap = obj.snapshots.order_by('-as_of_date', '-id').first()
+        snap = self._latest_snap(obj)
         return _money_out(snap.balance) if snap else None
 
     def get_latest_as_of(self, obj):
-        snap = obj.snapshots.order_by('-as_of_date', '-id').first()
+        snap = self._latest_snap(obj)
         return snap.as_of_date.isoformat() if snap else None
 
 

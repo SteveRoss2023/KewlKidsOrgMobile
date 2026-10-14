@@ -1,0 +1,17 @@
+---
+description: Money/Expenses soft-load and module-cache performance patterns (Oct 2026)
+globs: mobile/app/(tabs)/money.tsx,mobile/app/(tabs)/expenses-hub.tsx,mobile/components/expenses/**/*,mobile/components/money/**/*,mobile/services/expenseService.ts,mobile/services/moneyService.ts,backend/expenses/views.py
+alwaysApply: false
+---
+
+# Money / Expenses performance
+
+Before changing load/refresh/cache behavior on Money or Expense Tracker boards, read **`Docs/MONEY_EXPENSES_PERF.md`**.
+
+Preserve unless the user asks to change them:
+
+- Module-level Maps + `invalidate*Cache(familyId?)` for remount survival
+- Soft load early-return when cache is warm; invalidate before refetch after mutations
+- `lastRefreshKeyRef` so remount does not treat unchanged `refreshKey` as a refresh
+- Budgets year via `GET /budgets/year_board/` / `getBudgetsYearBoard` (not 12× monthly `getBudgets`)
+- Expenses paid toggle: hub API-only; dashboard `writeCache` + invalidate budget/cashflow

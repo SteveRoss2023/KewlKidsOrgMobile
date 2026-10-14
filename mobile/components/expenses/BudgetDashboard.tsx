@@ -27,6 +27,7 @@ import {
   monthRange,
   rollupBudgetSeries,
 } from '../../utils/budgetSeries';
+import { invalidateCashflowYearCache } from './CashflowDashboard';
 
 const MONTH_NAMES = [
   'January',
@@ -42,6 +43,31 @@ const MONTH_NAMES = [
   'November',
   'December',
 ];
+
+type BudgetYearCache = {
+  budgetsByMonth: Record<string, Budget[]>;
+  expensesByMonth: Record<string, Expense[]>;
+  selectedMonthIndex: number;
+};
+
+/** Survive Budgets tab remounts (Overview ↔ Budgets). */
+const budgetYearCache = new Map<string, BudgetYearCache>();
+
+function budgetCacheKey(familyId: number, y: number) {
+  return `${familyId}:${y}`;
+}
+
+/** Drop cached Budgets years after expense/budget mutations. */
+export function invalidateBudgetYearCache(familyId?: number | null) {
+  if (familyId == null) {
+    budgetYearCache.clear();
+    return;
+  }
+  const prefix = `${familyId}:`;
+  for (const key of [...budgetYearCache.keys()]) {
+    if (key.startsWith(prefix)) budgetYearCache.delete(key);
+  }
+}
 
 interface BudgetDashboardProps {
   onExpensePress?: (expense: Expense) => void;
@@ -63,19 +89,39 @@ export default function BudgetDashboard({
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
-  const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
-  const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, Budget[]>>({});
-  const [expensesByMonth, setExpensesByMonth] = useState<Record<string, Expense[]>>({});
-  const [yearLoading, setYearLoading] = useState(true);
+
+  const initialCache =
+    selectedFamily != null
+      ? budgetYearCache.get(budgetCacheKey(selectedFamily.id, now.getFullYear()))
+      : undefined;
+
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(
+    () => initialCache?.selectedMonthIndex ?? now.getMonth()
+  );
+  const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, Budget[]>>(
+    () => initialCache?.budgetsByMonth ?? {}
+  );
+  const [expensesByMonth, setExpensesByMonth] = useState<Record<string, Expense[]>>(
+    () => initialCache?.expensesByMonth ?? {}
+  );
+  const [yearLoading, setYearLoading] = useState(!initialCache);
   const [loadingMonth, setLoadingMonth] = useState<number | null>(null);
   const [paidToggleId, setPaidToggleId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const [budgetPendingDelete, setBudgetPendingDelete] = useState<Budget | null>(null);
+  const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
+    initialCache && selectedFamily ? selectedFamily.id : null
+  );
+  const [loadedYear, setLoadedYear] = useState<number | null>(() =>
+    initialCache ? now.getFullYear() : null
+  );
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
   selectedFamilyIdRef.current = selectedFamily?.id ?? null;
-  const monthInitYearRef = useRef<number | null>(null);
+  const monthInitYearRef = useRef<number | null>(initialCache ? now.getFullYear() : null);
+  const selectedMonthIndexRef = useRef(selectedMonthIndex);
+  selectedMonthIndexRef.current = selectedMonthIndex;
 
   const spentColor = colors.error || '#ef4444';
   const okColor = colors.success;
@@ -85,30 +131,68 @@ export default function BudgetDashboard({
     setBudgetsByMonth({});
     setExpensesByMonth({});
     setError('');
+    setDataFamilyId(null);
+    setLoadedYear(null);
     monthInitYearRef.current = null;
     setYearLoading(true);
   }, []);
 
+  const writeCache = useCallback(
+    (
+      familyId: number,
+      y: number,
+      budgets: Record<string, Budget[]>,
+      expenses: Record<string, Expense[]>,
+      monthIdx: number
+    ) => {
+      budgetYearCache.set(budgetCacheKey(familyId, y), {
+        budgetsByMonth: budgets,
+        expensesByMonth: expenses,
+        selectedMonthIndex: monthIdx,
+      });
+    },
+    []
+  );
+
   const loadYear = useCallback(
-    async (y: number) => {
+    async (y: number, opts?: { soft?: boolean }) => {
       if (!selectedFamily) {
         clearState();
         setYearLoading(false);
         return;
       }
+      const soft = !!opts?.soft;
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
-      setYearLoading(true);
+      const cached = budgetYearCache.get(budgetCacheKey(familyId, y));
+      if (cached) {
+        setBudgetsByMonth(cached.budgetsByMonth);
+        setExpensesByMonth(cached.expensesByMonth);
+        setSelectedMonthIndex(cached.selectedMonthIndex);
+        setDataFamilyId(familyId);
+        setLoadedYear(y);
+        monthInitYearRef.current = y;
+        setYearLoading(false);
+        // Tab return with fresh cache: do not re-fire 12 budget calls (that made quick
+        // flipping slow). Mutations clear the cache via invalidateBudgetYearCache.
+        if (soft) return;
+      } else if (!soft) {
+        setYearLoading(true);
+      }
       setError('');
       try {
-        const results = await Promise.all(
-          Array.from({ length: 12 }, async (_, monthIndex) => {
-            const key = monthKey(y, monthIndex);
-            const asOf = `${key}-01`;
-            const data = await expenseService.getBudgets(familyId, true, { asOf });
-            return [key, data] as const;
-          })
-        );
+        const monthIdx = cached?.selectedMonthIndex ?? selectedMonthIndexRef.current;
+        const { start, end } = monthRange(y, monthIdx);
+        const monthKeyStr = monthKey(y, monthIdx);
+
+        // One year_board call (same data as 12× monthly asOf) + month expenses.
+        const [board, monthExpenses] = await Promise.all([
+          expenseService.getBudgetsYearBoard(familyId, y, true),
+          expenseService.getExpenses(familyId, {
+            start_date: start,
+            end_date: end,
+          }),
+        ]);
         if (
           generation !== fetchGenerationRef.current ||
           selectedFamilyIdRef.current !== familyId
@@ -116,10 +200,19 @@ export default function BudgetDashboard({
           return;
         }
         const next: Record<string, Budget[]> = {};
-        for (const [key, data] of results) {
-          next[key] = data;
+        for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+          const key = monthKey(y, monthIndex);
+          next[key] = board[key] || [];
         }
+        const nextExpenses = {
+          ...(cached?.expensesByMonth ?? {}),
+          [monthKeyStr]: monthExpenses,
+        };
         setBudgetsByMonth(next);
+        setExpensesByMonth(nextExpenses);
+        setDataFamilyId(familyId);
+        setLoadedYear(y);
+        writeCache(familyId, y, next, nextExpenses, monthIdx);
       } catch (err: any) {
         if (
           generation !== fetchGenerationRef.current ||
@@ -128,7 +221,11 @@ export default function BudgetDashboard({
           return;
         }
         setError(err.message || 'Failed to load budgets');
-        setBudgetsByMonth({});
+        if (!cached) {
+          setBudgetsByMonth({});
+          setDataFamilyId(null);
+          setLoadedYear(null);
+        }
       } finally {
         if (
           generation === fetchGenerationRef.current &&
@@ -138,7 +235,7 @@ export default function BudgetDashboard({
         }
       }
     },
-    [selectedFamily, clearState]
+    [selectedFamily, clearState, writeCache]
   );
 
   const fetchMonthExpenses = useCallback(
@@ -160,7 +257,14 @@ export default function BudgetDashboard({
         ) {
           return;
         }
-        setExpensesByMonth((prev) => ({ ...prev, [key]: data }));
+        setExpensesByMonth((prev) => {
+          const next = { ...prev, [key]: data };
+          const budgets = budgetYearCache.get(budgetCacheKey(familyId, y))?.budgetsByMonth;
+          if (budgets) {
+            writeCache(familyId, y, budgets, next, monthIndex);
+          }
+          return next;
+        });
       } catch (err: any) {
         if (
           generation !== fetchGenerationRef.current ||
@@ -178,22 +282,46 @@ export default function BudgetDashboard({
         }
       }
     },
-    [selectedFamily]
+    [selectedFamily, writeCache]
   );
 
   useEffect(() => {
     clearState();
+    if (selectedFamily) {
+      const cached = budgetYearCache.get(budgetCacheKey(selectedFamily.id, year));
+      if (cached) {
+        setBudgetsByMonth(cached.budgetsByMonth);
+        setExpensesByMonth(cached.expensesByMonth);
+        setSelectedMonthIndex(cached.selectedMonthIndex);
+        setDataFamilyId(selectedFamily.id);
+        setLoadedYear(year);
+        monthInitYearRef.current = year;
+        setYearLoading(false);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFamily?.id]);
 
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) return;
-      setExpensesByMonth({});
-      monthInitYearRef.current = null;
-      void loadYear(year);
-    }, [selectedFamily?.id, year, loadYear, refreshKey])
+      const cacheHit = budgetYearCache.has(budgetCacheKey(selectedFamily.id, year));
+      const soft =
+        cacheHit || dataFamilyId === selectedFamily.id || loadedYear != null;
+      void loadYear(year, { soft });
+    }, [selectedFamily?.id, year, loadYear, dataFamilyId, loadedYear])
   );
+
+  // Only react when refreshKey actually changes — not on every remount (refreshKey is
+  // often > 0). Remount + invalidate was wiping the tab cache and causing random spinners.
+  const lastRefreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (!selectedFamily) return;
+    if (refreshKey === lastRefreshKeyRef.current) return;
+    lastRefreshKeyRef.current = refreshKey;
+    void loadYear(year, { soft: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const months = useMemo(
     () => buildMonthlyBudgetSeries(year, budgetsByMonth, expensesByMonth),
@@ -233,6 +361,9 @@ export default function BudgetDashboard({
 
   const handleSelectMonth = (monthIndex: number) => {
     setSelectedMonthIndex(monthIndex);
+    if (selectedFamily && loadedYear === year) {
+      writeCache(selectedFamily.id, year, budgetsByMonth, expensesByMonth, monthIndex);
+    }
     const key = monthKey(year, monthIndex);
     if (!expensesByMonth[key]) {
       void fetchMonthExpenses(monthIndex, year);
@@ -247,6 +378,17 @@ export default function BudgetDashboard({
         const next: Record<string, Expense[]> = {};
         for (const [key, list] of Object.entries(prev)) {
           next[key] = list.map((e) => (e.id === updated.id ? updated : e));
+        }
+        // Persist into tab cache so Overview → Budgets return keeps the toggle.
+        if (selectedFamily) {
+          writeCache(
+            selectedFamily.id,
+            year,
+            budgetsByMonth,
+            next,
+            selectedMonthIndexRef.current
+          );
+          invalidateCashflowYearCache(selectedFamily.id);
         }
         return next;
       });
@@ -578,7 +720,8 @@ export default function BudgetDashboard({
           <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
         ) : null}
 
-        {yearLoading ? (
+        {yearLoading &&
+        !(dataFamilyId === selectedFamily?.id && loadedYear === year) ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.primary} />
           </View>
