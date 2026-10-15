@@ -543,17 +543,21 @@ class BudgetViewSet(viewsets.ModelViewSet):
         serializer.save(family=family)
 
     @staticmethod
-    def _normalize_recurring_to_monthly(amount: Decimal, frequency: str) -> Decimal:
+    def _normalize_recurring_to_monthly(
+        amount: Decimal, frequency: str, *, is_seasonal: bool = False
+    ) -> Decimal:
         """Convert recurring amount to a standing monthly budget contribution.
 
-        Yearly items are NOT amortized here — they only count in their due month
-        via BudgetSerializer effective amount.
+        Yearly and seasonal-monthly items are NOT amortized here — they only
+        count in their due months via BudgetSerializer effective amount.
         """
         if frequency == 'daily':
             return amount * Decimal('30.44')
         if frequency == 'weekly':
             return amount * Decimal('4.33')
         if frequency == 'yearly':
+            return Decimal('0')
+        if frequency == 'monthly' and is_seasonal:
             return Decimal('0')
         return amount  # monthly
 
@@ -590,9 +594,17 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 amount = Decimal('0')
             cat_id = recurring.category_id
             cat_name = recurring.category.name if recurring.category else None
-            monthly = self._normalize_recurring_to_monthly(amount, recurring.frequency)
+            monthly = self._normalize_recurring_to_monthly(
+                amount,
+                recurring.frequency,
+                is_seasonal=bool(getattr(recurring, 'is_seasonal', False)),
+            )
 
-            if recurring.frequency == 'yearly':
+            # Yearly / seasonal-monthly: placeholder budget row; dues drive months.
+            due_month_only = recurring.frequency == 'yearly' or (
+                recurring.frequency == 'monthly' and bool(getattr(recurring, 'is_seasonal', False))
+            )
+            if due_month_only:
                 if cat_id not in yearly_only_cats:
                     yearly_only_cats[cat_id] = {
                         'category_id': cat_id,
@@ -818,7 +830,12 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     target = float(suggestion.get('recurring_amount') or suggestion['amount'])
                     if suggestion['sources'] == 'both':
                         target = float(suggestion.get('recurring_amount') or 0)
-                    keep_higher = old_amount > target + 0.005
+                    # Recurring-only: always follow current bills (incl. downward).
+                    # Mixed with expense analysis: keep a higher user/expense envelope.
+                    keep_higher = (
+                        suggestion['sources'] == 'both'
+                        and old_amount > target + 0.005
+                    )
                     amount_unchanged = abs(old_amount - target) < 0.005
                     new_amount = old_amount if keep_higher else target
                     item['amount'] = new_amount

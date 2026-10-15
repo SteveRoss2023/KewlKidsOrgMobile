@@ -11,12 +11,19 @@ def _parse_amount(raw) -> Decimal:
         return Decimal('0.00')
 
 
-def _normalize_to_monthly(amount: Decimal, frequency: str) -> Decimal:
+def _normalize_to_monthly(amount: Decimal, frequency: str, *, is_seasonal: bool = False) -> Decimal:
+    """Standing monthly contribution for budget sync.
+
+    Yearly and seasonal-monthly bills contribute 0 here — they only count in the
+    months they are due (via BudgetSerializer effective amount / dues window).
+    """
     if frequency == 'daily':
         return amount * Decimal('30.44')
     if frequency == 'weekly':
         return amount * Decimal('4.33')
     if frequency == 'yearly':
+        return Decimal('0')
+    if frequency == 'monthly' and is_seasonal:
         return Decimal('0')
     return amount
 
@@ -36,7 +43,11 @@ def active_bills_for_category(family_id: int, category_id: int):
 def bills_monthly_amount(bills) -> Decimal:
     total = Decimal('0')
     for bill in bills:
-        total += _normalize_to_monthly(_parse_amount(bill.amount), bill.frequency)
+        total += _normalize_to_monthly(
+            _parse_amount(bill.amount),
+            bill.frequency,
+            is_seasonal=bool(getattr(bill, 'is_seasonal', False)),
+        )
     return total.quantize(Decimal('0.01'))
 
 
@@ -93,11 +104,12 @@ def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
 
     if existing:
         old_amount = _parse_amount(existing.amount)
-        keep_higher = old_amount > target + Decimal('0.005')
-        new_amount = old_amount if keep_higher else target
+        # Bill-only sync always follows current bills (including downward when a
+        # bill is removed). Stale high standings were freezing wrong year totals.
+        new_amount = target
         update_fields = ['updated_at', 'is_active']
         existing.is_active = True
-        if not keep_higher and abs(old_amount - target) >= Decimal('0.005'):
+        if abs(old_amount - target) >= Decimal('0.005'):
             existing.amount = target
             update_fields.append('amount')
         if desired_start and (

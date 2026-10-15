@@ -384,11 +384,16 @@ class BudgetSerializer(serializers.ModelSerializer):
     def _effective_amount(self, obj) -> Decimal:
         """Period-aware budget limit.
 
-        Categories with active recurring templates: sum amounts due in the viewed window
-        (so future-start items like Shaw in Apr 2027 don't inflate Oct; year view sums
-        all dues in that year).
-        Categories without recurring (manual / expense-analysis): stored monthly amount
-        × months in the window (1 for month view, 12 for year view).
+        Categories with active recurring templates: max(standing monthly × months,
+        recurring dues in the viewed window). Standing amount is what the user saves
+        in the budget form (and what create_from_recurring stores). Dues still raise
+        the limit in months when bills exceed the standing amount (e.g. yearly due
+        months), and future-start items only count when due so they don't inflate
+        earlier months. Without this max(), off-season months for seasonal bills
+        showed $0 even when the user had set a standing monthly budget.
+
+        Categories without recurring (manual / expense-analysis): stored monthly
+        amount × months in the window (1 for month view, 12 for year view).
         Clipped to the budget's own start_date / end_date.
         """
         from .recurring_sync import recurring_due_in_window, category_has_active_recurring
@@ -398,6 +403,7 @@ class BudgetSerializer(serializers.ModelSerializer):
         start, end = window
         base = self._base_amount(obj)
         months = self._months_spanned(start, end)
+        standing = base * Decimal(months)
 
         if obj.period != 'monthly':
             return base
@@ -408,13 +414,16 @@ class BudgetSerializer(serializers.ModelSerializer):
             if obj.category_id in recurring_cats:
                 period = self._period_window(obj)
                 if (start, end) == period:
-                    return Decimal(str(recurring_due_map.get(obj.category_id, 0)))
-                return recurring_due_in_window(obj.family_id, obj.category_id, start, end)
-            return base * Decimal(months)
+                    due = Decimal(str(recurring_due_map.get(obj.category_id, 0)))
+                else:
+                    due = recurring_due_in_window(obj.family_id, obj.category_id, start, end)
+                return max(standing, due)
+            return standing
 
         if category_has_active_recurring(obj.family_id, obj.category_id):
-            return recurring_due_in_window(obj.family_id, obj.category_id, start, end)
-        return base * Decimal(months)
+            due = recurring_due_in_window(obj.family_id, obj.category_id, start, end)
+            return max(standing, due)
+        return standing
 
     def get_base_amount(self, obj):
         return float(self._base_amount(obj))

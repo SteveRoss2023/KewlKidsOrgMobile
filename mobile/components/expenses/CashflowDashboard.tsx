@@ -15,7 +15,7 @@ import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import expenseService from '../../services/expenseService';
 import moneyService from '../../services/moneyService';
-import { Expense } from '../../types/expenses';
+import { Budget, Expense } from '../../types/expenses';
 import { IncomeOccurrence, IncomeStream, IncomeStreamType } from '../../types/money';
 import {
   buildMonthlyCashflowSeries,
@@ -24,6 +24,7 @@ import {
   monthsInCashflowTracking,
   rollupCashflowSeries,
 } from '../../utils/cashflow';
+import { monthKey } from '../../utils/budgetSeries';
 import AuthService from '../../services/authService';
 import { STORAGE_KEYS, storage } from '../../utils/storage';
 import {
@@ -32,9 +33,9 @@ import {
 } from '../../utils/moneyDemoPortfolio';
 import DonutChart from './charts/DonutChart';
 import MonthCashflowBars from './charts/MonthCashflowBars';
-import CategoryHBars from './charts/CategoryHBars';
 
 const UNPAID_COLOR = '#f59e0b';
+const BUDGET_COLOR = '#6366f1';
 
 /** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
 const ensuredCashflowScheduleKeys = new Set<string>();
@@ -43,6 +44,7 @@ type CashflowYearCache = {
   streams: IncomeStream[];
   occurrences: IncomeOccurrence[];
   expenses: Expense[];
+  budgetsByMonth: Record<string, Budget[]>;
   demoPortfolio: boolean;
 };
 
@@ -72,6 +74,37 @@ function monthTitle(year: number, monthIndex: number): string {
   });
 }
 
+function formatShortDate(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function emptyBudgetsByMonth(year: number): Record<string, Budget[]> {
+  const next: Record<string, Budget[]> = {};
+  for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+    next[monthKey(year, monthIndex)] = [];
+  }
+  return next;
+}
+
+function normalizeBudgetsBoard(
+  year: number,
+  board: Record<string, Budget[]>
+): Record<string, Budget[]> {
+  const next = emptyBudgetsByMonth(year);
+  for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+    const key = monthKey(year, monthIndex);
+    next[key] = board[key] || [];
+  }
+  return next;
+}
+
+type DrillFilter = 'spent' | 'unpaid' | null;
+
 type CashflowDashboardProps = {
   refreshKey?: number;
 };
@@ -85,8 +118,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => now.getMonth());
-  /** Donut slice filter: spent | unpaid | income | null (all) */
+  /** Donut / KPI drill: spent | unpaid | income | null */
   const [donutFilter, setDonutFilter] = useState<string | null>(null);
+  const [drillFilter, setDrillFilter] = useState<DrillFilter>(null);
 
   const initialCache =
     selectedFamily != null
@@ -100,6 +134,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     () => initialCache?.occurrences ?? []
   );
   const [expenses, setExpenses] = useState<Expense[]>(() => initialCache?.expenses ?? []);
+  const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, Budget[]>>(
+    () => initialCache?.budgetsByMonth ?? emptyBudgetsByMonth(now.getFullYear())
+  );
   const [demoPortfolio, setDemoPortfolio] = useState(() => initialCache?.demoPortfolio ?? false);
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
     initialCache && selectedFamily ? selectedFamily.id : null
@@ -116,12 +153,14 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   streamsRef.current = streams;
 
   const spentColor = colors.error || '#ef4444';
+  const budgetColor = colors.primary || BUDGET_COLOR;
 
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
     setStreams([]);
     setOccurrences([]);
     setExpenses([]);
+    setBudgetsByMonth({});
     setError('');
     setDataFamilyId(null);
     setLoadedYear(null);
@@ -184,16 +223,39 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       const familyId = selectedFamily.id;
       const generation = ++fetchGenerationRef.current;
       const cached = cashflowYearCache.get(cashflowCacheKey(familyId, year));
-      if (cached) {
+      // Soft return only when cache has budgets (shape from budget-aware Overview).
+      const cacheComplete = !!cached?.budgetsByMonth;
+      if (cached && cacheComplete) {
         setDemoPortfolio(cached.demoPortfolio);
         setStreams(cached.streams);
         setOccurrences(cached.occurrences);
         setExpenses(cached.expenses);
+        setBudgetsByMonth(cached.budgetsByMonth);
         setDataFamilyId(familyId);
         setLoadedYear(year);
         setLoading(false);
-        // Cached tab return: skip network (mutations clear cache).
-        if (soft) return;
+        // Cached tab return: skip network (mutations clear cache), but always
+        // re-read demo overlay so Profile toggle updates Income / nets without
+        // a cold reload. Budgets / expenses stay real either way.
+        if (soft) {
+          void readDemoPortfolioPref().then((demoEnabled) => {
+            if (
+              generation !== fetchGenerationRef.current ||
+              selectedFamilyIdRef.current !== familyId
+            ) {
+              return;
+            }
+            setDemoPortfolio(demoEnabled);
+            const prev = cashflowYearCache.get(cashflowCacheKey(familyId, year));
+            if (prev && prev.demoPortfolio !== demoEnabled) {
+              cashflowYearCache.set(cashflowCacheKey(familyId, year), {
+                ...prev,
+                demoPortfolio: demoEnabled,
+              });
+            }
+          });
+          return;
+        }
       } else if (!soft) {
         setLoading(true);
       }
@@ -208,12 +270,13 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           existingStreams.length > 0 &&
           existingStreams.every((s) => s.family === familyId);
 
-        const [streamList, occs, expList] = await Promise.all([
+        const [streamList, occs, expList, board] = await Promise.all([
           reuseStreams
             ? Promise.resolve(existingStreams)
             : moneyService.getStreams(familyId),
           moneyService.getOccurrences(familyId, { start_date, end_date }),
           expenseService.getExpenses(familyId, { start_date, end_date }),
+          expenseService.getBudgetsYearBoard(familyId, year, true),
         ]);
         if (
           generation !== fetchGenerationRef.current ||
@@ -221,10 +284,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         ) {
           return;
         }
+        const budgets = normalizeBudgetsBoard(year, board);
         setDemoPortfolio(demoEnabled);
         setStreams(streamList);
         setOccurrences(occs);
         setExpenses(expList);
+        setBudgetsByMonth(budgets);
         setDataFamilyId(familyId);
         setLoadedYear(year);
         setLoading(false);
@@ -232,6 +297,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           streams: streamList,
           occurrences: occs,
           expenses: expList,
+          budgetsByMonth: budgets,
           demoPortfolio: demoEnabled,
         });
 
@@ -274,6 +340,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           setStreams([]);
           setOccurrences([]);
           setExpenses([]);
+          setBudgetsByMonth({});
           setDataFamilyId(null);
           setLoadedYear(null);
         }
@@ -296,11 +363,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       const cached = cashflowYearCache.get(
         cashflowCacheKey(selectedFamily.id, year)
       );
-      if (cached) {
+      if (cached?.budgetsByMonth) {
         setDemoPortfolio(cached.demoPortfolio);
         setStreams(cached.streams);
         setOccurrences(cached.occurrences);
         setExpenses(cached.expenses);
+        setBudgetsByMonth(cached.budgetsByMonth);
         setDataFamilyId(selectedFamily.id);
         setLoadedYear(year);
         setLoading(false);
@@ -312,9 +380,10 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   useFocusEffect(
     useCallback(() => {
       if (!selectedFamily) return;
-      const cacheHit = cashflowYearCache.has(
+      const cached = cashflowYearCache.get(
         cashflowCacheKey(selectedFamily.id, year)
       );
+      const cacheHit = !!cached?.budgetsByMonth;
       // Soft when we already showed this family (tab return / year change) or have cache.
       const soft =
         cacheHit || dataFamilyId === selectedFamily.id || loadedYear != null;
@@ -358,8 +427,8 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   }, [occurrences, demoPortfolio, streamTypeById]);
 
   const months = useMemo(
-    () => buildMonthlyCashflowSeries(displayOccurrences, expenses, year),
-    [displayOccurrences, expenses, year]
+    () => buildMonthlyCashflowSeries(displayOccurrences, expenses, year, budgetsByMonth),
+    [displayOccurrences, expenses, year, budgetsByMonth]
   );
 
   // Months before the first income month are incomplete / not tracked — exclude from year totals.
@@ -379,9 +448,22 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
 
   useEffect(() => {
     setDonutFilter(null);
+    setDrillFilter(null);
   }, [selectedMonthIndex, year]);
 
   const selectedMonth = months[selectedMonthIndex] || months[0];
+
+  const handleSelectMonth = (monthIndex: number) => {
+    setSelectedMonthIndex(monthIndex);
+    setDrillFilter(null);
+    setDonutFilter(null);
+  };
+
+  const toggleDrill = (key: DrillFilter) => {
+    setDrillFilter((prev) => (prev === key ? null : key));
+    if (key) setDonutFilter(key);
+    else setDonutFilter(null);
+  };
 
   const barPoints = useMemo(
     () =>
@@ -392,8 +474,10 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
             monthIndex: m.monthIndex,
             label: m.label,
             income: 0,
+            budget: 0,
             spent: 0,
             unpaid: 0,
+            plannedNet: 0,
             netAfterUnpaid: 0,
           };
         }
@@ -401,8 +485,10 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           monthIndex: m.monthIndex,
           label: m.label,
           income: m.incomeTotal,
+          budget: m.budgetTotal,
           spent: m.spentTotal,
           unpaid: m.unpaidTotal,
+          plannedNet: m.plannedNet,
           netAfterUnpaid: m.netAfterUnpaid,
         };
       }),
@@ -420,7 +506,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       },
       {
         key: 'spent',
-        label: 'Spent',
+        label: 'Paid',
         amount: selectedMonth.spentTotal,
         color: spentColor,
       },
@@ -467,7 +553,13 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Outflow</Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
+          <Text style={[styles.heroValue, { color: budgetColor }]}>
+            {displayMoney(yearSummary.budgetTotal)}
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Actual</Text>
           <Text style={[styles.heroValue, { color: spentColor }]}>
             {displayMoney(yearSummary.spentTotal + yearSummary.unpaidTotal)}
           </Text>
@@ -475,12 +567,23 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
             {yearSummary.paidCount} paid · {yearSummary.unpaidCount} unpaid
           </Text>
         </View>
+      </View>
+      <View style={[styles.heroGrid, { marginTop: 4 }]}>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Net</Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Planned net</Text>
+          <Text style={[styles.heroValue, { color: toneFor(yearSummary.plannedNet) }]}>
+            {displayMoney(yearSummary.plannedNet)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>Income − Budget</Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Actual net</Text>
           <Text style={[styles.heroValue, { color: toneFor(yearSummary.netAfterUnpaid) }]}>
             {displayMoney(yearSummary.netAfterUnpaid)}
           </Text>
-          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>After unpaid</Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            After paid + unpaid
+          </Text>
         </View>
       </View>
     </View>
@@ -496,13 +599,14 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     >
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly cashflow</Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Hover or tap a month · spent + unpaid + income
+        Hover or tap a month · income · budget · paid + unpaid
       </Text>
       <MonthCashflowBars
         points={barPoints}
         selectedMonthIndex={selectedMonthIndex}
-        onSelectMonth={setSelectedMonthIndex}
+        onSelectMonth={handleSelectMonth}
         incomeColor={colors.success}
+        budgetColor={budgetColor}
         spentColor={spentColor}
         unpaidColor={UNPAID_COLOR}
         trackColor={colors.border}
@@ -514,6 +618,27 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
     </View>
   );
 
+  const showPaidDrill = drillFilter === 'spent' || donutFilter === 'spent';
+  const showUnpaidDrill = drillFilter === 'unpaid' || donutFilter === 'unpaid';
+  const showVariance =
+    !!selectedMonth &&
+    (selectedMonth.overBudget.length > 0 ||
+      selectedMonth.underBudget.length > 0 ||
+      selectedMonth.unbudgeted.length > 0);
+
+  const monthActualTotal = selectedMonth
+    ? selectedMonth.spentTotal + selectedMonth.unpaidTotal
+    : 0;
+  const monthBudgetVariance = selectedMonth
+    ? selectedMonth.budgetTotal - monthActualTotal
+    : 0;
+  const monthVarianceLabel =
+    monthBudgetVariance > 0 ? 'Under' : monthBudgetVariance < 0 ? 'Over' : 'On budget';
+  const monthVarianceValue =
+    monthBudgetVariance === 0
+      ? displayMoney(0)
+      : displayMoney(Math.abs(monthBudgetVariance));
+
   const monthDetail = selectedMonth ? (
     <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -522,28 +647,60 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
 
       <View style={styles.monthKpis}>
         <Kpi
-          label="In"
+          label="Income"
           value={displayMoney(selectedMonth.incomeTotal)}
           color={colors.success}
           muted={colors.textSecondary}
         />
+      </View>
+
+      <View style={styles.monthKpis}>
         <Kpi
-          label="Spent"
-          value={displayMoney(selectedMonth.spentTotal)}
+          label="Budget"
+          value={displayMoney(selectedMonth.budgetTotal)}
+          color={budgetColor}
+          muted={colors.textSecondary}
+        />
+        <Kpi
+          label="Actual"
+          value={displayMoney(monthActualTotal)}
           color={spentColor}
           muted={colors.textSecondary}
+          meta={`${selectedMonth.paidCount} paid · ${selectedMonth.unpaidCount} unpaid`}
+          onPress={() => {
+            if (drillFilter === null) toggleDrill('spent');
+            else if (drillFilter === 'spent') toggleDrill('unpaid');
+            else {
+              setDrillFilter(null);
+              setDonutFilter(null);
+            }
+          }}
+          selected={drillFilter === 'spent' || drillFilter === 'unpaid'}
+          selectedBorder={colors.primary}
         />
         <Kpi
-          label="Unpaid"
-          value={displayMoney(selectedMonth.unpaidTotal)}
-          color={UNPAID_COLOR}
+          label={monthVarianceLabel}
+          value={monthVarianceValue}
+          color={toneFor(monthBudgetVariance)}
           muted={colors.textSecondary}
+          meta="Budget − Actual"
+        />
+      </View>
+
+      <View style={styles.monthKpis}>
+        <Kpi
+          label="Planned net"
+          value={displayMoney(selectedMonth.plannedNet)}
+          color={toneFor(selectedMonth.plannedNet)}
+          muted={colors.textSecondary}
+          meta="Income − Budget"
         />
         <Kpi
-          label="Net"
+          label="Actual net"
           value={displayMoney(selectedMonth.netAfterUnpaid)}
           color={toneFor(selectedMonth.netAfterUnpaid)}
           muted={colors.textSecondary}
+          meta="After paid + unpaid"
         />
       </View>
 
@@ -554,7 +711,14 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           mutedColor={colors.textSecondary}
           trackColor={colors.border}
           selectedKey={donutFilter}
-          onSelectSlice={setDonutFilter}
+          onSelectSlice={(key) => {
+            setDonutFilter(key);
+            if (key === 'spent' || key === 'unpaid') {
+              setDrillFilter(key);
+            } else {
+              setDrillFilter(null);
+            }
+          }}
           centerLabel={displayMoney(
             selectedMonth.incomeTotal ||
               selectedMonth.spentTotal + selectedMonth.unpaidTotal
@@ -573,7 +737,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
               <TouchableOpacity
                 key={s.key}
                 style={[styles.donutLegendRow, dimmed && { opacity: 0.4 }]}
-                onPress={() => setDonutFilter(active ? null : s.key)}
+                onPress={() => {
+                  const next = active ? null : s.key;
+                  setDonutFilter(next);
+                  if (next === 'spent' || next === 'unpaid') setDrillFilter(next);
+                  else setDrillFilter(null);
+                }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
               >
@@ -587,50 +756,170 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           })}
         </View>
       </View>
-      <Text style={[styles.donutHint, { color: colors.textSecondary }]}>
-        Tap a legend item to filter · tap the chart to show all
-      </Text>
 
-      {donutFilter === null || donutFilter === 'spent' ? (
-        <>
-          <Text style={[styles.subSectionTitle, { color: colors.text }]}>Spent by category</Text>
-          <CategoryHBars
-            rows={selectedMonth.spentByCategory}
-            emptyText="No paid expenses this month"
-            barColor={spentColor}
-            trackColor={colors.border}
-            textColor={colors.text}
-            mutedColor={colors.textSecondary}
-            formatAmount={displayMoney}
-          />
-        </>
+      {showPaidDrill ? (
+        <ExpenseDrillList
+          title="Paid this month"
+          emptyText="No paid expenses this month"
+          items={selectedMonth.paidExpenses}
+          amountColor={spentColor}
+          textColor={colors.text}
+          mutedColor={colors.textSecondary}
+          borderColor={colors.border}
+          formatAmount={displayMoney}
+        />
       ) : null}
 
-      {donutFilter === null || donutFilter === 'unpaid' ? (
-        <>
-          <Text
-            style={[
-              styles.subSectionTitle,
-              { color: colors.text, marginTop: donutFilter === null ? 16 : 0 },
-            ]}
-          >
-            Unpaid by category
+      {showUnpaidDrill ? (
+        <ExpenseDrillList
+          title="Left to pay"
+          emptyText="No unpaid expenses this month"
+          items={selectedMonth.unpaidExpenses}
+          amountColor={UNPAID_COLOR}
+          textColor={colors.text}
+          mutedColor={colors.textSecondary}
+          borderColor={colors.border}
+          formatAmount={displayMoney}
+        />
+      ) : null}
+
+      {showVariance ? (
+        <View style={styles.varianceBlock}>
+          <Text style={[styles.subSectionTitle, { color: colors.text }]}>
+            Outside budget
           </Text>
-          <CategoryHBars
-            rows={selectedMonth.unpaidByCategory}
-            emptyText="No unpaid expenses this month"
-            barColor={UNPAID_COLOR}
-            trackColor={colors.border}
-            textColor={colors.text}
-            mutedColor={colors.textSecondary}
-            formatAmount={displayMoney}
-          />
-        </>
+          <Text style={[styles.varianceCaption, { color: colors.textSecondary }]}>
+            Explains month Under/Over: category gaps use paid + unpaid vs budget
+          </Text>
+          {selectedMonth.overBudget.length > 0 ? (
+            <>
+              <Text
+                style={[
+                  styles.varianceCaption,
+                  { color: colors.textSecondary, marginTop: 6 },
+                ]}
+              >
+                Over budget
+              </Text>
+              {selectedMonth.overBudget.map((row) => (
+                <View
+                  key={`over-${row.key}`}
+                  style={[styles.varianceRow, { borderBottomColor: colors.border }]}
+                >
+                  <View style={styles.varianceMain}>
+                    <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={1}>
+                      {row.label}
+                    </Text>
+                    <Text style={[styles.itemMeta, { color: colors.textSecondary }]}>
+                      Actual {displayMoney(row.actualAmount)}
+                      {row.unpaidAmount > 0
+                        ? ` (${displayMoney(row.paidAmount)} paid · ${displayMoney(row.unpaidAmount)} unpaid)`
+                        : ''}
+                      {' · Budget '}
+                      {displayMoney(row.budgetAmount)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.itemAmount, { color: spentColor }]}>
+                    +{displayMoney(row.overBy)}
+                  </Text>
+                </View>
+              ))}
+            </>
+          ) : null}
+          {selectedMonth.unbudgeted.length > 0 ? (
+            <>
+              <Text
+                style={[
+                  styles.varianceCaption,
+                  {
+                    color: colors.textSecondary,
+                    marginTop:
+                      selectedMonth.overBudget.length > 0 ||
+                      selectedMonth.underBudget.length > 0
+                        ? 10
+                        : 6,
+                  },
+                ]}
+              >
+                Unbudgeted items
+              </Text>
+              {selectedMonth.unbudgeted.map((e) => (
+                <View
+                  key={`unb-${e.id}`}
+                  style={[styles.varianceRow, { borderBottomColor: colors.border }]}
+                >
+                  <View style={styles.varianceMain}>
+                    <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={1}>
+                      {e.description || 'Expense'}
+                    </Text>
+                    <Text style={[styles.itemMeta, { color: colors.textSecondary }]}>
+                      {formatShortDate(e.expense_date)}
+                      {e.category_name ? ` · ${e.category_name}` : ''}
+                      {e.is_paid === false ? ' · unpaid' : ''}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.itemAmount,
+                      { color: e.is_paid === false ? UNPAID_COLOR : spentColor },
+                    ]}
+                  >
+                    +{displayMoney(Number(e.amount) || 0)}
+                  </Text>
+                </View>
+              ))}
+            </>
+          ) : null}
+          {selectedMonth.underBudget.length > 0 ? (
+            <>
+              <Text
+                style={[
+                  styles.varianceCaption,
+                  {
+                    color: colors.textSecondary,
+                    marginTop:
+                      selectedMonth.overBudget.length > 0 ||
+                      selectedMonth.unbudgeted.length > 0
+                        ? 10
+                        : 6,
+                  },
+                ]}
+              >
+                Under budget (offsets Over)
+              </Text>
+              {selectedMonth.underBudget.map((row) => (
+                <View
+                  key={`under-${row.key}`}
+                  style={[styles.varianceRow, { borderBottomColor: colors.border }]}
+                >
+                  <View style={styles.varianceMain}>
+                    <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={1}>
+                      {row.label}
+                    </Text>
+                    <Text style={[styles.itemMeta, { color: colors.textSecondary }]}>
+                      Actual {displayMoney(row.actualAmount)} · Budget{' '}
+                      {displayMoney(row.budgetAmount)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.itemAmount, { color: colors.success }]}>
+                    −{displayMoney(row.underBy)}
+                  </Text>
+                </View>
+              ))}
+            </>
+          ) : null}
+          {monthBudgetVariance !== 0 ? (
+            <Text style={[styles.varianceReconcile, { color: colors.textSecondary }]}>
+              Overs + unbudgeted − unders = month {monthVarianceLabel}{' '}
+              {monthVarianceValue}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
 
-      {donutFilter === 'income' ? (
+      {donutFilter === 'income' && !showPaidDrill && !showUnpaidDrill ? (
         <Text style={[styles.emptyHint, { color: colors.textSecondary }]}>
-          Income has no category breakdown — tap the donut center to show all.
+          Income has no expense line items — tap Paid or Unpaid for details.
         </Text>
       ) : null}
     </View>
@@ -700,18 +989,98 @@ function Kpi({
   value,
   color,
   muted,
+  meta,
+  onPress,
+  selected,
+  selectedBorder,
 }: {
   label: string;
   value: string;
   color: string;
   muted: string;
+  meta?: string;
+  onPress?: () => void;
+  selected?: boolean;
+  selectedBorder?: string;
 }) {
-  return (
-    <View style={styles.kpi}>
-      <Text style={[styles.kpiLabel, { color: muted }]}>{label}</Text>
+  const body = (
+    <>
+      <Text style={[styles.kpiLabel, { color: muted }]} numberOfLines={1}>
+        {label}
+      </Text>
       <Text style={[styles.kpiValue, { color }]} numberOfLines={1}>
         {value}
       </Text>
+      <Text
+        style={[styles.kpiMeta, { color: muted, opacity: meta ? 1 : 0 }]}
+        numberOfLines={1}
+      >
+        {meta || ' '}
+      </Text>
+    </>
+  );
+  const boxStyle = [
+    styles.kpi,
+    styles.kpiCell,
+    selected && selectedBorder ? { borderColor: selectedBorder } : null,
+  ];
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        style={boxStyle}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected: !!selected }}
+      >
+        {body}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={boxStyle}>{body}</View>;
+}
+
+function ExpenseDrillList({
+  title,
+  emptyText,
+  items,
+  amountColor,
+  textColor,
+  mutedColor,
+  borderColor,
+  formatAmount,
+}: {
+  title: string;
+  emptyText: string;
+  items: Expense[];
+  amountColor: string;
+  textColor: string;
+  mutedColor: string;
+  borderColor: string;
+  formatAmount: (n: number) => string;
+}) {
+  return (
+    <View style={styles.drillBlock}>
+      <Text style={[styles.subSectionTitle, { color: textColor }]}>{title}</Text>
+      {items.length === 0 ? (
+        <Text style={[styles.emptyHint, { color: mutedColor }]}>{emptyText}</Text>
+      ) : (
+        items.map((e) => (
+          <View key={e.id} style={[styles.itemRow, { borderBottomColor: borderColor }]}>
+            <View style={styles.varianceMain}>
+              <Text style={[styles.itemTitle, { color: textColor }]} numberOfLines={1}>
+                {e.description || 'Expense'}
+              </Text>
+              <Text style={[styles.itemMeta, { color: mutedColor }]}>
+                {formatShortDate(e.expense_date)}
+                {e.category_name ? ` · ${e.category_name}` : ''}
+              </Text>
+            </View>
+            <Text style={[styles.itemAmount, { color: amountColor }]}>
+              {formatAmount(Number(e.amount) || 0)}
+            </Text>
+          </View>
+        ))
+      )}
     </View>
   );
 }
@@ -790,18 +1159,25 @@ const styles = StyleSheet.create({
   },
   monthKpis: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
+    alignItems: 'stretch',
     gap: 8,
   },
   kpi: {
-    flexGrow: 1,
-    flexBasis: '22%',
-    minWidth: 72,
+    flex: 1,
+    minWidth: 0,
     gap: 2,
+  },
+  kpiCell: {
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
   kpiLabel: { fontSize: 11, fontWeight: '600' },
   kpiValue: { fontSize: 14, fontWeight: '800' },
-  donutHint: { fontSize: 11, fontWeight: '500', opacity: 0.75, marginTop: -2 },
+  kpiMeta: { fontSize: 10, fontWeight: '500', minHeight: 13 },
   donutBlock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -816,4 +1192,31 @@ const styles = StyleSheet.create({
   donutLegendLabel: { flex: 1, fontSize: 13, fontWeight: '600' },
   donutLegendAmt: { fontSize: 12, fontWeight: '700' },
   subSectionTitle: { fontSize: 14, fontWeight: '800', marginTop: 4 },
+  drillBlock: { gap: 4, marginTop: 4 },
+  varianceBlock: { gap: 4, marginTop: 8 },
+  varianceCaption: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  varianceReconcile: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 10,
+    opacity: 0.85,
+  },
+  varianceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  varianceMain: { flex: 1, minWidth: 0, gap: 2 },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  itemTitle: { fontSize: 13, fontWeight: '600' },
+  itemMeta: { fontSize: 11, fontWeight: '500' },
+  itemAmount: { fontSize: 13, fontWeight: '800' },
 });

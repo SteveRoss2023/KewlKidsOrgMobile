@@ -1,5 +1,6 @@
-import { Expense } from '../types/expenses';
+import { Budget, Expense } from '../types/expenses';
 import { IncomeOccurrence } from '../types/money';
+import { monthKey } from './budgetSeries';
 
 export type CashflowBreakdownRow = {
   key: string;
@@ -7,11 +8,36 @@ export type CashflowBreakdownRow = {
   amount: number;
 };
 
+export type CashflowOverBudgetRow = {
+  key: string;
+  label: string;
+  budgetAmount: number;
+  paidAmount: number;
+  unpaidAmount: number;
+  /** paid + unpaid */
+  actualAmount: number;
+  /** actualAmount − budgetAmount (positive when over) */
+  overBy: number;
+};
+
+export type CashflowUnderBudgetRow = {
+  key: string;
+  label: string;
+  budgetAmount: number;
+  paidAmount: number;
+  unpaidAmount: number;
+  actualAmount: number;
+  /** budgetAmount − actualAmount (positive when under) */
+  underBy: number;
+};
+
 export type CashflowMonthSummary = {
   incomeTotal: number;
   spentTotal: number;
   /** Sum of unpaid expense rows (is_paid === false). Not budget remaining. */
   unpaidTotal: number;
+  /** Sum of category budget limits for the month. */
+  budgetTotal: number;
   paidCount: number;
   unpaidCount: number;
   expenseCount: number;
@@ -19,9 +45,16 @@ export type CashflowMonthSummary = {
   net: number;
   /** Income − Spent − Unpaid */
   netAfterUnpaid: number;
+  /** Income − Budget */
+  plannedNet: number;
   incomeByStream: CashflowBreakdownRow[];
   spentByCategory: CashflowBreakdownRow[];
   unpaidByCategory: CashflowBreakdownRow[];
+  paidExpenses: Expense[];
+  unpaidExpenses: Expense[];
+  overBudget: CashflowOverBudgetRow[];
+  underBudget: CashflowUnderBudgetRow[];
+  unbudgeted: Expense[];
 };
 
 function toAmt(v: number | string | null | undefined): number {
@@ -62,16 +95,26 @@ function addToBreakdown(
   else map.set(key, { key, label, amount });
 }
 
+function sortExpenses(list: Expense[]): Expense[] {
+  return [...list].sort(
+    (a, b) =>
+      a.expense_date.localeCompare(b.expense_date) ||
+      (a.description || '').localeCompare(b.description || '')
+  );
+}
+
 /**
  * Aggregate income occurrences + expenses for an inclusive date range.
  * Income: received → actual (fallback estimate); estimated → estimate; skipped excluded.
  * Spent: paid expenses (is_paid !== false). Unpaid: is_paid === false only.
+ * Budget: optional category budgets for the same window.
  */
 export function buildCashflowSummary(
   occurrences: IncomeOccurrence[],
   expenses: Expense[],
   startDate: string,
-  endDate: string
+  endDate: string,
+  budgets: Budget[] = []
 ): CashflowMonthSummary {
   const incomeByStreamMap = new Map<string, CashflowBreakdownRow>();
   let incomeTotal = 0;
@@ -85,8 +128,20 @@ export function buildCashflowSummary(
     addToBreakdown(incomeByStreamMap, String(o.stream), label, amount);
   }
 
+  const budgetByCategory = new Map<number, Budget>();
+  let budgetTotal = 0;
+  for (const b of budgets) {
+    budgetByCategory.set(b.category, b);
+    budgetTotal += toAmt(b.amount);
+  }
+
   const spentByCategoryMap = new Map<string, CashflowBreakdownRow>();
   const unpaidByCategoryMap = new Map<string, CashflowBreakdownRow>();
+  const paidByCat = new Map<number, number>();
+  const unpaidByCat = new Map<number, number>();
+  const paidExpenses: Expense[] = [];
+  const unpaidExpenses: Expense[] = [];
+  const unbudgeted: Expense[] = [];
   let spentTotal = 0;
   let unpaidTotal = 0;
   let paidCount = 0;
@@ -97,30 +152,83 @@ export function buildCashflowSummary(
     const amount = toAmt(e.amount);
     const label = (e.category_name || '').trim() || `Category ${e.category}`;
     const key = String(e.category);
+    const hasBudget = budgetByCategory.has(e.category);
+
     if (isExpensePaid(e)) {
       spentTotal += amount;
       paidCount += 1;
+      paidExpenses.push(e);
+      paidByCat.set(e.category, (paidByCat.get(e.category) || 0) + amount);
       addToBreakdown(spentByCategoryMap, key, label, amount);
     } else {
       unpaidTotal += amount;
       unpaidCount += 1;
+      unpaidExpenses.push(e);
+      unpaidByCat.set(e.category, (unpaidByCat.get(e.category) || 0) + amount);
       addToBreakdown(unpaidByCategoryMap, key, label, amount);
     }
+
+    if (!hasBudget) {
+      unbudgeted.push(e);
+    }
   }
+
+  const overBudget: CashflowOverBudgetRow[] = [];
+  const underBudget: CashflowUnderBudgetRow[] = [];
+  for (const b of budgets) {
+    const paidAmount = paidByCat.get(b.category) || 0;
+    const unpaidAmount = unpaidByCat.get(b.category) || 0;
+    const actualAmount = paidAmount + unpaidAmount;
+    const budgetAmount = toAmt(b.amount);
+    // Skip empty placeholder rows (no limit and no activity).
+    if (budgetAmount <= 0 && actualAmount <= 0) continue;
+    const label = (b.category_name || '').trim() || `Category ${b.category}`;
+    const key = String(b.category);
+    if (actualAmount > budgetAmount + 0.005) {
+      overBudget.push({
+        key,
+        label,
+        budgetAmount,
+        paidAmount,
+        unpaidAmount,
+        actualAmount,
+        overBy: actualAmount - budgetAmount,
+      });
+    } else if (budgetAmount > actualAmount + 0.005) {
+      underBudget.push({
+        key,
+        label,
+        budgetAmount,
+        paidAmount,
+        unpaidAmount,
+        actualAmount,
+        underBy: budgetAmount - actualAmount,
+      });
+    }
+  }
+  overBudget.sort((a, b) => b.overBy - a.overBy || a.label.localeCompare(b.label));
+  underBudget.sort((a, b) => b.underBy - a.underBy || a.label.localeCompare(b.label));
 
   const net = incomeTotal - spentTotal;
   return {
     incomeTotal,
     spentTotal,
     unpaidTotal,
+    budgetTotal,
     paidCount,
     unpaidCount,
     expenseCount: paidCount + unpaidCount,
     net,
     netAfterUnpaid: net - unpaidTotal,
+    plannedNet: incomeTotal - budgetTotal,
     incomeByStream: sortBreakdown([...incomeByStreamMap.values()]),
     spentByCategory: sortBreakdown([...spentByCategoryMap.values()]),
     unpaidByCategory: sortBreakdown([...unpaidByCategoryMap.values()]),
+    paidExpenses: sortExpenses(paidExpenses),
+    unpaidExpenses: sortExpenses(unpaidExpenses),
+    overBudget,
+    underBudget,
+    unbudgeted: sortExpenses(unbudgeted),
   };
 }
 
@@ -159,12 +267,14 @@ const MONTH_SHORT = [
 export function buildMonthlyCashflowSeries(
   occurrences: IncomeOccurrence[],
   expenses: Expense[],
-  year: number
+  year: number,
+  budgetsByMonth: Record<string, Budget[]> = {}
 ): CashflowMonthPoint[] {
   return Array.from({ length: 12 }, (_, monthIndex) => {
     const startDate = `${year}-${pad2(monthIndex + 1)}-01`;
     const endDate = `${year}-${pad2(monthIndex + 1)}-${pad2(lastDayOfMonth(year, monthIndex))}`;
-    const summary = buildCashflowSummary(occurrences, expenses, startDate, endDate);
+    const budgets = budgetsByMonth[monthKey(year, monthIndex)] || [];
+    const summary = buildCashflowSummary(occurrences, expenses, startDate, endDate, budgets);
     return {
       ...summary,
       monthIndex,
@@ -196,9 +306,15 @@ export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMont
   const incomeByStreamMap = new Map<string, CashflowBreakdownRow>();
   const spentByCategoryMap = new Map<string, CashflowBreakdownRow>();
   const unpaidByCategoryMap = new Map<string, CashflowBreakdownRow>();
+  const overByCat = new Map<string, CashflowOverBudgetRow>();
+  const underByCat = new Map<string, CashflowUnderBudgetRow>();
+  const paidExpenses: Expense[] = [];
+  const unpaidExpenses: Expense[] = [];
+  const unbudgeted: Expense[] = [];
   let incomeTotal = 0;
   let spentTotal = 0;
   let unpaidTotal = 0;
+  let budgetTotal = 0;
   let paidCount = 0;
   let unpaidCount = 0;
 
@@ -206,8 +322,12 @@ export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMont
     incomeTotal += m.incomeTotal;
     spentTotal += m.spentTotal;
     unpaidTotal += m.unpaidTotal;
+    budgetTotal += m.budgetTotal;
     paidCount += m.paidCount;
     unpaidCount += m.unpaidCount;
+    paidExpenses.push(...m.paidExpenses);
+    unpaidExpenses.push(...m.unpaidExpenses);
+    unbudgeted.push(...m.unbudgeted);
     for (const row of m.incomeByStream) {
       addToBreakdown(incomeByStreamMap, row.key, row.label, row.amount);
     }
@@ -217,6 +337,30 @@ export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMont
     for (const row of m.unpaidByCategory) {
       addToBreakdown(unpaidByCategoryMap, row.key, row.label, row.amount);
     }
+    for (const row of m.overBudget) {
+      const existing = overByCat.get(row.key);
+      if (existing) {
+        existing.budgetAmount += row.budgetAmount;
+        existing.paidAmount += row.paidAmount;
+        existing.unpaidAmount += row.unpaidAmount;
+        existing.actualAmount += row.actualAmount;
+        existing.overBy += row.overBy;
+      } else {
+        overByCat.set(row.key, { ...row });
+      }
+    }
+    for (const row of m.underBudget) {
+      const existing = underByCat.get(row.key);
+      if (existing) {
+        existing.budgetAmount += row.budgetAmount;
+        existing.paidAmount += row.paidAmount;
+        existing.unpaidAmount += row.unpaidAmount;
+        existing.actualAmount += row.actualAmount;
+        existing.underBy += row.underBy;
+      } else {
+        underByCat.set(row.key, { ...row });
+      }
+    }
   }
 
   const net = incomeTotal - spentTotal;
@@ -224,14 +368,25 @@ export function rollupCashflowSeries(months: CashflowMonthPoint[]): CashflowMont
     incomeTotal,
     spentTotal,
     unpaidTotal,
+    budgetTotal,
     paidCount,
     unpaidCount,
     expenseCount: paidCount + unpaidCount,
     net,
     netAfterUnpaid: net - unpaidTotal,
+    plannedNet: incomeTotal - budgetTotal,
     incomeByStream: sortBreakdown([...incomeByStreamMap.values()]),
     spentByCategory: sortBreakdown([...spentByCategoryMap.values()]),
     unpaidByCategory: sortBreakdown([...unpaidByCategoryMap.values()]),
+    paidExpenses: sortExpenses(paidExpenses),
+    unpaidExpenses: sortExpenses(unpaidExpenses),
+    overBudget: [...overByCat.values()].sort(
+      (a, b) => b.overBy - a.overBy || a.label.localeCompare(b.label)
+    ),
+    underBudget: [...underByCat.values()].sort(
+      (a, b) => b.underBy - a.underBy || a.label.localeCompare(b.label)
+    ),
+    unbudgeted: sortExpenses(unbudgeted),
   };
 }
 
@@ -246,7 +401,11 @@ export function defaultDashboardMonthIndex(
     const m = months[i];
     if (
       m &&
-      (m.incomeTotal > 0 || m.spentTotal > 0 || m.unpaidTotal > 0 || m.expenseCount > 0)
+      (m.incomeTotal > 0 ||
+        m.spentTotal > 0 ||
+        m.unpaidTotal > 0 ||
+        m.budgetTotal > 0 ||
+        m.expenseCount > 0)
     ) {
       return i;
     }

@@ -62,7 +62,13 @@ export default function BudgetForm({
     }
 
     if (budget) {
-      setAmount(budget.amount.toString());
+      // Edit the standing monthly amount (base), not the month-effective display amount
+      // (effective can be $0 in off-season when a seasonal bill drives the category).
+      const standing =
+        budget.base_amount != null && !Number.isNaN(Number(budget.base_amount))
+          ? Number(budget.base_amount)
+          : Number(budget.amount);
+      setAmount(String(standing));
       setCategoryId(budget.category);
       setPeriod(budget.period);
       setStartDate(budget.start_date);

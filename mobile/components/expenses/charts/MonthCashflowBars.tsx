@@ -22,10 +22,12 @@ export type MonthBarPoint = {
   monthIndex: number;
   label: string;
   income: number;
+  budget: number;
   /** Paid expenses only */
   spent: number;
   /** Unpaid expense rows */
   unpaid: number;
+  plannedNet: number;
   netAfterUnpaid: number;
 };
 
@@ -34,6 +36,7 @@ type MonthCashflowBarsProps = {
   selectedMonthIndex: number;
   onSelectMonth: (monthIndex: number) => void;
   incomeColor: string;
+  budgetColor: string;
   spentColor: string;
   unpaidColor: string;
   trackColor: string;
@@ -52,6 +55,7 @@ export default function MonthCashflowBars({
   selectedMonthIndex,
   onSelectMonth,
   incomeColor,
+  budgetColor,
   spentColor,
   unpaidColor,
   trackColor,
@@ -68,7 +72,7 @@ export default function MonthCashflowBars({
   const rawMax = useMemo(() => {
     let m = 1;
     for (const p of points) {
-      m = Math.max(m, p.income, p.spent + p.unpaid);
+      m = Math.max(m, p.income, p.budget, p.spent + p.unpaid);
     }
     return m;
   }, [points]);
@@ -77,9 +81,9 @@ export default function MonthCashflowBars({
   const ticks = useMemo(() => chartAxisTicks(rawMax, 3), [rawMax]);
 
   const slotW = plotWidth / 12;
-  const pairGap = 2;
-  const barW = Math.max(5, Math.min(8, (slotW * 0.55 - pairGap) / 2));
-  const pairW = barW * 2 + pairGap;
+  const barGap = 1.5;
+  const barW = Math.max(3.5, Math.min(6.5, (slotW * 0.72 - barGap * 2) / 3));
+  const groupW = barW * 3 + barGap * 2;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = Math.floor(e.nativeEvent.layout.width);
@@ -87,6 +91,19 @@ export default function MonthCashflowBars({
   };
 
   const hoverPoint = hoverIndex != null ? points[hoverIndex] : null;
+
+  const renderEmptyStub = (x: number, key: string) => (
+    <Rect
+      key={key}
+      x={x}
+      y={CHART_H - 2}
+      width={barW}
+      height={2}
+      rx={1}
+      fill={trackColor}
+      opacity={0.4}
+    />
+  );
 
   return (
     <View style={styles.wrap} onLayout={onLayout}>
@@ -96,8 +113,12 @@ export default function MonthCashflowBars({
           <Text style={[styles.legendText, { color: mutedColor }]}>Income</Text>
         </View>
         <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: budgetColor }]} />
+          <Text style={[styles.legendText, { color: mutedColor }]}>Budget</Text>
+        </View>
+        <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: spentColor }]} />
-          <Text style={[styles.legendText, { color: mutedColor }]}>Spent</Text>
+          <Text style={[styles.legendText, { color: mutedColor }]}>Paid</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: unpaidColor }]} />
@@ -143,22 +164,24 @@ export default function MonthCashflowBars({
                   );
                 })}
                 {points.map((p) => {
-                  const pairX = p.monthIndex * slotW + slotW / 2 - pairW / 2;
-                  const incomeX = pairX;
-                  const outflowX = pairX + barW + pairGap;
+                  const groupX = p.monthIndex * slotW + slotW / 2 - groupW / 2;
+                  const incomeX = groupX;
+                  const budgetX = groupX + barW + barGap;
+                  const actualX = groupX + (barW + barGap) * 2;
+                  const income = Math.max(0, p.income);
+                  const budget = Math.max(0, p.budget);
                   const spent = Math.max(0, p.spent);
                   const unpaid = Math.max(0, p.unpaid);
-                  const income = Math.max(0, p.income);
                   const scale = (CHART_H - 4) / chartMax;
-                  const empty = spent <= 0 && unpaid <= 0 && income <= 0;
+                  const empty = spent <= 0 && unpaid <= 0 && income <= 0 && budget <= 0;
 
                   if (empty) {
                     return (
                       <Rect
                         key={p.monthIndex}
-                        x={pairX}
+                        x={groupX}
                         y={CHART_H - 2}
-                        width={pairW}
+                        width={groupW}
                         height={2}
                         rx={1}
                         fill={trackColor}
@@ -168,6 +191,7 @@ export default function MonthCashflowBars({
                   }
 
                   const incomeH = income * scale;
+                  const budgetH = budget * scale;
                   const outflowLayers = [
                     { h: spent * scale, fill: spentColor },
                     { h: unpaid * scale, fill: unpaidColor },
@@ -187,33 +211,30 @@ export default function MonthCashflowBars({
                           opacity={0.9}
                         />
                       ) : (
+                        renderEmptyStub(incomeX, `${p.monthIndex}-inc`)
+                      )}
+                      {budgetH > 0 ? (
                         <Rect
-                          x={incomeX}
-                          y={CHART_H - 2}
+                          x={budgetX}
+                          y={CHART_H - Math.max(budgetH, 0.5)}
                           width={barW}
-                          height={2}
-                          rx={1}
-                          fill={trackColor}
-                          opacity={0.4}
+                          height={Math.max(budgetH, 0.5)}
+                          rx={2}
+                          fill={budgetColor}
+                          opacity={0.85}
                         />
+                      ) : (
+                        renderEmptyStub(budgetX, `${p.monthIndex}-bud`)
                       )}
                       {outflowLayers.length === 0 ? (
-                        <Rect
-                          x={outflowX}
-                          y={CHART_H - 2}
-                          width={barW}
-                          height={2}
-                          rx={1}
-                          fill={trackColor}
-                          opacity={0.4}
-                        />
+                        renderEmptyStub(actualX, `${p.monthIndex}-act`)
                       ) : (
                         outflowLayers.map((layer, i) => {
                           outflowY -= layer.h;
                           return (
                             <Rect
                               key={`${p.monthIndex}-out-${i}`}
-                              x={outflowX}
+                              x={actualX}
                               y={outflowY}
                               width={barW}
                               height={Math.max(layer.h, 0.5)}
@@ -238,7 +259,12 @@ export default function MonthCashflowBars({
                       color: incomeColor,
                     },
                     {
-                      label: 'Spent',
+                      label: 'Budget',
+                      value: formatAmount(hoverPoint.budget),
+                      color: budgetColor,
+                    },
+                    {
+                      label: 'Paid',
                       value: formatAmount(hoverPoint.spent),
                       color: spentColor,
                     },
@@ -248,7 +274,11 @@ export default function MonthCashflowBars({
                       color: unpaidColor,
                     },
                     {
-                      label: 'Net',
+                      label: 'Planned',
+                      value: formatAmount(hoverPoint.plannedNet),
+                    },
+                    {
+                      label: 'Actual',
                       value: formatAmount(hoverPoint.netAfterUnpaid),
                     },
                   ]}
@@ -285,7 +315,8 @@ export default function MonthCashflowBars({
 
           <View style={[styles.netRow, { height: NET_H, marginLeft: Y_AXIS_W }]}>
             {points.map((p) => {
-              const empty = p.income === 0 && p.spent === 0 && p.unpaid === 0;
+              const empty =
+                p.income === 0 && p.budget === 0 && p.spent === 0 && p.unpaid === 0;
               const positive = p.netAfterUnpaid >= 0;
               const dotColor =
                 p.spent <= 0 && p.unpaid > 0
