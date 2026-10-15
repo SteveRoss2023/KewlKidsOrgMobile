@@ -20,7 +20,11 @@ import { IncomeOccurrence, IncomeStream, IncomeStreamType } from '../../types/mo
 import {
   buildMonthlyCashflowSeries,
   cashflowTrackingStartMonthIndex,
+  CashflowMonthPoint,
+  CashflowOverBudgetRow,
+  CashflowUnderBudgetRow,
   defaultDashboardMonthIndex,
+  isExpensePaid,
   monthsInCashflowTracking,
   rollupCashflowSeries,
 } from '../../utils/cashflow';
@@ -620,8 +624,10 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
 
   const showPaidDrill = drillFilter === 'spent' || donutFilter === 'spent';
   const showUnpaidDrill = drillFilter === 'unpaid' || donutFilter === 'unpaid';
+  const showDrill = showPaidDrill || showUnpaidDrill;
   const showVariance =
     !!selectedMonth &&
+    !showDrill &&
     (selectedMonth.overBudget.length > 0 ||
       selectedMonth.underBudget.length > 0 ||
       selectedMonth.unbudgeted.length > 0);
@@ -757,29 +763,20 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         </View>
       </View>
 
-      {showPaidDrill ? (
-        <ExpenseDrillList
-          title="Paid this month"
-          emptyText="No paid expenses this month"
-          items={selectedMonth.paidExpenses}
-          amountColor={spentColor}
+      {showDrill ? (
+        <ExpenseDrillBreakdown
+          key={`${showPaidDrill ? 'paid' : 'unpaid'}-${selectedMonth.monthIndex}-${year}`}
+          mode={showPaidDrill ? 'paid' : 'unpaid'}
+          month={selectedMonth}
+          amountColor={showPaidDrill ? spentColor : UNPAID_COLOR}
+          underColor={colors.success}
           textColor={colors.text}
           mutedColor={colors.textSecondary}
           borderColor={colors.border}
           formatAmount={displayMoney}
-        />
-      ) : null}
-
-      {showUnpaidDrill ? (
-        <ExpenseDrillList
-          title="Left to pay"
-          emptyText="No unpaid expenses this month"
-          items={selectedMonth.unpaidExpenses}
-          amountColor={UNPAID_COLOR}
-          textColor={colors.text}
-          mutedColor={colors.textSecondary}
-          borderColor={colors.border}
-          formatAmount={displayMoney}
+          monthVarianceLabel={monthVarianceLabel}
+          monthVarianceValue={monthVarianceValue}
+          showReconcile={monthBudgetVariance !== 0}
         />
       ) : null}
 
@@ -1039,19 +1036,125 @@ function Kpi({
   return <View style={boxStyle}>{body}</View>;
 }
 
-function ExpenseDrillList({
+type DrillCategoryGroup = {
+  key: string;
+  label: string;
+  amount: number;
+  items: Expense[];
+  meta?: string;
+};
+
+function groupExpensesByCategory(items: Expense[]): DrillCategoryGroup[] {
+  const map = new Map<string, DrillCategoryGroup>();
+  for (const e of items) {
+    const key = String(e.category ?? 'none');
+    const label = (e.category_name || '').trim() || `Category ${e.category}`;
+    const amt = Number(e.amount) || 0;
+    const existing = map.get(key);
+    if (existing) {
+      existing.amount += amt;
+      existing.items.push(e);
+    } else {
+      map.set(key, { key, label, amount: amt, items: [e] });
+    }
+  }
+  for (const g of map.values()) {
+    g.items.sort(
+      (a, b) =>
+        a.expense_date.localeCompare(b.expense_date) ||
+        (a.description || '').localeCompare(b.description || '')
+    );
+  }
+  return [...map.values()].sort(
+    (a, b) => b.amount - a.amount || a.label.localeCompare(b.label)
+  );
+}
+
+function CollapsibleBlock({
   title,
+  amount,
+  amountColor,
+  textColor,
+  mutedColor,
+  borderColor,
+  formatAmount,
+  depth = 0,
+  defaultOpen = false,
+  children,
   emptyText,
-  items,
+  hasContent,
+}: {
+  title: string;
+  amount?: number;
+  amountColor: string;
+  textColor: string;
+  mutedColor: string;
+  borderColor: string;
+  formatAmount: (n: number) => string;
+  depth?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  emptyText?: string;
+  hasContent: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <View
+      style={[
+        styles.collapseBlock,
+        depth > 0 && styles.collapseNested,
+        depth > 0 && { borderLeftColor: borderColor },
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.collapseHeader}
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <FontAwesome
+          name={open ? 'chevron-down' : 'chevron-right'}
+          size={depth > 0 ? 11 : 12}
+          color={mutedColor}
+          style={styles.collapseChevron}
+        />
+        <Text
+          style={[
+            depth > 0 ? styles.collapseCatTitle : styles.collapseSectionTitle,
+            { color: textColor, flex: 1 },
+          ]}
+          numberOfLines={1}
+        >
+          {title}
+        </Text>
+        {amount != null ? (
+          <Text style={[styles.collapseAmount, { color: amountColor }]}>
+            {formatAmount(amount)}
+          </Text>
+        ) : null}
+      </TouchableOpacity>
+      {open ? (
+        hasContent ? (
+          <View style={styles.collapseBody}>{children}</View>
+        ) : emptyText ? (
+          <Text style={[styles.emptyHint, { color: mutedColor, marginLeft: 20 }]}>
+            {emptyText}
+          </Text>
+        ) : null
+      ) : null}
+    </View>
+  );
+}
+
+function CompactExpenseLine({
+  expense,
   amountColor,
   textColor,
   mutedColor,
   borderColor,
   formatAmount,
 }: {
-  title: string;
-  emptyText: string;
-  items: Expense[];
+  expense: Expense;
   amountColor: string;
   textColor: string;
   mutedColor: string;
@@ -1059,28 +1162,300 @@ function ExpenseDrillList({
   formatAmount: (n: number) => string;
 }) {
   return (
+    <View style={[styles.itemRowCompact, { borderBottomColor: borderColor }]}>
+      <Text style={[styles.itemTitle, { color: textColor, flex: 1, minWidth: 0 }]} numberOfLines={1}>
+        {expense.description || 'Expense'}
+      </Text>
+      <Text style={[styles.itemMetaInline, { color: mutedColor }]}>
+        {formatShortDate(expense.expense_date)}
+      </Text>
+      <Text style={[styles.itemAmount, { color: amountColor }]}>
+        {formatAmount(Number(expense.amount) || 0)}
+      </Text>
+    </View>
+  );
+}
+
+function ExpenseDrillBreakdown({
+  mode,
+  month,
+  amountColor,
+  underColor,
+  textColor,
+  mutedColor,
+  borderColor,
+  formatAmount,
+  monthVarianceLabel,
+  monthVarianceValue,
+  showReconcile,
+}: {
+  mode: 'paid' | 'unpaid';
+  month: CashflowMonthPoint;
+  amountColor: string;
+  underColor: string;
+  textColor: string;
+  mutedColor: string;
+  borderColor: string;
+  formatAmount: (n: number) => string;
+  monthVarianceLabel: string;
+  monthVarianceValue: string;
+  showReconcile: boolean;
+}) {
+  const primaryItems = mode === 'paid' ? month.paidExpenses : month.unpaidExpenses;
+  const primaryGroups = useMemo(
+    () => groupExpensesByCategory(primaryItems),
+    [primaryItems]
+  );
+  const primaryTotal =
+    mode === 'paid' ? month.spentTotal : month.unpaidTotal;
+
+  const overRows: CashflowOverBudgetRow[] = useMemo(() => {
+    return month.overBudget.filter((r) =>
+      mode === 'paid' ? r.paidAmount > 0.005 : r.unpaidAmount > 0.005
+    );
+  }, [month.overBudget, mode]);
+
+  const overGroups = useMemo(() => {
+    const byKey = new Map(overRows.map((r) => [r.key, r]));
+    const items = primaryItems.filter((e) => byKey.has(String(e.category)));
+    return groupExpensesByCategory(items).map((g) => {
+      const row = byKey.get(g.key);
+      return {
+        ...g,
+        meta: row
+          ? `Budget ${formatAmount(row.budgetAmount)} · Over ${formatAmount(row.overBy)}`
+          : undefined,
+        amount: mode === 'paid' ? (row?.paidAmount ?? g.amount) : (row?.unpaidAmount ?? g.amount),
+      };
+    });
+  }, [overRows, primaryItems, mode, formatAmount]);
+
+  // Under is category-level (actual vs budget), same list for paid/unpaid drills.
+  const underRows: CashflowUnderBudgetRow[] = month.underBudget;
+
+  const underGroups = useMemo(() => {
+    const byKey = new Map(underRows.map((r) => [r.key, r]));
+    // Include under categories even when this mode has no line items yet (room left).
+    const fromItems = groupExpensesByCategory(
+      primaryItems.filter((e) => byKey.has(String(e.category)))
+    );
+    const seen = new Set(fromItems.map((g) => g.key));
+    const groups = fromItems.map((g) => {
+      const row = byKey.get(g.key);
+      return {
+        ...g,
+        meta: row
+          ? `Actual ${formatAmount(row.actualAmount)} · Budget ${formatAmount(row.budgetAmount)}`
+          : undefined,
+        amount: row?.underBy ?? 0,
+      };
+    });
+    for (const row of underRows) {
+      if (seen.has(row.key)) continue;
+      groups.push({
+        key: row.key,
+        label: row.label,
+        amount: row.underBy,
+        items: [],
+        meta: `Actual ${formatAmount(row.actualAmount)} · Budget ${formatAmount(row.budgetAmount)}`,
+      });
+    }
+    return groups.sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
+  }, [underRows, primaryItems, formatAmount]);
+
+  const underTotal = underGroups.reduce((s, g) => s + g.amount, 0);
+
+  const unbudgetedItems = useMemo(
+    () =>
+      month.unbudgeted.filter((e) =>
+        mode === 'paid' ? isExpensePaid(e) : e.is_paid === false
+      ),
+    [month.unbudgeted, mode]
+  );
+  const unbudgetedGroups = useMemo(
+    () => groupExpensesByCategory(unbudgetedItems),
+    [unbudgetedItems]
+  );
+  const unbudgetedTotal = unbudgetedItems.reduce(
+    (s, e) => s + (Number(e.amount) || 0),
+    0
+  );
+
+  const primaryTitle = mode === 'paid' ? 'Paid this month' : 'Left to pay';
+
+  return (
     <View style={styles.drillBlock}>
-      <Text style={[styles.subSectionTitle, { color: textColor }]}>{title}</Text>
-      {items.length === 0 ? (
-        <Text style={[styles.emptyHint, { color: mutedColor }]}>{emptyText}</Text>
-      ) : (
-        items.map((e) => (
-          <View key={e.id} style={[styles.itemRow, { borderBottomColor: borderColor }]}>
-            <View style={styles.varianceMain}>
-              <Text style={[styles.itemTitle, { color: textColor }]} numberOfLines={1}>
-                {e.description || 'Expense'}
+      <CollapsibleBlock
+        title={primaryTitle}
+        amount={primaryTotal}
+        amountColor={amountColor}
+        textColor={textColor}
+        mutedColor={mutedColor}
+        borderColor={borderColor}
+        formatAmount={formatAmount}
+        hasContent={primaryGroups.length > 0}
+        emptyText={mode === 'paid' ? 'No paid expenses this month' : 'No unpaid expenses this month'}
+      >
+        {primaryGroups.map((g) => (
+          <CollapsibleBlock
+            key={`pri-${g.key}`}
+            title={g.label}
+            amount={g.amount}
+            amountColor={amountColor}
+            textColor={textColor}
+            mutedColor={mutedColor}
+            borderColor={borderColor}
+            formatAmount={formatAmount}
+            depth={1}
+            hasContent={g.items.length > 0}
+          >
+            {g.items.map((e) => (
+              <CompactExpenseLine
+                key={e.id}
+                expense={e}
+                amountColor={amountColor}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                borderColor={borderColor}
+                formatAmount={formatAmount}
+              />
+            ))}
+          </CollapsibleBlock>
+        ))}
+      </CollapsibleBlock>
+
+      <CollapsibleBlock
+        title="Outside budget"
+        amount={overGroups.reduce((s, g) => s + g.amount, 0)}
+        amountColor={amountColor}
+        textColor={textColor}
+        mutedColor={mutedColor}
+        borderColor={borderColor}
+        formatAmount={formatAmount}
+        hasContent={overGroups.length > 0}
+        emptyText="No over-budget categories for these items"
+      >
+        {overGroups.map((g) => (
+          <CollapsibleBlock
+            key={`over-${g.key}`}
+            title={g.label}
+            amount={g.amount}
+            amountColor={amountColor}
+            textColor={textColor}
+            mutedColor={mutedColor}
+            borderColor={borderColor}
+            formatAmount={formatAmount}
+            depth={1}
+            hasContent={g.items.length > 0}
+          >
+            {g.meta ? (
+              <Text style={[styles.itemMeta, { color: mutedColor, marginBottom: 2 }]} numberOfLines={1}>
+                {g.meta}
               </Text>
-              <Text style={[styles.itemMeta, { color: mutedColor }]}>
-                {formatShortDate(e.expense_date)}
-                {e.category_name ? ` · ${e.category_name}` : ''}
+            ) : null}
+            {g.items.map((e) => (
+              <CompactExpenseLine
+                key={e.id}
+                expense={e}
+                amountColor={amountColor}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                borderColor={borderColor}
+                formatAmount={formatAmount}
+              />
+            ))}
+          </CollapsibleBlock>
+        ))}
+      </CollapsibleBlock>
+
+      <CollapsibleBlock
+        title="Unbudgeted"
+        amount={unbudgetedTotal}
+        amountColor={amountColor}
+        textColor={textColor}
+        mutedColor={mutedColor}
+        borderColor={borderColor}
+        formatAmount={formatAmount}
+        hasContent={unbudgetedGroups.length > 0}
+        emptyText="No unbudgeted items"
+      >
+        {unbudgetedGroups.map((g) => (
+          <CollapsibleBlock
+            key={`unb-${g.key}`}
+            title={g.label}
+            amount={g.amount}
+            amountColor={amountColor}
+            textColor={textColor}
+            mutedColor={mutedColor}
+            borderColor={borderColor}
+            formatAmount={formatAmount}
+            depth={1}
+            hasContent={g.items.length > 0}
+          >
+            {g.items.map((e) => (
+              <CompactExpenseLine
+                key={e.id}
+                expense={e}
+                amountColor={amountColor}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                borderColor={borderColor}
+                formatAmount={formatAmount}
+              />
+            ))}
+          </CollapsibleBlock>
+        ))}
+      </CollapsibleBlock>
+
+      <CollapsibleBlock
+        title="Under budget"
+        amount={underTotal}
+        amountColor={underColor}
+        textColor={textColor}
+        mutedColor={mutedColor}
+        borderColor={borderColor}
+        formatAmount={formatAmount}
+        hasContent={underGroups.length > 0}
+        emptyText="No under-budget categories"
+      >
+        {underGroups.map((g) => (
+          <CollapsibleBlock
+            key={`under-${g.key}`}
+            title={g.label}
+            amount={g.amount}
+            amountColor={underColor}
+            textColor={textColor}
+            mutedColor={mutedColor}
+            borderColor={borderColor}
+            formatAmount={formatAmount}
+            depth={1}
+            hasContent={g.items.length > 0 || !!g.meta}
+          >
+            {g.meta ? (
+              <Text style={[styles.itemMeta, { color: mutedColor, marginBottom: 2 }]} numberOfLines={1}>
+                {g.meta}
               </Text>
-            </View>
-            <Text style={[styles.itemAmount, { color: amountColor }]}>
-              {formatAmount(Number(e.amount) || 0)}
-            </Text>
-          </View>
-        ))
-      )}
+            ) : null}
+            {g.items.map((e) => (
+              <CompactExpenseLine
+                key={e.id}
+                expense={e}
+                amountColor={amountColor}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                borderColor={borderColor}
+                formatAmount={formatAmount}
+              />
+            ))}
+          </CollapsibleBlock>
+        ))}
+      </CollapsibleBlock>
+
+      {showReconcile ? (
+        <Text style={[styles.varianceReconcile, { color: mutedColor }]}>
+          Overs + unbudgeted − unders = month {monthVarianceLabel} {monthVarianceValue}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -1192,7 +1567,24 @@ const styles = StyleSheet.create({
   donutLegendLabel: { flex: 1, fontSize: 13, fontWeight: '600' },
   donutLegendAmt: { fontSize: 12, fontWeight: '700' },
   subSectionTitle: { fontSize: 14, fontWeight: '800', marginTop: 4 },
-  drillBlock: { gap: 4, marginTop: 4 },
+  drillBlock: { gap: 8, marginTop: 4 },
+  collapseBlock: { gap: 2 },
+  collapseNested: {
+    marginLeft: 6,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+  },
+  collapseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  collapseChevron: { width: 14, textAlign: 'center' },
+  collapseSectionTitle: { fontSize: 14, fontWeight: '800' },
+  collapseCatTitle: { fontSize: 13, fontWeight: '700' },
+  collapseAmount: { fontSize: 13, fontWeight: '800' },
+  collapseBody: { gap: 2, paddingBottom: 4 },
   varianceBlock: { gap: 4, marginTop: 8 },
   varianceCaption: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   varianceReconcile: {
@@ -1216,7 +1608,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  itemRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   itemTitle: { fontSize: 13, fontWeight: '600' },
   itemMeta: { fontSize: 11, fontWeight: '500' },
-  itemAmount: { fontSize: 13, fontWeight: '800' },
+  itemMetaInline: { fontSize: 11, fontWeight: '500', flexShrink: 0 },
+  itemAmount: { fontSize: 13, fontWeight: '800', flexShrink: 0 },
 });
