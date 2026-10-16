@@ -41,6 +41,20 @@ import DonutChart from './charts/DonutChart';
 import MonthCashflowBars from './charts/MonthCashflowBars';
 
 const UNPAID_COLOR = '#f59e0b';
+const OVER_BUDGET_RED = '#ef4444';
+
+function groupTint(hex: string) {
+  return {
+    borderLeftWidth: 4,
+    borderLeftColor: hex,
+    backgroundColor: /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}22` : undefined,
+    borderRadius: 8,
+    paddingLeft: 8,
+    paddingRight: 4,
+    paddingBottom: 2,
+    marginTop: 8,
+  };
+}
 const BUDGET_COLOR = '#6366f1';
 
 /** Survive tab remounts so we don't re-POST generate_occurrences every visit. */
@@ -852,13 +866,8 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
             Explains month Under/Over: category gaps use paid + unpaid vs budget
           </Text>
           {selectedMonth.overBudget.length > 0 ? (
-            <>
-              <Text
-                style={[
-                  styles.varianceCaption,
-                  { color: colors.textSecondary, marginTop: 6 },
-                ]}
-              >
+            <View style={groupTint(OVER_BUDGET_RED)}>
+              <Text style={[styles.varianceCaption, { color: OVER_BUDGET_RED, marginTop: 6 }]}>
                 Over budget
               </Text>
               {selectedMonth.overBudget.map((row) => (
@@ -879,28 +888,16 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
                       {displayMoney(row.budgetAmount)}
                     </Text>
                   </View>
-                  <Text style={[styles.itemAmount, { color: spentColor }]}>
+                  <Text style={[styles.itemAmount, { color: OVER_BUDGET_RED }]}>
                     +{displayMoney(row.overBy)}
                   </Text>
                 </View>
               ))}
-            </>
+            </View>
           ) : null}
           {selectedMonth.unbudgeted.length > 0 ? (
-            <>
-              <Text
-                style={[
-                  styles.varianceCaption,
-                  {
-                    color: colors.textSecondary,
-                    marginTop:
-                      selectedMonth.overBudget.length > 0 ||
-                      selectedMonth.underBudget.length > 0
-                        ? 10
-                        : 6,
-                  },
-                ]}
-              >
+            <View style={groupTint(UNPAID_COLOR)}>
+              <Text style={[styles.varianceCaption, { color: UNPAID_COLOR, marginTop: 6 }]}>
                 Unbudgeted items
               </Text>
               {selectedMonth.unbudgeted.map((e) => (
@@ -918,31 +915,19 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
                       {e.is_paid === false ? ' · unpaid' : ''}
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.itemAmount,
-                      { color: e.is_paid === false ? UNPAID_COLOR : spentColor },
-                    ]}
-                  >
+                  <Text style={[styles.itemAmount, { color: UNPAID_COLOR }]}>
                     +{displayMoney(Number(e.amount) || 0)}
                   </Text>
                 </View>
               ))}
-            </>
+            </View>
           ) : null}
           {selectedMonth.underBudget.length > 0 ? (
-            <>
+            <View style={groupTint(colors.success || '#10b981')}>
               <Text
                 style={[
                   styles.varianceCaption,
-                  {
-                    color: colors.textSecondary,
-                    marginTop:
-                      selectedMonth.overBudget.length > 0 ||
-                      selectedMonth.unbudgeted.length > 0
-                        ? 10
-                        : 6,
-                  },
+                  { color: colors.success || '#10b981', marginTop: 6 },
                 ]}
               >
                 Under budget (offsets Over)
@@ -961,12 +946,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
                       {displayMoney(row.budgetAmount)}
                     </Text>
                   </View>
-                  <Text style={[styles.itemAmount, { color: colors.success }]}>
+                  <Text style={[styles.itemAmount, { color: colors.success || '#10b981' }]}>
                     −{displayMoney(row.underBy)}
                   </Text>
                 </View>
               ))}
-            </>
+            </View>
           ) : null}
           {monthBudgetVariance !== 0 ? (
             <Text style={[styles.varianceReconcile, { color: colors.textSecondary }]}>
@@ -1165,6 +1150,7 @@ function CollapsibleBlock({
   formatAmount,
   depth = 0,
   defaultOpen = false,
+  accentColor,
   children,
   emptyText,
   hasContent,
@@ -1178,6 +1164,7 @@ function CollapsibleBlock({
   formatAmount: (n: number) => string;
   depth?: number;
   defaultOpen?: boolean;
+  accentColor?: string;
   children: React.ReactNode;
   emptyText?: string;
   hasContent: boolean;
@@ -1189,6 +1176,7 @@ function CollapsibleBlock({
         styles.collapseBlock,
         depth > 0 && styles.collapseNested,
         depth > 0 && { borderLeftColor: borderColor },
+        accentColor ? groupTint(accentColor) : null,
       ]}
     >
       <TouchableOpacity
@@ -1206,7 +1194,7 @@ function CollapsibleBlock({
         <Text
           style={[
             depth > 0 ? styles.collapseCatTitle : styles.collapseSectionTitle,
-            { color: textColor, flex: 1 },
+            { color: accentColor || textColor, flex: 1 },
           ]}
           numberOfLines={1}
         >
@@ -1232,7 +1220,6 @@ function CollapsibleBlock({
 }
 
 const OUTSIDE_BUDGET_ORANGE = '#f59e0b';
-const OVER_BUDGET_RED = '#ef4444';
 
 function CompactExpenseLine({
   expense,
@@ -1470,7 +1457,8 @@ function ExpenseDrillBreakdown({
       <CollapsibleBlock
         title="Over budget"
         amount={overCategorySummaries.reduce((s, g) => s + g.amount, 0)}
-        amountColor={OUTSIDE_BUDGET_ORANGE}
+        amountColor={OVER_BUDGET_RED}
+        accentColor={OVER_BUDGET_RED}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
@@ -1484,7 +1472,7 @@ function ExpenseDrillBreakdown({
             title={row.title}
             meta={row.meta}
             amount={row.amount}
-            amountColor={OUTSIDE_BUDGET_ORANGE}
+            amountColor={OVER_BUDGET_RED}
             textColor={textColor}
             mutedColor={mutedColor}
             borderColor={borderColor}
@@ -1497,6 +1485,7 @@ function ExpenseDrillBreakdown({
         title="Unbudgeted"
         amount={unbudgetedTotal}
         amountColor={OUTSIDE_BUDGET_ORANGE}
+        accentColor={OUTSIDE_BUDGET_ORANGE}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
@@ -1521,6 +1510,7 @@ function ExpenseDrillBreakdown({
         title="Under budget"
         amount={underTotal}
         amountColor={underColor}
+        accentColor={underColor}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
