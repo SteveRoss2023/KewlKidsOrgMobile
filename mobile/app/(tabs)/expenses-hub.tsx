@@ -646,9 +646,9 @@ export default function ExpensesHubScreen() {
           {(
             [
               { id: 'overview' as const, label: 'Overview', icon: 'tachometer' as const },
-              { id: 'budgets' as const, label: 'Budgets', icon: 'pie-chart' as const },
               { id: 'expenses' as const, label: 'Expenses', icon: 'th-list' as const },
               { id: 'bills' as const, label: 'Bills', icon: 'repeat' as const },
+              { id: 'budgets' as const, label: 'Budgets', icon: 'pie-chart' as const },
               { id: 'categories' as const, label: 'Categories', icon: 'folder-o' as const },
             ] as const
           ).map((tab) => {

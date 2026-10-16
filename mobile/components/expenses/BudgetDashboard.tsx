@@ -215,22 +215,26 @@ export default function BudgetDashboard({
       const generation = ++fetchGenerationRef.current;
       let cached = budgetYearCache.get(budgetCacheKey(familyId, y));
 
+      // Preview missing bill rows in the background so it does not delay the board.
       const ensureKey = `${familyId}:${y}`;
       if (
         !ensuredYearsRef.current.has(ensureKey) &&
         !dismissedEnsureRef.current.has(ensureKey)
       ) {
-        try {
-          const preview = await previewBillExpensesForYear(familyId, y);
-          if (generation !== fetchGenerationRef.current) return;
-          if (ensureYearHasChanges(preview)) {
-            setEnsurePreview(preview);
-          } else {
-            ensuredYearsRef.current.add(ensureKey);
-          }
-        } catch {
-          ensuredYearsRef.current.add(ensureKey);
-        }
+        void previewBillExpensesForYear(familyId, y)
+          .then((preview) => {
+            if (generation !== fetchGenerationRef.current) return;
+            if (ensureYearHasChanges(preview)) {
+              setEnsurePreview(preview);
+            } else {
+              ensuredYearsRef.current.add(ensureKey);
+            }
+          })
+          .catch(() => {
+            if (generation === fetchGenerationRef.current) {
+              ensuredYearsRef.current.add(ensureKey);
+            }
+          });
       }
 
       if (cached && soft) {
