@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -13,6 +14,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import { isPhoneMoneyLayout, phoneMoneyValueStyle } from './phoneMoneyLayout';
 import expenseService from '../../services/expenseService';
 import moneyService from '../../services/moneyService';
 import { Budget, Expense } from '../../types/expenses';
@@ -118,6 +120,8 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
@@ -551,30 +555,33 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       ) : null}
       <View style={styles.heroGrid}>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Income</Text>
-          <Text style={[styles.heroValue, { color: colors.success }]}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Income
+          </Text>
+          <Text
+            style={[styles.heroValue, { color: colors.success }]}
+            numberOfLines={1}
+          >
             {displayMoney(yearSummary.incomeTotal)}
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Projected</Text>
-          <Text style={[styles.heroValue, { color: spentColor }]}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Projected
+          </Text>
+          <Text style={[styles.heroValue, { color: spentColor }]} numberOfLines={1}>
             {displayMoney(yearSummary.spentTotal + yearSummary.unpaidTotal)}
           </Text>
-          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            Paid + Unpaid
-          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>Paid + Unpaid</Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Planned net</Text>
-          <Text style={[styles.heroValue, { color: toneFor(yearSummary.plannedNet) }]}>
-            {displayMoney(yearSummary.plannedNet)}
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Actual net
           </Text>
-          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>Income − Budget</Text>
-        </View>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Actual net</Text>
-          <Text style={[styles.heroValue, { color: toneFor(yearSummary.netAfterUnpaid) }]}>
+          <Text
+            style={[styles.heroValue, { color: toneFor(yearSummary.netAfterUnpaid) }]}
+            numberOfLines={1}
+          >
             {displayMoney(yearSummary.netAfterUnpaid)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
@@ -584,14 +591,18 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       </View>
       <View style={[styles.heroGrid, { marginTop: 4 }]}>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
-          <Text style={[styles.heroValue, { color: budgetColor }]}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Budget
+          </Text>
+          <Text style={[styles.heroValue, { color: budgetColor }]} numberOfLines={1}>
             {displayMoney(yearSummary.budgetTotal)}
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
-          <Text style={[styles.heroValue, { color: spentColor }]}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Paid
+          </Text>
+          <Text style={[styles.heroValue, { color: spentColor }]} numberOfLines={1}>
             {displayMoney(yearSummary.spentTotal)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
@@ -599,8 +610,10 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Unpaid</Text>
-          <Text style={[styles.heroValue, { color: UNPAID_COLOR }]}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]} numberOfLines={1}>
+            Unpaid
+          </Text>
+          <Text style={[styles.heroValue, { color: UNPAID_COLOR }]} numberOfLines={1}>
             {displayMoney(yearSummary.unpaidTotal)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
@@ -669,14 +682,20 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         {monthTitle(year, selectedMonth.monthIndex)}
       </Text>
 
-      <View style={styles.monthKpis}>
+      <View style={[styles.monthKpis, phoneMoney && styles.monthKpisTight]}>
         <Kpi
+          columns={3}
+          columnGap={2}
+          cellInset={4}
           label="Income"
           value={displayMoney(selectedMonth.incomeTotal)}
           color={colors.success}
           muted={colors.textSecondary}
         />
         <Kpi
+          columns={3}
+          columnGap={2}
+          cellInset={4}
           label="Projected"
           value={displayMoney(monthActualTotal)}
           color={spentColor}
@@ -694,13 +713,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           selectedBorder={colors.primary}
         />
         <Kpi
-          label="Planned net"
-          value={displayMoney(selectedMonth.plannedNet)}
-          color={toneFor(selectedMonth.plannedNet)}
-          muted={colors.textSecondary}
-          meta="Income − Budget"
-        />
-        <Kpi
+          columns={3}
+          columnGap={2}
+          cellInset={4}
           label="Actual net"
           value={displayMoney(selectedMonth.netAfterUnpaid)}
           color={toneFor(selectedMonth.netAfterUnpaid)}
@@ -709,15 +724,21 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         />
       </View>
 
-      <View style={styles.monthKpis}>
+      <View style={[styles.monthKpis, phoneMoney && styles.monthKpisTight]}>
         <Kpi
+          columns={4}
+          columnGap={2}
+          cellInset={4}
           label="Budget"
           value={displayMoney(selectedMonth.budgetTotal)}
           color={budgetColor}
           muted={colors.textSecondary}
-          meta="Includes bill dues this month"
+          meta="With bill dues"
         />
         <Kpi
+          columns={4}
+          columnGap={2}
+          cellInset={4}
           label="Paid"
           value={displayMoney(selectedMonth.spentTotal)}
           color={spentColor}
@@ -728,6 +749,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           selectedBorder={colors.primary}
         />
         <Kpi
+          columns={4}
+          columnGap={2}
+          cellInset={4}
           label="Unpaid"
           value={displayMoney(selectedMonth.unpaidTotal)}
           color={UNPAID_COLOR}
@@ -738,6 +762,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           selectedBorder={colors.primary}
         />
         <Kpi
+          columns={4}
+          columnGap={2}
+          cellInset={4}
           label={monthVarianceLabel}
           value={monthVarianceValue}
           color={toneFor(monthBudgetVariance)}
@@ -1023,6 +1050,9 @@ function Kpi({
   color,
   muted,
   meta,
+  columns,
+  columnGap = 8,
+  cellInset = 12,
   onPress,
   selected,
   selectedBorder,
@@ -1032,20 +1062,38 @@ function Kpi({
   color: string;
   muted: string;
   meta?: string;
+  /** How many figures share this row. Phone type is sized so the full string fits. */
+  columns: number;
+  columnGap?: number;
+  cellInset?: number;
   onPress?: () => void;
   selected?: boolean;
   selectedBorder?: string;
 }) {
+  const { width: windowWidth } = useWindowDimensions();
+  const phone = isPhoneMoneyLayout(windowWidth);
+  const fit = (text: string, base: number, charWidth: number) =>
+    phone ? phoneMoneyValueStyle(text, windowWidth, base, columns, cellInset, charWidth, columnGap) : null;
   const body = (
     <>
-      <Text style={[styles.kpiLabel, { color: muted }]} numberOfLines={1}>
+      <Text
+        style={[styles.kpiLabel, { color: muted }, fit(label, 11, 0.62)]}
+        numberOfLines={1}
+      >
         {label}
       </Text>
-      <Text style={[styles.kpiValue, { color }]} numberOfLines={1}>
+      <Text
+        style={[styles.kpiValue, { color }, fit(value, 14, cellInset <= 4 ? 0.58 : 0.8)]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
       <Text
-        style={[styles.kpiMeta, { color: muted, opacity: meta ? 1 : 0 }]}
+        style={[
+          styles.kpiMeta,
+          { color: muted, opacity: meta ? 1 : 0 },
+          meta ? fit(meta, 10, 0.58) : null,
+        ]}
         numberOfLines={1}
       >
         {meta || ' '}
@@ -1055,6 +1103,7 @@ function Kpi({
   const boxStyle = [
     styles.kpi,
     styles.kpiCell,
+    phone && (cellInset <= 4 ? styles.kpiCellTight : styles.kpiCellPhone),
     selected && selectedBorder ? { borderColor: selectedBorder } : null,
   ];
   if (onPress) {
@@ -1554,7 +1603,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   heroGrid: { flexDirection: 'row', gap: 8 },
-  heroCell: { flex: 1, gap: 2 },
+  heroCell: { flex: 1, minWidth: 0, gap: 2 },
   heroCaption: { fontSize: 11, fontWeight: '600' },
   heroValue: { fontSize: 16, fontWeight: '800' },
   heroMeta: { fontSize: 10, fontWeight: '500', marginTop: 2 },
@@ -1581,6 +1630,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: 8,
   },
+  monthKpisTight: { gap: 2 },
   kpi: {
     flex: 1,
     minWidth: 0,
@@ -1593,6 +1643,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
+  kpiCellPhone: { paddingHorizontal: 2 },
+  kpiCellTight: { paddingHorizontal: 0 },
   kpiLabel: { fontSize: 11, fontWeight: '600' },
   kpiValue: { fontSize: 14, fontWeight: '800' },
   kpiMeta: { fontSize: 10, fontWeight: '500', minHeight: 13 },

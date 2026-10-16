@@ -111,7 +111,7 @@ export default function BudgetCategoryRow({
           </View>
         </View>
 
-        <Text style={[styles.limitsMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+        <Text style={[styles.limitsMeta, { color: colors.textSecondary }]}>
           Standing {displayMoney(standing)}
           {' · This month '}
           <Text
@@ -126,7 +126,7 @@ export default function BudgetCategoryRow({
           </Text>
         </Text>
 
-        <Text style={[styles.line3, { color: colors.textSecondary }]} numberOfLines={1}>
+        <Text style={[styles.line3, { color: colors.textSecondary }]}>
           Paid <Text style={{ color: '#ef4444' }}>{displayMoney(paid)}</Text>
           {' · Unpaid '}
           <Text style={{ color: unpaidColor }}>{displayMoney(unpaid)}</Text>

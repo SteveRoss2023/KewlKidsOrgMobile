@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -25,6 +26,13 @@ import { groupAccountsByInstitution } from '../../utils/moneyAccounts';
 import DonutChart from '../expenses/charts/DonutChart';
 import TooltipButton from '../TooltipButton';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import {
+  isPhoneMoneyLayout,
+  phoneMoneyCaption,
+  phoneMoneyCell,
+  phoneMoneyGrid,
+  phoneMoneyValueStyle,
+} from '../expenses/phoneMoneyLayout';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   rrsp: 'RRSP',
@@ -98,6 +106,8 @@ export default function AccountsDashboard({
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
   const isDark = theme === 'dark';
 
   const seeded =
@@ -422,24 +432,66 @@ export default function AccountsDashboard({
         ]}
       >
         <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Portfolio</Text>
-        <View style={styles.heroGrid}>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Total</Text>
-            <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid]}>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+            <Text
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >Total</Text>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: colors.primary },
+                phoneMoney && phoneMoneyValueStyle(displayMoney(portfolioTotal), windowWidth),
+              ]}
+              numberOfLines={1}
+            >
               {displayMoney(portfolioTotal)}
             </Text>
           </View>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+            <Text
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >
               Investments
             </Text>
-            <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: investedColor },
+                phoneMoney && phoneMoneyValueStyle(displayMoney(investedTotal), windowWidth),
+              ]}
+              numberOfLines={1}
+            >
               {displayMoney(investedTotal)}
             </Text>
           </View>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
-            <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+            <Text
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >Cash</Text>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: cashColor },
+                phoneMoney && phoneMoneyValueStyle(displayMoney(cashTotal), windowWidth),
+              ]}
+              numberOfLines={1}
+            >
               {displayMoney(cashTotal)}
             </Text>
           </View>
@@ -569,7 +621,19 @@ export default function AccountsDashboard({
 
     const manageHeader = (
       <View style={styles.manageHeader}>
-        <Text style={styles.portfolioLine} numberOfLines={1}>
+        <Text
+          style={[
+            styles.portfolioLine,
+            phoneMoney &&
+              phoneMoneyValueStyle(
+                accounts.length > 0 ? `Portfolio ${displayMoney(portfolioTotal)}` : 'Portfolio',
+                windowWidth,
+                16,
+                0.92
+              ),
+          ]}
+          numberOfLines={1}
+        >
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Portfolio </Text>
           {accounts.length > 0 ? (
             <Text style={[styles.manageTotal, { color: colors.primary }]}>
@@ -639,7 +703,15 @@ export default function AccountsDashboard({
               >
                 {group.label}
               </Text>
-              <Text style={[styles.groupAmt, { color: colors.text }]}>
+              <Text
+                style={[
+                  styles.groupAmt,
+                  { color: colors.text },
+                  phoneMoney &&
+                    phoneMoneyValueStyle(displayMoney(groupTotal), windowWidth, 14, 0.42),
+                ]}
+                numberOfLines={1}
+              >
                 {displayMoney(groupTotal)}
               </Text>
             </View>
@@ -697,7 +769,20 @@ export default function AccountsDashboard({
                         ) : null}
                       </View>
                     </View>
-                    <Text style={[styles.accountAmt, { color: amtColor }]}>
+                    <Text
+                      style={[
+                        styles.accountAmt,
+                        { color: amtColor },
+                        phoneMoney &&
+                          phoneMoneyValueStyle(
+                            displayAccountMoney(a.latest_balance, a.account_type),
+                            windowWidth,
+                            14,
+                            0.4
+                          ),
+                      ]}
+                      numberOfLines={1}
+                    >
                       {displayAccountMoney(a.latest_balance, a.account_type)}
                     </Text>
                     {onEditAccount ? (
@@ -763,7 +848,17 @@ export default function AccountsDashboard({
                               {formatShortDate(s.as_of_date)}
                             </Text>
                             <Text
-                              style={[styles.historyAmt, { color: amtColor }]}
+                              style={[
+                                styles.historyAmt,
+                                { color: amtColor },
+                                phoneMoney &&
+                                  phoneMoneyValueStyle(
+                                    displayAccountMoney(s.balance, a.account_type),
+                                    windowWidth,
+                                    13,
+                                    0.4
+                                  ),
+                              ]}
                               numberOfLines={1}
                             >
                               {displayAccountMoney(s.balance, a.account_type)}

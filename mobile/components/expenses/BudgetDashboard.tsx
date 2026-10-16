@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -13,6 +14,13 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import {
+  isPhoneMoneyLayout,
+  phoneMoneyCaption,
+  phoneMoneyCell,
+  phoneMoneyGrid,
+  phoneMoneyValueStyle,
+} from './phoneMoneyLayout';
 import expenseService from '../../services/expenseService';
 import { Budget, Expense } from '../../types/expenses';
 import BudgetCategoryRow from './BudgetCategoryRow';
@@ -122,6 +130,8 @@ export default function BudgetDashboard({
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
 
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState(() => now.getFullYear());
@@ -454,34 +464,77 @@ export default function BudgetDashboard({
       <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
         Year overview
       </Text>
-      <View style={styles.heroGrid}>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
-          <Text style={[styles.heroValue, { color: colors.primary }]}>
+      <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Budget</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: colors.primary },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(yearSummary.budgeted), windowWidth),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {displayMoney(yearSummary.budgeted)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
             {yearSummary.monthsWithBudgets} months
           </Text>
         </View>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Projected</Text>
-          <Text style={[styles.heroValue, { color: spentColor }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Projected</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: spentColor },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(yearSummary.projected), windowWidth),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {displayMoney(yearSummary.projected)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
             Paid + Unpaid
           </Text>
         </View>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             {yearVarianceLabel}
           </Text>
           <Text
             style={[
               styles.heroValue,
               { color: toneVariance(yearSummary.variance) },
+              phoneMoney &&
+                phoneMoneyValueStyle(
+                  Math.abs(yearSummary.variance) > 0.005
+                    ? displayMoney(Math.abs(yearSummary.variance))
+                    : displayMoney(0),
+                  windowWidth
+                ),
             ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
           >
             {Math.abs(yearSummary.variance) > 0.005
               ? displayMoney(Math.abs(yearSummary.variance))
@@ -492,19 +545,47 @@ export default function BudgetDashboard({
           </Text>
         </View>
       </View>
-      <View style={[styles.heroGrid, { marginTop: 4 }]}>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
-          <Text style={[styles.heroValue, { color: spentColor }]}>
+      <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid, { marginTop: 4 }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Paid</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: spentColor },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(yearSummary.paid), windowWidth),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {displayMoney(yearSummary.paid)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
             {yearSummary.paidCount} items
           </Text>
         </View>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Unpaid</Text>
-          <Text style={[styles.heroValue, { color: unpaidColor }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Unpaid</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: unpaidColor },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(yearSummary.unpaid), windowWidth),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {displayMoney(yearSummary.unpaid)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
@@ -554,30 +635,86 @@ export default function BudgetDashboard({
         {MONTH_NAMES[selectedMonth.monthIndex]} {year}
       </Text>
 
-      <View style={styles.monthKpis}>
-        <View style={styles.kpi}>
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Budget</Text>
-          <Text style={[styles.kpiValue, { color: colors.primary }]}>
+      <View style={[styles.monthKpis, phoneMoney && phoneMoneyGrid]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.kpi}>
+          <Text
+            style={[
+              styles.kpiLabel,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Budget</Text>
+          <Text
+            style={[
+              styles.kpiValue,
+              { color: colors.primary },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(monthBudget), windowWidth, 15),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {displayMoney(monthBudget)}
           </Text>
           <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
             Includes bill dues this month
           </Text>
         </View>
-        <View style={styles.kpi}>
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Projected</Text>
-          <Text style={[styles.kpiValue, { color: spentColor }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.kpi}>
+          <Text
+            style={[
+              styles.kpiLabel,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Projected</Text>
+          <Text
+            style={[
+              styles.kpiValue,
+              { color: spentColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(
+                  expensesReady ? displayMoney(monthProjected) : '…',
+                  windowWidth,
+                  15
+                ),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {expensesReady ? displayMoney(monthProjected) : '…'}
           </Text>
           <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
             Paid + Unpaid
           </Text>
         </View>
-        <View style={styles.kpi}>
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.kpi}>
+          <Text
+            style={[
+              styles.kpiLabel,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             {monthVarianceLabel}
           </Text>
-          <Text style={[styles.kpiValue, { color: toneVariance(monthVariance) }]}>
+          <Text
+            style={[
+              styles.kpiValue,
+              { color: toneVariance(monthVariance) },
+              phoneMoney &&
+                phoneMoneyValueStyle(
+                  expensesReady
+                    ? Math.abs(monthVariance) > 0.005
+                      ? displayMoney(Math.abs(monthVariance))
+                      : displayMoney(0)
+                    : '…',
+                  windowWidth,
+                  15
+                ),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {expensesReady
               ? Math.abs(monthVariance) > 0.005
                 ? displayMoney(Math.abs(monthVariance))
@@ -590,19 +727,57 @@ export default function BudgetDashboard({
         </View>
       </View>
 
-      <View style={styles.monthKpis}>
-        <View style={styles.kpi}>
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Paid</Text>
-          <Text style={[styles.kpiValue, { color: spentColor }]}>
+      <View style={[styles.monthKpis, phoneMoney && phoneMoneyGrid]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.kpi}>
+          <Text
+            style={[
+              styles.kpiLabel,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Paid</Text>
+          <Text
+            style={[
+              styles.kpiValue,
+              { color: spentColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(
+                  expensesReady ? displayMoney(monthPaid) : '…',
+                  windowWidth,
+                  15
+                ),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {expensesReady ? displayMoney(monthPaid) : '…'}
           </Text>
           <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
             {expensesReady ? `${selectedMonth.paidCount} items` : 'Loading…'}
           </Text>
         </View>
-        <View style={styles.kpi}>
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Unpaid</Text>
-          <Text style={[styles.kpiValue, { color: unpaidColor }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.kpi}>
+          <Text
+            style={[
+              styles.kpiLabel,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Unpaid</Text>
+          <Text
+            style={[
+              styles.kpiValue,
+              { color: unpaidColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(
+                  expensesReady ? displayMoney(monthUnpaid) : '…',
+                  windowWidth,
+                  15
+                ),
+            ]}
+            numberOfLines={phoneMoney ? 1 : undefined}
+          >
             {expensesReady ? displayMoney(monthUnpaid) : '…'}
           </Text>
           <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>

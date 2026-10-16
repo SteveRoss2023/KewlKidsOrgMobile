@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -23,6 +24,13 @@ import {
   projectPortfolioAtYears,
 } from '../../utils/moneyReturns';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import {
+  isPhoneMoneyLayout,
+  phoneMoneyCaption,
+  phoneMoneyCell,
+  phoneMoneyGrid,
+  phoneMoneyValueStyle,
+} from '../expenses/phoneMoneyLayout';
 
 const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
 const DEFAULT_FORECAST_RATE = 2.5;
@@ -42,6 +50,8 @@ export default function TargetDashboard({
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
 
   const seeded =
     !!selectedFamily &&
@@ -292,36 +302,102 @@ export default function TargetDashboard({
         {horizonPoint?.calendarYear ?? currentCalendarYear + 1} · {forecastRate}% investment
         return
       </Text>
-      <Text style={[styles.heroPortfolio, { color: growthColor }]} numberOfLines={1}>
+      <Text
+        style={[
+          styles.heroPortfolio,
+          { color: growthColor },
+          phoneMoney &&
+            phoneMoneyValueStyle(fmtSignedMoney(investGrowthSelected), windowWidth, 28, 0.92),
+        ]}
+        numberOfLines={1}
+      >
         {fmtSignedMoney(investGrowthSelected)}
       </Text>
       <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
         Investment growth this year
       </Text>
-      <View style={styles.heroBreakdown}>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+      <View style={[styles.heroBreakdown, phoneMoney && phoneMoneyGrid]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             Invest start
           </Text>
-          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: investedColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(horizonPoint?.investStart ?? 0), windowWidth, 15),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(horizonPoint?.investStart ?? 0)}
           </Text>
         </View>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Invest end</Text>
-          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Invest end</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: investedColor },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(investEndSelected), windowWidth, 15),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(investEndSelected)}
           </Text>
         </View>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
-          <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Cash</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: cashColor },
+              phoneMoney && phoneMoneyValueStyle(displayMoney(cashSelected), windowWidth, 15),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(cashSelected)}
           </Text>
         </View>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Portfolio</Text>
-          <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Portfolio</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: colors.primary },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(horizonPoint?.portfolio ?? 0), windowWidth, 15),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(horizonPoint?.portfolio ?? 0)}
           </Text>
         </View>
@@ -376,7 +452,17 @@ export default function TargetDashboard({
                 {p.calendarYear}
               </Text>
               <Text
-                style={[styles.yearCardMeta, { color: colors.textSecondary, flex: 1 }]}
+                style={[
+                  styles.yearCardMeta,
+                  { color: colors.textSecondary, flex: 1 },
+                  phoneMoney &&
+                    phoneMoneyValueStyle(
+                      `${displayMoney(p.investStart)}→${displayMoney(p.invest)}`,
+                      windowWidth,
+                      12,
+                      0.42
+                    ),
+                ]}
                 numberOfLines={1}
               >
                 {displayMoney(p.investStart)}→
@@ -385,7 +471,12 @@ export default function TargetDashboard({
                 </Text>
               </Text>
               <Text
-                style={[styles.yearCardGrowth, { color: growthColor }]}
+                style={[
+                  styles.yearCardGrowth,
+                  { color: growthColor },
+                  phoneMoney &&
+                    phoneMoneyValueStyle(fmtSignedMoney(p.investGrowth), windowWidth, 13, 0.22),
+                ]}
                 numberOfLines={1}
               >
                 {fmtSignedMoney(p.investGrowth)}
@@ -423,7 +514,14 @@ export default function TargetDashboard({
                         <Text
                           style={[
                             styles.yearAccountPathLine,
-                            { color: colors.textSecondary },
+                            { color: colors.textSecondary, flex: 1, minWidth: 0 },
+                            phoneMoney &&
+                              phoneMoneyValueStyle(
+                                `${displayMoney(row.start)}→${displayMoney(row.end)}`,
+                                windowWidth,
+                                12,
+                                0.4
+                              ),
                           ]}
                           numberOfLines={1}
                         >
@@ -438,6 +536,8 @@ export default function TargetDashboard({
                             {
                               color: row.growth > 0 ? growthColor : colors.textSecondary,
                             },
+                            phoneMoney &&
+                              phoneMoneyValueStyle(fmtSignedMoney(row.growth), windowWidth, 12, 0.22),
                           ]}
                           numberOfLines={1}
                         >

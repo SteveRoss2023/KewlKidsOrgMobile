@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -30,6 +31,13 @@ import DonutChart from '../expenses/charts/DonutChart';
 import MonthIncomeBars from './charts/MonthIncomeBars';
 import TooltipButton from '../TooltipButton';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import {
+  isPhoneMoneyLayout,
+  phoneMoneyCaption,
+  phoneMoneyCell,
+  phoneMoneyGrid,
+  phoneMoneyValueStyle,
+} from '../expenses/phoneMoneyLayout';
 
 function monthTitle(year: number, monthIndex: number): string {
   return new Date(year, monthIndex, 1).toLocaleDateString('en-US', {
@@ -161,6 +169,8 @@ export default function IncomeDashboard({
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
 
   const now = useMemo(() => new Date(), []);
   const initialCache =
@@ -715,29 +725,69 @@ export default function IncomeDashboard({
         <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
           Income · {year}
         </Text>
-        <View style={styles.heroGrid}>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid]}>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+            <Text
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >
               Year total
             </Text>
-            <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: colors.primary },
+                phoneMoney &&
+                  phoneMoneyValueStyle(displayMoney(yearIncomeTotal), windowWidth),
+              ]}
+              numberOfLines={1}
+            >
               {displayMoney(yearIncomeTotal)}
             </Text>
           </View>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Received</Text>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
             <Text
-              style={[styles.heroValue, { color: colors.success || '#10b981' }]}
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >Received</Text>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: colors.success || '#10b981' },
+                phoneMoney && phoneMoneyValueStyle(displayMoney(receivedTotal), windowWidth),
+              ]}
               numberOfLines={1}
             >
               {displayMoney(receivedTotal)}
             </Text>
           </View>
-          <View style={styles.heroCell}>
-            <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+          <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
+            <Text
+              style={[
+                styles.heroCaption,
+                { color: colors.textSecondary },
+                phoneMoney && phoneMoneyCaption,
+              ]}
+              numberOfLines={1}
+            >
               Estimated
             </Text>
-            <Text style={[styles.heroValue, { color: '#f59e0b' }]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.heroValue,
+                { color: '#f59e0b' },
+                phoneMoney && phoneMoneyValueStyle(displayMoney(estimatedTotal), windowWidth),
+              ]}
+              numberOfLines={1}
+            >
               {displayMoney(estimatedTotal)}
             </Text>
           </View>
@@ -1010,7 +1060,15 @@ export default function IncomeDashboard({
                       <Text style={[styles.streamName, { color: colors.text }]} numberOfLines={1}>
                         {s.name}
                       </Text>
-                      <Text style={[styles.streamAmt, { color: colors.text }]}>
+                      <Text
+                        style={[
+                          styles.streamAmt,
+                          { color: colors.text },
+                          phoneMoney &&
+                            phoneMoneyValueStyle(displayStreamEstimate(s), windowWidth, 14, 0.42),
+                        ]}
+                        numberOfLines={1}
+                      >
                         {displayStreamEstimate(s)}
                       </Text>
                     </View>

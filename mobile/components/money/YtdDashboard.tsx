@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -21,6 +22,13 @@ import { canUseMoneyDemoPortfolio } from '../../utils/moneyDemoPortfolio';
 import { buildYearReturnRows, YearReturnRow, ytdPortfolioTotals } from '../../utils/moneyReturns';
 import DonutChart from '../expenses/charts/DonutChart';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
+import {
+  isPhoneMoneyLayout,
+  phoneMoneyCaption,
+  phoneMoneyCell,
+  phoneMoneyGrid,
+  phoneMoneyValueStyle,
+} from '../expenses/phoneMoneyLayout';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   rrsp: 'RRSP',
@@ -106,6 +114,8 @@ export default function YtdDashboard({
   const { selectedFamily } = useFamily();
   const { displayMoney } = useShowAmounts();
   const isWide = useIsWideLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const phoneMoney = isPhoneMoneyLayout(windowWidth);
 
   const seeded =
     !!selectedFamily &&
@@ -384,6 +394,8 @@ export default function YtdDashboard({
         style={[
           styles.heroPortfolio,
           { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+          phoneMoney &&
+            phoneMoneyValueStyle(fmtSignedMoney(ytdHeroTotals.invested.delta), windowWidth, 28, 0.92),
         ]}
         numberOfLines={1}
       >
@@ -393,22 +405,46 @@ export default function YtdDashboard({
         Investment growth
       </Text>
 
-      <View style={styles.heroInvestPath}>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+      <View style={[styles.heroInvestPath, phoneMoney && phoneMoneyGrid]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             Invest start
           </Text>
-          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: investedColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.start), windowWidth, 15, 4),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(ytdHeroTotals.invested.start)}
           </Text>
         </View>
         <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Growth</Text>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Growth</Text>
           <Text
             style={[
               styles.heroValue,
               { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+              phoneMoney &&
+                phoneMoneyValueStyle(fmtSignedMoney(ytdHeroTotals.invested.delta), windowWidth, 15, 4),
             ]}
             numberOfLines={1}
           >
@@ -418,44 +454,112 @@ export default function YtdDashboard({
             style={[
               styles.heroMeta,
               { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
+              phoneMoney && phoneMoneyCaption,
             ]}
+            numberOfLines={1}
           >
             {fmtReturnPct(ytdHeroTotals.invested.returnPct)}
           </Text>
         </View>
         <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             Invest now
           </Text>
-          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: investedColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.latest), windowWidth, 15, 4),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(ytdHeroTotals.invested.latest)}
           </Text>
         </View>
       </View>
 
-      <View style={[styles.heroPortfolioRow, { borderTopColor: colors.border }]}>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+      <View
+        style={[
+          styles.heroPortfolioRow,
+          { borderTopColor: colors.border },
+          phoneMoney && phoneMoneyGrid,
+        ]}
+      >
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             Invest now
           </Text>
-          <Text style={[styles.heroValue, { color: investedColor }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: investedColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.latest), windowWidth, 15, 4),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(ytdHeroTotals.invested.latest)}
           </Text>
         </View>
         <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Cash</Text>
-          <Text style={[styles.heroValue, { color: cashColor }]} numberOfLines={1}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >Cash</Text>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: cashColor },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.cash.latest), windowWidth, 15, 4),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(ytdHeroTotals.cash.latest)}
           </Text>
         </View>
         <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-        <View style={styles.heroBreakCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+          <Text
+            style={[
+              styles.heroCaption,
+              { color: colors.textSecondary },
+              phoneMoney && phoneMoneyCaption,
+            ]}
+            numberOfLines={1}
+          >
             Portfolio
           </Text>
-          <Text style={[styles.heroValue, { color: colors.primary }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: colors.primary },
+              phoneMoney &&
+                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.all.latest), windowWidth, 15, 4),
+            ]}
+            numberOfLines={1}
+          >
             {displayMoney(ytdHeroTotals.all.latest)}
           </Text>
         </View>
@@ -555,7 +659,12 @@ export default function YtdDashboard({
                       {fmtReturnPct(row.returnPct)}
                     </Text>
                     <Text
-                      style={[styles.accountDelta, { color: returnsDeltaColor(row.delta) }]}
+                      style={[
+                        styles.accountDelta,
+                        { color: returnsDeltaColor(row.delta) },
+                        phoneMoney &&
+                          phoneMoneyValueStyle(fmtSignedMoney(row.delta), windowWidth, 12, 0.34),
+                      ]}
                       numberOfLines={1}
                     >
                       {fmtSignedMoney(row.delta)}
@@ -569,11 +678,37 @@ export default function YtdDashboard({
                       {row.startDate ? formatShortDate(row.startDate) : 'no start'}
                       {row.latestDate ? ` → ${formatShortDate(row.latestDate)}` : ''}
                     </Text>
-                    <Text style={[styles.accountAmt, { color: colors.text }]}>
+                    <Text
+                      style={[
+                        styles.accountAmt,
+                        { color: colors.text },
+                        phoneMoney &&
+                          phoneMoneyValueStyle(
+                            displayMoney(row.startBalance),
+                            windowWidth,
+                            12,
+                            0.42
+                          ),
+                      ]}
+                      numberOfLines={1}
+                    >
                       {displayMoney(row.startBalance)}
                     </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 11 }}>→</Text>
-                    <Text style={[styles.accountAmt, { color: colors.text }]}>
+                    <Text
+                      style={[
+                        styles.accountAmt,
+                        { color: colors.text },
+                        phoneMoney &&
+                          phoneMoneyValueStyle(
+                            displayMoney(row.latestBalance),
+                            windowWidth,
+                            12,
+                            0.42
+                          ),
+                      ]}
+                      numberOfLines={1}
+                    >
                       {displayMoney(row.latestBalance)}
                     </Text>
                   </View>
@@ -699,7 +834,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   heroBreakCell: { flexGrow: 1, flexBasis: '22%', minWidth: 88, gap: 2 },
-  heroOp: { fontSize: 16, fontWeight: '700', paddingTop: 16 },
+  heroOp: { fontSize: 16, fontWeight: '700', paddingTop: 16, flexShrink: 0 },
   heroFormulaHint: { fontSize: 11, fontWeight: '500' },
   heroCaption: { fontSize: 11, fontWeight: '600' },
   heroValue: { fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
