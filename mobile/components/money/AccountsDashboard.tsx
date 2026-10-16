@@ -30,7 +30,9 @@ import {
   isPhoneMoneyLayout,
   phoneMoneyCaption,
   phoneMoneyCell,
+  phoneHeroValueStyle,
   phoneMoneyGrid,
+  phoneMoneyTight,
   phoneMoneyValueStyle,
 } from '../expenses/phoneMoneyLayout';
 
@@ -432,7 +434,7 @@ export default function AccountsDashboard({
         ]}
       >
         <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>Portfolio</Text>
-        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid]}>
+        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid, phoneMoney && phoneMoneyTight]}>
           <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
             <Text
               style={[
@@ -446,7 +448,7 @@ export default function AccountsDashboard({
               style={[
                 styles.heroValue,
                 { color: colors.primary },
-                phoneMoney && phoneMoneyValueStyle(displayMoney(portfolioTotal), windowWidth),
+                phoneMoney && phoneHeroValueStyle(displayMoney(portfolioTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >
@@ -468,7 +470,7 @@ export default function AccountsDashboard({
               style={[
                 styles.heroValue,
                 { color: investedColor },
-                phoneMoney && phoneMoneyValueStyle(displayMoney(investedTotal), windowWidth),
+                phoneMoney && phoneHeroValueStyle(displayMoney(investedTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >
@@ -488,7 +490,7 @@ export default function AccountsDashboard({
               style={[
                 styles.heroValue,
                 { color: cashColor },
-                phoneMoney && phoneMoneyValueStyle(displayMoney(cashTotal), windowWidth),
+                phoneMoney && phoneHeroValueStyle(displayMoney(cashTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >

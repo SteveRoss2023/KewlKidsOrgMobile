@@ -35,7 +35,9 @@ import {
   isPhoneMoneyLayout,
   phoneMoneyCaption,
   phoneMoneyCell,
+  phoneHeroValueStyle,
   phoneMoneyGrid,
+  phoneMoneyTight,
   phoneMoneyValueStyle,
 } from '../expenses/phoneMoneyLayout';
 
@@ -92,6 +94,28 @@ function formatShortDate(ymd: string): string {
   if (!y || !m) return ymd;
   const dt = new Date(y, m - 1, d || 1);
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Phone payment rows drop the year. The stream header still shows the range. */
+function formatMonthDay(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m) return ymd;
+  const dt = new Date(y, m - 1, d || 1);
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function payStatusLabel(status: string, phone: boolean): string {
+  if (!phone) return status;
+  if (status === 'received') return 'Rec';
+  if (status === 'skipped') return 'Skip';
+  return 'Est';
+}
+
+/** Share of the phone row left for one Est/Actual amount after date, badge, and actions. */
+function payAmountFraction(windowWidth: number): number {
+  const reserved = 64 + 4 + 8 + 56 + 44 + 52;
+  const cell = Math.max((windowWidth - reserved) / 2, 36);
+  return cell / Math.max(windowWidth - 64, 1);
 }
 
 function occAmount(o: IncomeOccurrence): number {
@@ -725,7 +749,7 @@ export default function IncomeDashboard({
         <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
           Income · {year}
         </Text>
-        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid]}>
+        <View style={[styles.heroGrid, phoneMoney && phoneMoneyGrid, phoneMoney && phoneMoneyTight]}>
           <View style={phoneMoney ? phoneMoneyCell : styles.heroCell}>
             <Text
               style={[
@@ -742,7 +766,7 @@ export default function IncomeDashboard({
                 styles.heroValue,
                 { color: colors.primary },
                 phoneMoney &&
-                  phoneMoneyValueStyle(displayMoney(yearIncomeTotal), windowWidth),
+                  phoneHeroValueStyle(displayMoney(yearIncomeTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >
@@ -762,7 +786,7 @@ export default function IncomeDashboard({
               style={[
                 styles.heroValue,
                 { color: colors.success || '#10b981' },
-                phoneMoney && phoneMoneyValueStyle(displayMoney(receivedTotal), windowWidth),
+                phoneMoney && phoneHeroValueStyle(displayMoney(receivedTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >
@@ -784,7 +808,7 @@ export default function IncomeDashboard({
               style={[
                 styles.heroValue,
                 { color: '#f59e0b' },
-                phoneMoney && phoneMoneyValueStyle(displayMoney(estimatedTotal), windowWidth),
+                phoneMoney && phoneHeroValueStyle(displayMoney(estimatedTotal), windowWidth, 16, 3),
               ]}
               numberOfLines={1}
             >
@@ -890,6 +914,12 @@ export default function IncomeDashboard({
           <View style={styles.monthPays}>
             {selectedMonth.occs.map((o) => {
               const color = streamColor(o.stream);
+              const payDate = phoneMoney ? formatMonthDay(o.due_date) : formatShortDate(o.due_date);
+              const estText = displayMoney(o.estimated_amount);
+              const actText = o.actual_amount != null ? displayMoney(o.actual_amount) : null;
+              const metaProbe = actText
+                ? `${payDate} · Est ${estText} · Act ${actText}`
+                : `${payDate} · Est ${estText}`;
               return (
                 <View
                   key={o.id}
@@ -907,11 +937,16 @@ export default function IncomeDashboard({
                       {o.stream_name || streamNameById.get(o.stream) || 'Stream'}
                     </Text>
                     <Text
-                      style={[styles.meta, { color: colors.textSecondary }]}
+                      style={[
+                        styles.meta,
+                        { color: colors.textSecondary },
+                        phoneMoney &&
+                          phoneMoneyValueStyle(metaProbe, windowWidth, 11, 0.72, 0, 0.58),
+                      ]}
                       numberOfLines={1}
                     >
-                      {formatShortDate(o.due_date)} · Est {displayMoney(o.estimated_amount)}
-                      {o.actual_amount != null ? (
+                      {payDate} · Est {estText}
+                      {actText != null ? (
                         <>
                           {' · Act '}
                           <Text
@@ -920,7 +955,7 @@ export default function IncomeDashboard({
                               fontWeight: '700',
                             }}
                           >
-                            {displayMoney(o.actual_amount)}
+                            {actText}
                           </Text>
                         </>
                       ) : null}
@@ -1079,7 +1114,10 @@ export default function IncomeDashboard({
                       {' · '}
                       {items.length} payments
                     </Text>
-                    <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.meta, { color: colors.textSecondary }]}
+                      numberOfLines={phoneMoney ? 2 : 1}
+                    >
                       {formatShortDate(s.start_date)}
                       {' → '}
                       {s.end_date ? formatShortDate(s.end_date) : 'open'}
@@ -1126,11 +1164,15 @@ export default function IncomeDashboard({
                       <View
                         style={[
                           styles.streamPayHeader,
+                          phoneMoney && styles.streamPayRowPhone,
                           { borderTopColor: colors.border, backgroundColor: colors.background },
                         ]}
                       >
                         <Text
-                          style={[styles.streamPayColDate, { color: colors.textSecondary }]}
+                          style={[
+                            phoneMoney ? styles.streamPayColDatePhone : styles.streamPayColDate,
+                            { color: colors.textSecondary },
+                          ]}
                           numberOfLines={1}
                         >
                           Date
@@ -1148,20 +1190,43 @@ export default function IncomeDashboard({
                           Actual
                         </Text>
                         <Text
-                          style={[styles.streamPayColStatus, { color: colors.textSecondary }]}
+                          style={[
+                            styles.streamPayColStatus,
+                            phoneMoney && styles.streamPayColStatusPhone,
+                            { color: colors.textSecondary, fontSize: phoneMoney ? 10 : 12 },
+                          ]}
                           numberOfLines={1}
                         >
                           Status
                         </Text>
                         <View style={styles.streamPayColActions} />
                       </View>
-                      {items.map((o) => (
+                      {items.map((o) => {
+                        const estText = displayMoney(o.estimated_amount);
+                        const actText =
+                          o.actual_amount != null ? displayMoney(o.actual_amount) : '—';
+                        const amtFit = (text: string) =>
+                          phoneMoney
+                            ? phoneMoneyValueStyle(
+                                text,
+                                windowWidth,
+                                12,
+                                payAmountFraction(windowWidth),
+                                0,
+                                0.58
+                              )
+                            : null;
+                        return (
                         <View
                           key={o.id}
-                          style={[styles.streamPayRow, { borderTopColor: colors.border }]}
+                          style={[
+                            styles.streamPayRow,
+                            phoneMoney && styles.streamPayRowPhone,
+                            { borderTopColor: colors.border },
+                          ]}
                         >
                           <TouchableOpacity
-                            style={styles.streamPayColDate}
+                            style={phoneMoney ? styles.streamPayColDatePhone : styles.streamPayColDate}
                             onPress={() => editOcc(o)}
                             accessibilityLabel={`Edit payment on ${formatShortDate(o.due_date)}`}
                           >
@@ -1169,25 +1234,31 @@ export default function IncomeDashboard({
                               style={[styles.streamPayDateText, { color: colors.text }]}
                               numberOfLines={1}
                             >
-                              {formatShortDate(o.due_date)}
+                              {phoneMoney ? formatMonthDay(o.due_date) : formatShortDate(o.due_date)}
                             </Text>
                           </TouchableOpacity>
                           <Text
-                            style={[styles.streamPayColAmt, { color: colors.text }]}
+                            style={[styles.streamPayColAmt, { color: colors.text }, amtFit(estText)]}
                             numberOfLines={1}
                           >
-                            {displayMoney(o.estimated_amount)}
+                            {estText}
                           </Text>
                           <Text
-                            style={[styles.streamPayColAmt, { color: colors.text }]}
+                            style={[styles.streamPayColAmt, { color: colors.text }, amtFit(actText)]}
                             numberOfLines={1}
                           >
-                            {o.actual_amount != null ? displayMoney(o.actual_amount) : '—'}
+                            {actText}
                           </Text>
-                          <View style={styles.streamPayColStatus}>
+                          <View
+                            style={[
+                              styles.streamPayColStatus,
+                              phoneMoney && styles.streamPayColStatusPhone,
+                            ]}
+                          >
                             <View
                               style={[
                                 styles.statusBadge,
+                                phoneMoney && styles.statusBadgePhone,
                                 {
                                   backgroundColor:
                                     o.status === 'received'
@@ -1211,7 +1282,7 @@ export default function IncomeDashboard({
                                 }}
                                 numberOfLines={1}
                               >
-                                {o.status}
+                                {payStatusLabel(o.status, phoneMoney)}
                               </Text>
                             </View>
                           </View>
@@ -1242,7 +1313,8 @@ export default function IncomeDashboard({
                             ) : null}
                           </View>
                         </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   )
                 ) : null}
@@ -1490,6 +1562,12 @@ const styles = StyleSheet.create({
     flex: 1.15,
     minWidth: 0,
   },
+  streamPayColDatePhone: {
+    width: 56,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  streamPayRowPhone: { gap: 2 },
   streamPayDateText: {
     fontSize: 12,
     fontWeight: '600',
@@ -1507,6 +1585,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  streamPayColStatusPhone: { width: 44 },
   streamPayColActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1518,5 +1597,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 999,
   },
+  statusBadgePhone: { paddingHorizontal: 4 },
   empty: { fontSize: 13, paddingVertical: 12 },
 });

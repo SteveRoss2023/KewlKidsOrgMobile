@@ -28,7 +28,9 @@ import {
   isPhoneMoneyLayout,
   phoneMoneyCaption,
   phoneMoneyCell,
+  phoneHeroValueStyle,
   phoneMoneyGrid,
+  phoneMoneyTight,
   phoneMoneyValueStyle,
 } from '../expenses/phoneMoneyLayout';
 
@@ -228,6 +230,14 @@ export default function TargetDashboard({
     return `${sign}${displayMoney(Math.abs(n))}`;
   };
 
+  /** Phone forecast row: keep the stylesheet size unless the full amount needs to shrink. */
+  const forecastFit = (text: string, base: number, reserved: number) => {
+    if (!phoneMoney) return null;
+    const cell = Math.max(windowWidth - reserved, 36);
+    const share = cell / Math.max(windowWidth - 64, 1);
+    return phoneMoneyValueStyle(text, windowWidth, base, share, 0, 0.58);
+  };
+
   const selectForecastYear = (yearsAhead: number) => {
     setHorizonYearsAhead(yearsAhead);
     setExpandedForecastYears((prev) =>
@@ -316,7 +326,7 @@ export default function TargetDashboard({
       <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
         Investment growth this year
       </Text>
-      <View style={[styles.heroBreakdown, phoneMoney && phoneMoneyGrid]}>
+      <View style={[styles.heroBreakdown, phoneMoney && phoneMoneyGrid, phoneMoney && phoneMoneyTight]}>
         <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
           <Text
             style={[
@@ -333,7 +343,7 @@ export default function TargetDashboard({
               styles.heroValue,
               { color: investedColor },
               phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(horizonPoint?.investStart ?? 0), windowWidth, 15),
+                phoneHeroValueStyle(displayMoney(horizonPoint?.investStart ?? 0), windowWidth, 15, 4),
             ]}
             numberOfLines={1}
           >
@@ -353,7 +363,7 @@ export default function TargetDashboard({
             style={[
               styles.heroValue,
               { color: investedColor },
-              phoneMoney && phoneMoneyValueStyle(displayMoney(investEndSelected), windowWidth, 15),
+              phoneMoney && phoneHeroValueStyle(displayMoney(investEndSelected), windowWidth, 15, 4),
             ]}
             numberOfLines={1}
           >
@@ -373,7 +383,7 @@ export default function TargetDashboard({
             style={[
               styles.heroValue,
               { color: cashColor },
-              phoneMoney && phoneMoneyValueStyle(displayMoney(cashSelected), windowWidth, 15),
+              phoneMoney && phoneHeroValueStyle(displayMoney(cashSelected), windowWidth, 15, 4),
             ]}
             numberOfLines={1}
           >
@@ -394,7 +404,7 @@ export default function TargetDashboard({
               styles.heroValue,
               { color: colors.primary },
               phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(horizonPoint?.portfolio ?? 0), windowWidth, 15),
+                phoneHeroValueStyle(displayMoney(horizonPoint?.portfolio ?? 0), windowWidth, 15, 4),
             ]}
             numberOfLines={1}
           >
@@ -425,6 +435,9 @@ export default function TargetDashboard({
               demoPortfolio
             )
           : [];
+        const pathLabel = `${displayMoney(p.investStart)}→${displayMoney(p.invest)}`;
+        const growthLabel = fmtSignedMoney(p.investGrowth);
+        const growthReserve = Math.ceil(growthLabel.length * 13 * 0.62) + 8;
         return (
           <View
             key={p.yearsAhead}
@@ -455,13 +468,7 @@ export default function TargetDashboard({
                 style={[
                   styles.yearCardMeta,
                   { color: colors.textSecondary, flex: 1 },
-                  phoneMoney &&
-                    phoneMoneyValueStyle(
-                      `${displayMoney(p.investStart)}→${displayMoney(p.invest)}`,
-                      windowWidth,
-                      12,
-                      0.42
-                    ),
+                  forecastFit(pathLabel, 12, 116 + growthReserve),
                 ]}
                 numberOfLines={1}
               >
@@ -474,12 +481,11 @@ export default function TargetDashboard({
                 style={[
                   styles.yearCardGrowth,
                   { color: growthColor },
-                  phoneMoney &&
-                    phoneMoneyValueStyle(fmtSignedMoney(p.investGrowth), windowWidth, 13, 0.22),
+                  forecastFit(growthLabel, 13, windowWidth - growthReserve),
                 ]}
                 numberOfLines={1}
               >
-                {fmtSignedMoney(p.investGrowth)}
+                {growthLabel}
               </Text>
             </TouchableOpacity>
 
@@ -500,13 +506,20 @@ export default function TargetDashboard({
                 ) : (
                   accountRows.map((row) => {
                     const amtColor = row.isCash ? cashColor : investedColor;
+                    const pathLabel = `${displayMoney(row.start)}→${displayMoney(row.end)}`;
+                    const growthLabel = fmtSignedMoney(row.growth);
+                    const growthReserve = Math.ceil(growthLabel.length * 13 * 0.62) + 8;
                     return (
                       <View
                         key={`${p.yearsAhead}-${row.id}`}
                         style={[styles.yearAccountRow, { borderTopColor: colors.border }]}
                       >
                         <Text
-                          style={[styles.accountName, { color: colors.text, flex: 1 }]}
+                          style={[
+                            styles.accountName,
+                            { color: colors.text, flex: 1 },
+                            phoneMoney && styles.yearAccountNamePhone,
+                          ]}
                           numberOfLines={1}
                         >
                           {row.name}
@@ -515,13 +528,7 @@ export default function TargetDashboard({
                           style={[
                             styles.yearAccountPathLine,
                             { color: colors.textSecondary, flex: 1, minWidth: 0 },
-                            phoneMoney &&
-                              phoneMoneyValueStyle(
-                                `${displayMoney(row.start)}→${displayMoney(row.end)}`,
-                                windowWidth,
-                                12,
-                                0.4
-                              ),
+                            forecastFit(pathLabel, 12, 148 + growthReserve),
                           ]}
                           numberOfLines={1}
                         >
@@ -536,12 +543,11 @@ export default function TargetDashboard({
                             {
                               color: row.growth > 0 ? growthColor : colors.textSecondary,
                             },
-                            phoneMoney &&
-                              phoneMoneyValueStyle(fmtSignedMoney(row.growth), windowWidth, 12, 0.22),
+                            forecastFit(growthLabel, 13, windowWidth - growthReserve),
                           ]}
                           numberOfLines={1}
                         >
-                          {fmtSignedMoney(row.growth)}
+                          {growthLabel}
                         </Text>
                       </View>
                     );
@@ -727,5 +733,11 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   accountName: { fontSize: 13, fontWeight: '700' },
+  yearAccountNamePhone: {
+    flexGrow: 0.4,
+    flexShrink: 1,
+    flexBasis: 0,
+    maxWidth: '24%',
+  },
   meta: { fontSize: 11, fontWeight: '500', marginTop: 1 },
 });

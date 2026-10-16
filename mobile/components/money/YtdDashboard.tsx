@@ -25,8 +25,8 @@ import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import {
   isPhoneMoneyLayout,
   phoneMoneyCaption,
-  phoneMoneyCell,
   phoneMoneyGrid,
+  phoneMoneyTight,
   phoneMoneyValueStyle,
 } from '../expenses/phoneMoneyLayout';
 
@@ -377,6 +377,43 @@ export default function YtdDashboard({
     </View>
   );
 
+  const ytdFigureStyle = (texts: string[]) => {
+    if (!phoneMoney) return null;
+    const longest = texts.reduce((a, b) => (a.length >= b.length ? a : b), '');
+    // Three amounts plus two narrow operators, not four equal columns.
+    return phoneMoneyValueStyle(longest, windowWidth, 16, 3, 8, 0.56, 2);
+  };
+
+  const pathStartText = displayMoney(ytdHeroTotals.invested.start);
+  const pathGrowthText = fmtSignedMoney(ytdHeroTotals.invested.delta);
+  const pathNowText = displayMoney(ytdHeroTotals.invested.latest);
+  const pathCashText = displayMoney(ytdHeroTotals.cash.latest);
+  const pathAllText = displayMoney(ytdHeroTotals.all.latest);
+  const pathStyle = ytdFigureStyle([pathStartText, pathGrowthText, pathNowText]);
+  const totalStyle = ytdFigureStyle([pathNowText, pathCashText, pathAllText]);
+  const phoneFigureText = phoneMoney ? { textAlign: 'center' as const } : null;
+  const phoneCaptionText = phoneMoney ? { textAlign: 'center' as const, lineHeight: 13 } : null;
+  const formulaOp = (sign: string, figure: { fontSize?: number; lineHeight?: number } | null) => (
+    <Text
+      style={[
+        styles.heroOp,
+        { color: colors.textSecondary },
+        phoneMoney && styles.heroOpPhone,
+        phoneMoney && figure
+          ? { fontSize: figure.fontSize, lineHeight: figure.lineHeight }
+          : null,
+      ]}
+    >
+      {sign}
+    </Text>
+  );
+
+  const growthText = fmtSignedMoney(ytdHeroTotals.invested.delta);
+  const returnText = fmtReturnPct(ytdHeroTotals.invested.returnPct);
+  const headlineStyle = phoneMoney
+    ? phoneMoneyValueStyle(growthText, windowWidth, 32, 0.58, 0, 0.56, 16)
+    : null;
+
   const growthHero = (
     <View
       style={[
@@ -386,32 +423,62 @@ export default function YtdDashboard({
     >
       <Text style={[styles.sectionEyebrow, { color: colors.textSecondary }]}>
         Year to date · {returnsYear}
-        {ytdHeroTotals.invested.returnPct != null
-          ? ` · ${fmtReturnPct(ytdHeroTotals.invested.returnPct)} invest return`
-          : ''}
       </Text>
-      <Text
-        style={[
-          styles.heroPortfolio,
-          { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
-          phoneMoney &&
-            phoneMoneyValueStyle(fmtSignedMoney(ytdHeroTotals.invested.delta), windowWidth, 28, 0.92),
-        ]}
-        numberOfLines={1}
-      >
-        {fmtSignedMoney(ytdHeroTotals.invested.delta)}
-      </Text>
-      <Text style={[styles.heroPortfolioHint, { color: colors.textSecondary }]}>
-        Investment growth
-      </Text>
+      <View style={styles.heroHeadline}>
+        <View style={styles.heroHeadlineGrow}>
+          <Text
+            style={[
+              styles.heroHeadlineValue,
+              styles.heroHeadlineCenter,
+              { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
+              headlineStyle,
+            ]}
+            numberOfLines={1}
+          >
+            {growthText}
+          </Text>
+          <Text
+            style={[
+              styles.heroPortfolioHint,
+              styles.heroHeadlineCenter,
+              { color: colors.textSecondary },
+            ]}
+          >
+            Investment growth
+          </Text>
+        </View>
+        <View style={styles.heroHeadlineReturn}>
+          <Text
+            style={[
+              styles.heroHeadlineValue,
+              styles.heroHeadlineCenter,
+              { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
+              headlineStyle,
+            ]}
+            numberOfLines={1}
+          >
+            {returnText}
+          </Text>
+          <Text
+            style={[
+              styles.heroPortfolioHint,
+              styles.heroHeadlineCenter,
+              { color: colors.textSecondary },
+            ]}
+          >
+            Investment Return
+          </Text>
+        </View>
+      </View>
 
-      <View style={[styles.heroInvestPath, phoneMoney && phoneMoneyGrid]}>
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+      <View style={[styles.heroInvestPath, phoneMoney && phoneMoneyGrid, phoneMoney && phoneMoneyTight]}>
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
           >
@@ -421,53 +488,47 @@ export default function YtdDashboard({
             style={[
               styles.heroValue,
               { color: investedColor },
-              phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.start), windowWidth, 15, 4),
+              pathStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {displayMoney(ytdHeroTotals.invested.start)}
+            {pathStartText}
           </Text>
         </View>
-        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+        {formulaOp('+', pathStyle)}
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
-          >Growth</Text>
+          >
+            Growth
+          </Text>
           <Text
             style={[
               styles.heroValue,
               { color: returnsDeltaColor(ytdHeroTotals.invested.delta) },
-              phoneMoney &&
-                phoneMoneyValueStyle(fmtSignedMoney(ytdHeroTotals.invested.delta), windowWidth, 15, 4),
+              pathStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {fmtSignedMoney(ytdHeroTotals.invested.delta)}
-          </Text>
-          <Text
-            style={[
-              styles.heroMeta,
-              { color: returnsDeltaColor(ytdHeroTotals.invested.returnPct) },
-              phoneMoney && phoneMoneyCaption,
-            ]}
-            numberOfLines={1}
-          >
-            {fmtReturnPct(ytdHeroTotals.invested.returnPct)}
+            {pathGrowthText}
           </Text>
         </View>
-        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+        {formulaOp('=', pathStyle)}
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
           >
@@ -477,12 +538,12 @@ export default function YtdDashboard({
             style={[
               styles.heroValue,
               { color: investedColor },
-              phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.latest), windowWidth, 15, 4),
+              pathStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {displayMoney(ytdHeroTotals.invested.latest)}
+            {pathNowText}
           </Text>
         </View>
       </View>
@@ -492,14 +553,16 @@ export default function YtdDashboard({
           styles.heroPortfolioRow,
           { borderTopColor: colors.border },
           phoneMoney && phoneMoneyGrid,
+          phoneMoney && phoneMoneyTight,
         ]}
       >
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
           >
@@ -509,43 +572,47 @@ export default function YtdDashboard({
             style={[
               styles.heroValue,
               { color: investedColor },
-              phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.invested.latest), windowWidth, 15, 4),
+              totalStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {displayMoney(ytdHeroTotals.invested.latest)}
+            {pathNowText}
           </Text>
         </View>
-        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>+</Text>
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+        {formulaOp('+', totalStyle)}
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
-          >Cash</Text>
+          >
+            Cash
+          </Text>
           <Text
             style={[
               styles.heroValue,
               { color: cashColor },
-              phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.cash.latest), windowWidth, 15, 4),
+              totalStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {displayMoney(ytdHeroTotals.cash.latest)}
+            {pathCashText}
           </Text>
         </View>
-        <Text style={[styles.heroOp, { color: colors.textSecondary }]}>=</Text>
-        <View style={phoneMoney ? phoneMoneyCell : styles.heroBreakCell}>
+        {formulaOp('=', totalStyle)}
+        <View style={phoneMoney ? styles.phoneFormulaCell : styles.heroBreakCell}>
           <Text
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
               phoneMoney && phoneMoneyCaption,
+              phoneCaptionText,
             ]}
             numberOfLines={1}
           >
@@ -555,18 +622,15 @@ export default function YtdDashboard({
             style={[
               styles.heroValue,
               { color: colors.primary },
-              phoneMoney &&
-                phoneMoneyValueStyle(displayMoney(ytdHeroTotals.all.latest), windowWidth, 15, 4),
+              totalStyle,
+              phoneFigureText,
             ]}
             numberOfLines={1}
           >
-            {displayMoney(ytdHeroTotals.all.latest)}
+            {pathAllText}
           </Text>
         </View>
       </View>
-      <Text style={[styles.heroFormulaHint, { color: colors.textSecondary }]}>
-        Investment growth · cash added to portfolio total
-      </Text>
     </View>
   );
 
@@ -810,12 +874,20 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
   sectionHint: { fontSize: 12, fontWeight: '500', marginTop: -4 },
-  heroPortfolio: {
-    fontSize: 28,
+  heroHeadline: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  heroHeadlineGrow: { flex: 1.5, minWidth: 0, alignItems: 'center' },
+  heroHeadlineReturn: { flex: 1, minWidth: 0, alignItems: 'center' },
+  heroHeadlineValue: {
+    fontSize: 32,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
-    marginTop: 2,
+    alignSelf: 'stretch',
   },
+  heroHeadlineCenter: { textAlign: 'center' },
   heroPortfolioHint: { fontSize: 12, fontWeight: '600', marginTop: -4 },
   heroInvestPath: {
     flexDirection: 'row',
@@ -835,7 +907,21 @@ const styles = StyleSheet.create({
   },
   heroBreakCell: { flexGrow: 1, flexBasis: '22%', minWidth: 88, gap: 2 },
   heroOp: { fontSize: 16, fontWeight: '700', paddingTop: 16, flexShrink: 0 },
-  heroFormulaHint: { fontSize: 11, fontWeight: '500' },
+  heroOpPhone: {
+    paddingTop: 0,
+    marginTop: 15,
+    width: 16,
+    textAlign: 'center',
+    flexShrink: 0,
+  },
+  phoneFormulaCell: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 2,
+  },
   heroCaption: { fontSize: 11, fontWeight: '600' },
   heroValue: { fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
   heroMeta: { fontSize: 12, fontWeight: '700' },

@@ -31,6 +31,19 @@ export const phoneMoneyCaption: TextStyle = {
   ...(Platform.OS === 'web' ? ({ whiteSpace: 'nowrap' } as TextStyle) : {}),
 };
 
+/** Tighter gap so phone hero figures can use the row. */
+export const phoneMoneyTight: ViewStyle = { gap: 2 };
+
+/** Hero amounts on a phone: grow toward `base` while a full currency string still fits. */
+export function phoneHeroValueStyle(
+  text: string,
+  windowWidth: number,
+  base: number,
+  columns: number
+): TextStyle {
+  return phoneMoneyValueStyle(text, windowWidth, base, columns, 0, 0.58, 2);
+}
+
 /**
  * Shrink just enough that the full currency string fits its share of one row.
  * Pass a column count (2–6) for equal cells, or a width fraction (0–1) for a custom slot.
