@@ -32,6 +32,68 @@ function toAmt(v: number | string | null | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
+type BillView = 'status' | 'category' | 'frequency' | 'seasonal';
+
+const BILL_VIEWS: { id: BillView; label: string }[] = [
+  { id: 'status', label: 'Active / Inactive' },
+  { id: 'category', label: 'Category' },
+  { id: 'frequency', label: 'Monthly / Yearly' },
+  { id: 'seasonal', label: 'Seasonal' },
+];
+
+const GROUP_COLORS: Record<string, string> = {
+  Active: '#10b981',
+  Inactive: '#ef4444',
+  Monthly: '#3b82f6',
+  Yearly: '#8b5cf6',
+  Other: '#64748b',
+  Seasonal: '#0ea5e9',
+  'Not seasonal': '#f59e0b',
+};
+
+function compareBills(a: RecurringExpense, b: RecurringExpense): number {
+  return a.description.localeCompare(b.description);
+}
+
+function groupBills(
+  bills: RecurringExpense[],
+  view: BillView
+): { title: string; bills: RecurringExpense[]; categoryId?: number }[] {
+  if (view === 'status') {
+    return [
+      { title: 'Active', bills: bills.filter((b) => b.is_active).sort(compareBills) },
+      { title: 'Inactive', bills: bills.filter((b) => !b.is_active).sort(compareBills) },
+    ];
+  }
+  if (view === 'frequency') {
+    const other = bills
+      .filter((b) => b.frequency !== 'monthly' && b.frequency !== 'yearly')
+      .sort(compareBills);
+    const groups = [
+      { title: 'Monthly', bills: bills.filter((b) => b.frequency === 'monthly').sort(compareBills) },
+      { title: 'Yearly', bills: bills.filter((b) => b.frequency === 'yearly').sort(compareBills) },
+    ];
+    if (other.length > 0) groups.push({ title: 'Other', bills: other });
+    return groups;
+  }
+  if (view === 'seasonal') {
+    return [
+      { title: 'Seasonal', bills: bills.filter((b) => b.is_seasonal).sort(compareBills) },
+      { title: 'Not seasonal', bills: bills.filter((b) => !b.is_seasonal).sort(compareBills) },
+    ];
+  }
+  const map = new Map<string, { title: string; bills: RecurringExpense[]; categoryId?: number }>();
+  for (const bill of bills) {
+    const name = (bill.category_name || '').trim() || 'Uncategorized';
+    const existing = map.get(name);
+    if (existing) existing.bills.push(bill);
+    else map.set(name, { title: name, bills: [bill], categoryId: bill.category });
+  }
+  return [...map.values()]
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((group) => ({ ...group, bills: group.bills.sort(compareBills) }));
+}
+
 type BillsBoardCache = {
   bills: RecurringExpense[];
   budgets: Budget[];
@@ -89,9 +151,8 @@ export default function BillsDashboard({
     categoryName: string;
     amount: number;
   } | null>(null);
-  const [activeOpen, setActiveOpen] = useState(false);
-  const [inactiveOpen, setInactiveOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [billView, setBillView] = useState<BillView>('status');
 
   const fetchGenerationRef = useRef(0);
   const selectedFamilyIdRef = useRef<number | null>(selectedFamily?.id ?? null);
@@ -491,105 +552,115 @@ export default function BillsDashboard({
     </View>
   );
 
-  const activeBillsList = (
-    <View
-      style={[
-        styles.sectionCard,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-      ]}
-    >
-      <TouchableOpacity
-        style={styles.accordionHeader}
-        onPress={() => setActiveOpen((o) => !o)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: activeOpen }}
-      >
-        <FontAwesome
-          name={activeOpen ? 'chevron-down' : 'chevron-right'}
-          size={12}
-          color={colors.textSecondary}
-        />
-        <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-          Active
-        </Text>
-        <Text
-          style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-        >
-          {activeBills.length}
-        </Text>
-      </TouchableOpacity>
-      {activeOpen ? (
-        loading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
-        ) : activeBills.length === 0 && inactiveBills.length === 0 ? (
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            No bills yet. Add rent, utilities, and subscriptions.
-          </Text>
-        ) : activeBills.length === 0 ? (
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            No active bills
-          </Text>
-        ) : (
-          activeBills.map((bill) => (
-            <RecurringExpenseRow
-              key={bill.id}
-              recurring={bill}
-              onPress={() => {
-                setEditingBill(bill);
-                setShowBillForm(true);
-              }}
-              onDelete={() => setBillPendingDelete(bill)}
-            />
-          ))
-        )
-      ) : null}
-    </View>
-  );
+  const billGroups = useMemo(() => {
+    const groups = groupBills(bills, billView);
+    if (billView === 'category') return groups.filter((g) => g.bills.length > 0);
+    return groups.filter((g) => g.bills.length > 0 || bills.length > 0);
+  }, [bills, billView]);
 
-  const inactiveBillsList =
-    inactiveBills.length > 0 ? (
+  const openBill = (bill: RecurringExpense) => {
+    setEditingBill(bill);
+    setShowBillForm(true);
+  };
+
+  const billsBrowser = (
+    <View style={styles.billBrowser}>
+      <View style={styles.viewToggles}>
+        {BILL_VIEWS.map((view) => {
+          const selected = billView === view.id;
+          return (
+            <TouchableOpacity
+              key={view.id}
+              style={[
+                styles.viewToggle,
+                {
+                  backgroundColor: selected ? colors.primary : colors.surface,
+                  borderColor: selected ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setBillView(view.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+            >
+              <Text
+                style={[
+                  styles.viewToggleText,
+                  { color: selected ? '#fff' : colors.text },
+                ]}
+              >
+                {view.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
       <View
         style={[
           styles.sectionCard,
           { backgroundColor: colors.surface, borderColor: colors.border },
         ]}
       >
-        <TouchableOpacity
-          style={styles.accordionHeader}
-          onPress={() => setInactiveOpen((o) => !o)}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: inactiveOpen }}
-        >
-          <FontAwesome
-            name={inactiveOpen ? 'chevron-down' : 'chevron-right'}
-            size={12}
-            color={colors.textSecondary}
-          />
-          <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
-            Inactive
+        {loading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
+        ) : bills.length === 0 ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>
+            No bills yet. Add rent, utilities, and subscriptions.
           </Text>
-          <Text
-            style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-          >
-            {inactiveBills.length}
-          </Text>
-        </TouchableOpacity>
-        {inactiveOpen
-          ? inactiveBills.map((bill) => (
-              <RecurringExpenseRow
-                key={bill.id}
-                recurring={bill}
-                badge={{ label: 'Inactive', color: inactiveColor }}
-                onPress={() => {
-                  setEditingBill(bill);
-                  setShowBillForm(true);
-                }}
-                onDelete={() => setBillPendingDelete(bill)}
-              />
-            ))
-          : null}
+        ) : (
+          billGroups.map((group) => {
+            const groupColor =
+              billView === 'category'
+                ? categories.find((c) => c.id === group.categoryId)?.color || colors.primary
+                : GROUP_COLORS[group.title] || colors.primary;
+            const tint =
+              /^#[0-9a-fA-F]{6}$/.test(groupColor) ? `${groupColor}22` : groupColor;
+            return (
+            <View
+              key={group.title}
+              style={[
+                styles.billGroup,
+                {
+                  borderLeftWidth: 4,
+                  borderLeftColor: groupColor,
+                  backgroundColor: tint,
+                  borderRadius: 8,
+                  paddingLeft: 8,
+                  paddingRight: 4,
+                  marginTop: 8,
+                },
+              ]}
+            >
+              <View style={styles.groupHeader}>
+                <View style={[styles.categorySwatch, { backgroundColor: groupColor }]} />
+                <Text style={[styles.groupTitle, { color: groupColor }]}>{group.title}</Text>
+                <Text style={[styles.groupCount, { color: groupColor }]}>
+                  {group.bills.length}
+                </Text>
+              </View>
+              {group.bills.length === 0 ? (
+                <Text style={[styles.empty, { color: colors.textSecondary }]}>None</Text>
+              ) : (
+                group.bills.map((bill) => (
+                  <RecurringExpenseRow
+                    key={bill.id}
+                    recurring={bill}
+                    badge={
+                      !bill.is_active && billView !== 'status'
+                        ? { label: 'Inactive', color: inactiveColor }
+                        : null
+                    }
+                    onPress={() => openBill(bill)}
+                    onDelete={() => setBillPendingDelete(bill)}
+                  />
+                ))
+              )}
+            </View>
+            );
+          })
+        )}
       </View>
-    ) : null;
+    </View>
+  );
 
   const help = (
     <>
@@ -658,12 +729,11 @@ export default function BillsDashboard({
                 <View style={styles.wideCol}>
                   {hero}
                   {donut}
-                  {actionButtons}
                   {help}
                 </View>
                 <View style={styles.wideCol}>
-                  {activeBillsList}
-                  {inactiveBillsList}
+                  {actionButtons}
+                  {billsBrowser}
                 </View>
               </View>
             ) : (
@@ -671,8 +741,7 @@ export default function BillsDashboard({
                 {hero}
                 {donut}
                 {actionButtons}
-                {activeBillsList}
-                {inactiveBillsList}
+                {billsBrowser}
                 {help}
               </>
             )}
@@ -815,11 +884,25 @@ const styles = StyleSheet.create({
   },
   secondaryActionText: { fontSize: 14, fontWeight: '800' },
   empty: { fontSize: 13, paddingVertical: 12 },
-  accordionHeader: {
+  billBrowser: { gap: 10 },
+  viewToggles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  viewToggle: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  viewToggleText: { fontSize: 13, fontWeight: '700' },
+  billGroup: { gap: 2, paddingTop: 4 },
+  categorySwatch: { width: 10, height: 10, borderRadius: 5 },
+  groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingTop: 6,
   },
+  groupTitle: { flex: 1, fontSize: 15, fontWeight: '800' },
+  groupCount: { fontSize: 12, fontWeight: '700' },
   helpHeader: {
     flexDirection: 'row',
     alignItems: 'center',

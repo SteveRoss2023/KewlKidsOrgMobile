@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { RecurringExpense } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
+import { isPhoneMoneyLayout } from './phoneMoneyLayout';
 
 interface RecurringExpenseRowProps {
   recurring: RecurringExpense;
@@ -45,6 +46,16 @@ export default function RecurringExpenseRow({
 }: RecurringExpenseRowProps) {
   const { colors } = useTheme();
   const { displayMoney } = useShowAmounts();
+  const { width: windowWidth } = useWindowDimensions();
+  const amountText = displayMoney(recurring.amount);
+  const statusLabel = recurring.is_active ? 'Active' : 'Inactive';
+  const statusColor = recurring.is_active ? '#10b981' : colors.error || '#ef4444';
+  const phone = isPhoneMoneyLayout(windowWidth);
+  const nameRoom =
+    windowWidth - 36 - (onDelete ? 34 : 0) - amountText.length * 8.5 - 16;
+  const statusWordWidth = statusLabel.length * 7 + 16;
+  const showStatusDot =
+    phone && recurring.description.length * 7.5 + statusWordWidth > nameRoom;
   const monthNames = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -60,14 +71,6 @@ export default function RecurringExpenseRow({
     : null;
   const startLabel = formatDate(recurring.start_date);
   const endLabel = recurring.end_date ? formatDate(recurring.end_date) : 'no end';
-  const metaParts = [
-    frequency,
-    seasonLabel ? `seasonal ${seasonLabel}` : null,
-    dateLabel ? `due ${dateLabel}` : null,
-    `start ${startLabel}`,
-    `end ${endLabel}`,
-    recurring.category_name || null,
-  ].filter(Boolean);
 
   return (
     <TouchableOpacity
@@ -75,46 +78,48 @@ export default function RecurringExpenseRow({
       onPress={onPress}
       activeOpacity={0.65}
       accessibilityRole="button"
-      accessibilityLabel={`${recurring.description}, ${displayMoney(recurring.amount)}, ${frequency}${seasonLabel ? `, seasonal ${seasonLabel}` : ''}`}
+      accessibilityLabel={`${recurring.description}, ${statusLabel}, ${amountText}, ${frequency}${seasonLabel ? `, seasonal ${seasonLabel}` : ''}`}
     >
       <View style={styles.main}>
         <View style={styles.topLine}>
-          <Text style={[styles.description, { color: colors.text }]} numberOfLines={1}>
-            {recurring.description}
-          </Text>
+          <View style={styles.nameRow}>
+            <Text style={[styles.description, { color: colors.text }]} numberOfLines={1}>
+              {recurring.description}
+            </Text>
+            {showStatusDot ? (
+              <View
+                style={[styles.statusDot, { backgroundColor: statusColor }]}
+                accessibilityLabel={statusLabel}
+              />
+            ) : (
+              <View style={[styles.chip, { backgroundColor: `${statusColor}22` }]}>
+                <Text style={[styles.chipText, { color: statusColor }]}>{statusLabel}</Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.amount, { color: colors.primary }]}>
-            {displayMoney(recurring.amount)}
+            {amountText}
           </Text>
         </View>
 
-        <View style={styles.bottomLine}>
-          <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
-            {metaParts.join(' · ')}
+        <View style={styles.details}>
+          <Text style={[styles.meta, { color: colors.textSecondary }]}>
+            {frequency}
+            {dateLabel ? ` · due ${dateLabel}` : ''}
+            {` · ${startLabel} – ${endLabel}`}
           </Text>
-          <View style={styles.chips}>
-            {isSeasonal ? (
-              <View style={[styles.chip, { backgroundColor: '#0ea5e922' }]}>
-                <Text style={[styles.chipText, { color: '#0284c7' }]}>
-                  Seasonal {seasonLabel}
-                </Text>
-              </View>
-            ) : null}
-            <View
-              style={[
-                styles.chip,
-                { backgroundColor: recurring.is_active ? '#10b98122' : '#6b728022' },
-              ]}
-            >
-              <Text style={[styles.chipText, { color: recurring.is_active ? '#10b981' : '#6b7280' }]}>
-                {recurring.is_active ? 'Active' : 'Inactive'}
-              </Text>
-            </View>
-            {badge ? (
+          {isSeasonal ? (
+            <Text style={[styles.meta, { color: colors.textSecondary }]}>
+              Seasonal {seasonLabel}
+            </Text>
+          ) : null}
+          {badge ? (
+            <View style={styles.chips}>
               <View style={[styles.chip, { backgroundColor: badge.color }]}>
                 <Text style={styles.badgeText}>{badge.label}</Text>
               </View>
-            ) : null}
-          </View>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -138,7 +143,7 @@ export default function RecurringExpenseRow({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 10,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -155,32 +160,42 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   description: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: '600',
+  },
+  nameRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
   },
   amount: {
     fontSize: 15,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
-  bottomLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    minHeight: 18,
-  },
+  details: { gap: 2 },
   meta: {
-    flexShrink: 1,
     fontSize: 12,
+    lineHeight: 16,
   },
   chips: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 4,
-    marginLeft: 'auto',
+    marginTop: 2,
   },
   chip: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 5,
@@ -198,6 +213,7 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     paddingLeft: 10,
-    paddingVertical: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
 });
