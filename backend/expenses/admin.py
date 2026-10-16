@@ -31,8 +31,8 @@ class ExpenseTagAdmin(admin.ModelAdmin):
 
 @admin.register(Budget)
 class BudgetAdmin(admin.ModelAdmin):
-    list_display = ['id', 'category', 'amount', 'period', 'start_date', 'is_active', 'created_at']
-    list_filter = ['period', 'is_active', 'start_date']
+    list_display = ['id', 'category', 'amount', 'period', 'origin', 'start_date', 'is_active', 'created_at']
+    list_filter = ['period', 'origin', 'is_active', 'start_date']
     search_fields = ['category__name']
     readonly_fields = ['created_at', 'updated_at']
 

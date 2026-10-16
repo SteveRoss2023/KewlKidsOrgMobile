@@ -557,22 +557,14 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
-          <Text style={[styles.heroValue, { color: budgetColor }]}>
-            {displayMoney(yearSummary.budgetTotal)}
-          </Text>
-        </View>
-        <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Actual</Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Projected</Text>
           <Text style={[styles.heroValue, { color: spentColor }]}>
             {displayMoney(yearSummary.spentTotal + yearSummary.unpaidTotal)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            {yearSummary.paidCount} paid · {yearSummary.unpaidCount} unpaid
+            Paid + Unpaid
           </Text>
         </View>
-      </View>
-      <View style={[styles.heroGrid, { marginTop: 4 }]}>
         <View style={styles.heroCell}>
           <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Planned net</Text>
           <Text style={[styles.heroValue, { color: toneFor(yearSummary.plannedNet) }]}>
@@ -586,7 +578,33 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
             {displayMoney(yearSummary.netAfterUnpaid)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            After paid + unpaid
+            Income − Paid − Unpaid
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.heroGrid, { marginTop: 4 }]}>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
+          <Text style={[styles.heroValue, { color: budgetColor }]}>
+            {displayMoney(yearSummary.budgetTotal)}
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
+          <Text style={[styles.heroValue, { color: spentColor }]}>
+            {displayMoney(yearSummary.spentTotal)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.paidCount} items
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Unpaid</Text>
+          <Text style={[styles.heroValue, { color: UNPAID_COLOR }]}>
+            {displayMoney(yearSummary.unpaidTotal)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.unpaidCount} items
           </Text>
         </View>
       </View>
@@ -658,21 +676,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           color={colors.success}
           muted={colors.textSecondary}
         />
-      </View>
-
-      <View style={styles.monthKpis}>
         <Kpi
-          label="Budget"
-          value={displayMoney(selectedMonth.budgetTotal)}
-          color={budgetColor}
-          muted={colors.textSecondary}
-        />
-        <Kpi
-          label="Actual"
+          label="Projected"
           value={displayMoney(monthActualTotal)}
           color={spentColor}
           muted={colors.textSecondary}
-          meta={`${selectedMonth.paidCount} paid · ${selectedMonth.unpaidCount} unpaid`}
+          meta="Paid + Unpaid"
           onPress={() => {
             if (drillFilter === null) toggleDrill('spent');
             else if (drillFilter === 'spent') toggleDrill('unpaid');
@@ -685,16 +694,6 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           selectedBorder={colors.primary}
         />
         <Kpi
-          label={monthVarianceLabel}
-          value={monthVarianceValue}
-          color={toneFor(monthBudgetVariance)}
-          muted={colors.textSecondary}
-          meta="Budget − Actual"
-        />
-      </View>
-
-      <View style={styles.monthKpis}>
-        <Kpi
           label="Planned net"
           value={displayMoney(selectedMonth.plannedNet)}
           color={toneFor(selectedMonth.plannedNet)}
@@ -706,7 +705,44 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           value={displayMoney(selectedMonth.netAfterUnpaid)}
           color={toneFor(selectedMonth.netAfterUnpaid)}
           muted={colors.textSecondary}
-          meta="After paid + unpaid"
+          meta="Income − Paid − Unpaid"
+        />
+      </View>
+
+      <View style={styles.monthKpis}>
+        <Kpi
+          label="Budget"
+          value={displayMoney(selectedMonth.budgetTotal)}
+          color={budgetColor}
+          muted={colors.textSecondary}
+          meta="Includes bill dues this month"
+        />
+        <Kpi
+          label="Paid"
+          value={displayMoney(selectedMonth.spentTotal)}
+          color={spentColor}
+          muted={colors.textSecondary}
+          meta={`${selectedMonth.paidCount} items`}
+          onPress={() => toggleDrill('spent')}
+          selected={drillFilter === 'spent'}
+          selectedBorder={colors.primary}
+        />
+        <Kpi
+          label="Unpaid"
+          value={displayMoney(selectedMonth.unpaidTotal)}
+          color={UNPAID_COLOR}
+          muted={colors.textSecondary}
+          meta={`${selectedMonth.unpaidCount} items`}
+          onPress={() => toggleDrill('unpaid')}
+          selected={drillFilter === 'unpaid'}
+          selectedBorder={colors.primary}
+        />
+        <Kpi
+          label={monthVarianceLabel}
+          value={monthVarianceValue}
+          color={toneFor(monthBudgetVariance)}
+          muted={colors.textSecondary}
+          meta="Budget − Paid − Unpaid"
         />
       </View>
 
@@ -783,7 +819,7 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
       {showVariance ? (
         <View style={styles.varianceBlock}>
           <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-            Outside budget
+            Over budget
           </Text>
           <Text style={[styles.varianceCaption, { color: colors.textSecondary }]}>
             Explains month Under/Over: category gaps use paid + unpaid vs budget
@@ -1146,6 +1182,9 @@ function CollapsibleBlock({
   );
 }
 
+const OUTSIDE_BUDGET_ORANGE = '#f59e0b';
+const OVER_BUDGET_RED = '#ef4444';
+
 function CompactExpenseLine({
   expense,
   amountColor,
@@ -1153,8 +1192,59 @@ function CompactExpenseLine({
   mutedColor,
   borderColor,
   formatAmount,
+  detail,
 }: {
   expense: Expense;
+  amountColor: string;
+  textColor: string;
+  mutedColor: string;
+  borderColor: string;
+  formatAmount: (n: number) => string;
+  /** Subtle second line (e.g. budget / over meta). */
+  detail?: string;
+}) {
+  const category =
+    (expense.category_name || '').trim() || `Category ${expense.category}`;
+  const description = (expense.description || 'Expense').trim();
+  const primary = [category, description, formatShortDate(expense.expense_date)]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <View style={[styles.itemRowCompact, { borderBottomColor: borderColor }]}>
+      <View style={styles.itemCopy}>
+        <Text
+          style={[styles.itemTitle, { color: textColor }]}
+          numberOfLines={1}
+        >
+          {primary}
+        </Text>
+        {detail ? (
+          <Text style={[styles.itemDetail, { color: mutedColor }]} numberOfLines={1}>
+            {detail}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={[styles.itemAmount, { color: amountColor }]}>
+        {formatAmount(Number(expense.amount) || 0)}
+      </Text>
+    </View>
+  );
+}
+
+function CompactCategoryLine({
+  title,
+  meta,
+  amount,
+  amountColor,
+  textColor,
+  mutedColor,
+  borderColor,
+  formatAmount,
+}: {
+  title: string;
+  meta?: string;
+  amount: number;
   amountColor: string;
   textColor: string;
   mutedColor: string;
@@ -1163,14 +1253,18 @@ function CompactExpenseLine({
 }) {
   return (
     <View style={[styles.itemRowCompact, { borderBottomColor: borderColor }]}>
-      <Text style={[styles.itemTitle, { color: textColor, flex: 1, minWidth: 0 }]} numberOfLines={1}>
-        {expense.description || 'Expense'}
-      </Text>
-      <Text style={[styles.itemMetaInline, { color: mutedColor }]}>
-        {formatShortDate(expense.expense_date)}
-      </Text>
+      <View style={styles.itemCopy}>
+        <Text style={[styles.itemTitle, { color: textColor }]} numberOfLines={1}>
+          {title}
+        </Text>
+        {meta ? (
+          <Text style={[styles.itemDetail, { color: mutedColor }]} numberOfLines={1}>
+            {meta}
+          </Text>
+        ) : null}
+      </View>
       <Text style={[styles.itemAmount, { color: amountColor }]}>
-        {formatAmount(Number(expense.amount) || 0)}
+        {formatAmount(amount)}
       </Text>
     </View>
   );
@@ -1202,10 +1296,6 @@ function ExpenseDrillBreakdown({
   showReconcile: boolean;
 }) {
   const primaryItems = mode === 'paid' ? month.paidExpenses : month.unpaidExpenses;
-  const primaryGroups = useMemo(
-    () => groupExpensesByCategory(primaryItems),
-    [primaryItems]
-  );
   const primaryTotal =
     mode === 'paid' ? month.spentTotal : month.unpaidTotal;
 
@@ -1214,21 +1304,6 @@ function ExpenseDrillBreakdown({
       mode === 'paid' ? r.paidAmount > 0.005 : r.unpaidAmount > 0.005
     );
   }, [month.overBudget, mode]);
-
-  const overGroups = useMemo(() => {
-    const byKey = new Map(overRows.map((r) => [r.key, r]));
-    const items = primaryItems.filter((e) => byKey.has(String(e.category)));
-    return groupExpensesByCategory(items).map((g) => {
-      const row = byKey.get(g.key);
-      return {
-        ...g,
-        meta: row
-          ? `Budget ${formatAmount(row.budgetAmount)} · Over ${formatAmount(row.overBy)}`
-          : undefined,
-        amount: mode === 'paid' ? (row?.paidAmount ?? g.amount) : (row?.unpaidAmount ?? g.amount),
-      };
-    });
-  }, [overRows, primaryItems, mode, formatAmount]);
 
   // Under is category-level (actual vs budget), same list for paid/unpaid drills.
   const underRows: CashflowUnderBudgetRow[] = month.underBudget;
@@ -1272,16 +1347,47 @@ function ExpenseDrillBreakdown({
       ),
     [month.unbudgeted, mode]
   );
-  const unbudgetedGroups = useMemo(
-    () => groupExpensesByCategory(unbudgetedItems),
-    [unbudgetedItems]
-  );
   const unbudgetedTotal = unbudgetedItems.reduce(
     (s, e) => s + (Number(e.amount) || 0),
     0
   );
 
   const primaryTitle = mode === 'paid' ? 'Paid this month' : 'Left to pay';
+
+  const primaryLines = useMemo(() => {
+    return [...primaryItems].sort(
+      (a, b) =>
+        (a.category_name || '').localeCompare(b.category_name || '') ||
+        a.expense_date.localeCompare(b.expense_date) ||
+        (a.description || '').localeCompare(b.description || '')
+    );
+  }, [primaryItems]);
+
+  // Category-level only (same idea as Under budget) — Budget/Over are not
+  // per-expense figures and were confusing next to individual bill amounts.
+  const overCategorySummaries = useMemo(() => {
+    return overRows
+      .map((row) => ({
+        key: row.key,
+        title: row.label,
+        meta: `Budget ${formatAmount(row.budgetAmount)} · Actual ${formatAmount(row.actualAmount)}`,
+        amount: row.overBy,
+      }))
+      .sort((a, b) => b.amount - a.amount || a.title.localeCompare(b.title));
+  }, [overRows, formatAmount]);
+
+  const overCategoryKeys = useMemo(
+    () => new Set(overRows.map((r) => r.key)),
+    [overRows]
+  );
+
+  const unbudgetedLines = useMemo(() => {
+    return [...unbudgetedItems].sort(
+      (a, b) =>
+        (a.category_name || '').localeCompare(b.category_name || '') ||
+        a.expense_date.localeCompare(b.expense_date)
+    );
+  }, [unbudgetedItems]);
 
   return (
     <View style={styles.drillBlock}>
@@ -1293,117 +1399,72 @@ function ExpenseDrillBreakdown({
         mutedColor={mutedColor}
         borderColor={borderColor}
         formatAmount={formatAmount}
-        hasContent={primaryGroups.length > 0}
+        hasContent={primaryLines.length > 0}
         emptyText={mode === 'paid' ? 'No paid expenses this month' : 'No unpaid expenses this month'}
       >
-        {primaryGroups.map((g) => (
-          <CollapsibleBlock
-            key={`pri-${g.key}`}
-            title={g.label}
-            amount={g.amount}
-            amountColor={amountColor}
-            textColor={textColor}
-            mutedColor={mutedColor}
-            borderColor={borderColor}
-            formatAmount={formatAmount}
-            depth={1}
-            hasContent={g.items.length > 0}
-          >
-            {g.items.map((e) => (
-              <CompactExpenseLine
-                key={e.id}
-                expense={e}
-                amountColor={amountColor}
-                textColor={textColor}
-                mutedColor={mutedColor}
-                borderColor={borderColor}
-                formatAmount={formatAmount}
-              />
-            ))}
-          </CollapsibleBlock>
-        ))}
+        {primaryLines.map((e) => {
+          const over = overCategoryKeys.has(String(e.category));
+          return (
+            <CompactExpenseLine
+              key={e.id}
+              expense={e}
+              amountColor={over ? OVER_BUDGET_RED : textColor}
+              textColor={textColor}
+              mutedColor={mutedColor}
+              borderColor={borderColor}
+              formatAmount={formatAmount}
+            />
+          );
+        })}
       </CollapsibleBlock>
 
       <CollapsibleBlock
-        title="Outside budget"
-        amount={overGroups.reduce((s, g) => s + g.amount, 0)}
-        amountColor={amountColor}
+        title="Over budget"
+        amount={overCategorySummaries.reduce((s, g) => s + g.amount, 0)}
+        amountColor={OUTSIDE_BUDGET_ORANGE}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
         formatAmount={formatAmount}
-        hasContent={overGroups.length > 0}
+        hasContent={overCategorySummaries.length > 0}
         emptyText="No over-budget categories for these items"
       >
-        {overGroups.map((g) => (
-          <CollapsibleBlock
-            key={`over-${g.key}`}
-            title={g.label}
-            amount={g.amount}
-            amountColor={amountColor}
+        {overCategorySummaries.map((row) => (
+          <CompactCategoryLine
+            key={`over-sum-${row.key}`}
+            title={row.title}
+            meta={row.meta}
+            amount={row.amount}
+            amountColor={OUTSIDE_BUDGET_ORANGE}
             textColor={textColor}
             mutedColor={mutedColor}
             borderColor={borderColor}
             formatAmount={formatAmount}
-            depth={1}
-            hasContent={g.items.length > 0}
-          >
-            {g.meta ? (
-              <Text style={[styles.itemMeta, { color: mutedColor, marginBottom: 2 }]} numberOfLines={1}>
-                {g.meta}
-              </Text>
-            ) : null}
-            {g.items.map((e) => (
-              <CompactExpenseLine
-                key={e.id}
-                expense={e}
-                amountColor={amountColor}
-                textColor={textColor}
-                mutedColor={mutedColor}
-                borderColor={borderColor}
-                formatAmount={formatAmount}
-              />
-            ))}
-          </CollapsibleBlock>
+          />
         ))}
       </CollapsibleBlock>
 
       <CollapsibleBlock
         title="Unbudgeted"
         amount={unbudgetedTotal}
-        amountColor={amountColor}
+        amountColor={OUTSIDE_BUDGET_ORANGE}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
         formatAmount={formatAmount}
-        hasContent={unbudgetedGroups.length > 0}
+        hasContent={unbudgetedLines.length > 0}
         emptyText="No unbudgeted items"
       >
-        {unbudgetedGroups.map((g) => (
-          <CollapsibleBlock
-            key={`unb-${g.key}`}
-            title={g.label}
-            amount={g.amount}
-            amountColor={amountColor}
+        {unbudgetedLines.map((e) => (
+          <CompactExpenseLine
+            key={e.id}
+            expense={e}
+            amountColor={OUTSIDE_BUDGET_ORANGE}
             textColor={textColor}
             mutedColor={mutedColor}
             borderColor={borderColor}
             formatAmount={formatAmount}
-            depth={1}
-            hasContent={g.items.length > 0}
-          >
-            {g.items.map((e) => (
-              <CompactExpenseLine
-                key={e.id}
-                expense={e}
-                amountColor={amountColor}
-                textColor={textColor}
-                mutedColor={mutedColor}
-                borderColor={borderColor}
-                formatAmount={formatAmount}
-              />
-            ))}
-          </CollapsibleBlock>
+          />
         ))}
       </CollapsibleBlock>
 
@@ -1419,35 +1480,17 @@ function ExpenseDrillBreakdown({
         emptyText="No under-budget categories"
       >
         {underGroups.map((g) => (
-          <CollapsibleBlock
+          <CompactCategoryLine
             key={`under-${g.key}`}
             title={g.label}
+            meta={g.meta}
             amount={g.amount}
             amountColor={underColor}
             textColor={textColor}
             mutedColor={mutedColor}
             borderColor={borderColor}
             formatAmount={formatAmount}
-            depth={1}
-            hasContent={g.items.length > 0 || !!g.meta}
-          >
-            {g.meta ? (
-              <Text style={[styles.itemMeta, { color: mutedColor, marginBottom: 2 }]} numberOfLines={1}>
-                {g.meta}
-              </Text>
-            ) : null}
-            {g.items.map((e) => (
-              <CompactExpenseLine
-                key={e.id}
-                expense={e}
-                amountColor={amountColor}
-                textColor={textColor}
-                mutedColor={mutedColor}
-                borderColor={borderColor}
-                formatAmount={formatAmount}
-              />
-            ))}
-          </CollapsibleBlock>
+          />
         ))}
       </CollapsibleBlock>
 
@@ -1610,13 +1653,15 @@ const styles = StyleSheet.create({
   },
   itemRowCompact: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  itemCopy: { flex: 1, minWidth: 0, gap: 2 },
   itemTitle: { fontSize: 13, fontWeight: '600' },
+  itemDetail: { fontSize: 11, fontWeight: '400', opacity: 0.85 },
   itemMeta: { fontSize: 11, fontWeight: '500' },
   itemMetaInline: { fontSize: 11, fontWeight: '500', flexShrink: 0 },
-  itemAmount: { fontSize: 13, fontWeight: '800', flexShrink: 0 },
+  itemAmount: { fontSize: 13, fontWeight: '500', flexShrink: 0, paddingTop: 1 },
 });

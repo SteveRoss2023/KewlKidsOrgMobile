@@ -63,27 +63,8 @@ def bills_desired_end(bills) -> Optional[date]:
     return None
 
 
-def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
-    """Upsert the monthly budget for a category from its active bills.
-
-    - Amount from monthly-normalized bill totals (keep higher existing amount).
-    - Start = earliest bill start in the category.
-    - End = latest bill end if every bill has an end; else open-ended.
-    - If no active bills remain, leave the budget alone (full sync may deactivate).
-
-    Returns a small result dict, or None if nothing to do.
-    """
+def _active_monthly_budget(family, category_id: int):
     from .models import Budget
-
-    bills = active_bills_for_category(family.id, category_id)
-    if not bills:
-        return None
-
-    target = bills_monthly_amount(bills)
-    desired_start = bills_desired_start(bills)
-    desired_end = bills_desired_end(bills)
-    if desired_start is None:
-        return None
 
     existing = Budget.objects.filter(
         family=family,
@@ -91,26 +72,63 @@ def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
         period='monthly',
         is_active=True,
     ).first()
-    if not existing:
-        existing = (
-            Budget.objects.filter(
-                family=family,
-                category_id=category_id,
-                period='monthly',
-            )
-            .order_by('-updated_at')
-            .first()
+    if existing:
+        return existing
+    return (
+        Budget.objects.filter(
+            family=family,
+            category_id=category_id,
+            period='monthly',
         )
+        .order_by('-updated_at')
+        .first()
+    )
+
+
+def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
+    """Upsert the monthly budget for a category from its active bills.
+
+    - origin=manual: never change standing amount (skip entirely when bills exist).
+    - origin=bills (or new row): standing follows current monthly-normalized bill totals.
+    - Yearly / seasonal bills contribute 0 to standing; dues raise effective amount in-month.
+    - Start = earliest bill start in the category.
+    - End = latest bill end if every bill has an end; else open-ended.
+    - If no active bills remain: deactivate origin=bills; leave manual/analysis alone.
+
+    Returns a small result dict, or None if nothing to do.
+    """
+    from .models import Budget
+
+    bills = active_bills_for_category(family.id, category_id)
+    if not bills:
+        return deactivate_bills_budget_if_orphaned(family, category_id)
+
+    target = bills_monthly_amount(bills)
+    desired_start = bills_desired_start(bills)
+    desired_end = bills_desired_end(bills)
+    if desired_start is None:
+        return None
+
+    existing = _active_monthly_budget(family, category_id)
 
     if existing:
+        origin = getattr(existing, 'origin', None) or 'bills'
+        if origin == 'manual':
+            return {
+                'action': 'skipped_manual',
+                'budget_id': existing.id,
+                'category_id': category_id,
+                'amount': float(_parse_amount(existing.amount)),
+                'origin': origin,
+            }
+
         old_amount = _parse_amount(existing.amount)
-        # Bill-only sync always follows current bills (including downward when a
-        # bill is removed). Stale high standings were freezing wrong year totals.
         new_amount = target
-        update_fields = ['updated_at', 'is_active']
+        update_fields = ['updated_at', 'is_active', 'origin']
         existing.is_active = True
+        existing.origin = 'bills'
         if abs(old_amount - target) >= Decimal('0.005'):
-            existing.amount = target
+            existing.amount = str(target)
             update_fields.append('amount')
         if desired_start and (
             existing.start_date is None or existing.start_date > desired_start
@@ -126,6 +144,7 @@ def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
             'budget_id': existing.id,
             'category_id': category_id,
             'amount': float(new_amount),
+            'origin': 'bills',
             'start_date': existing.start_date.isoformat() if existing.start_date else None,
             'end_date': existing.end_date.isoformat() if existing.end_date else None,
         }
@@ -133,8 +152,9 @@ def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
     budget = Budget.objects.create(
         family=family,
         category_id=category_id,
-        amount=target,
+        amount=str(target),
         period='monthly',
+        origin='bills',
         start_date=desired_start,
         end_date=desired_end,
         alert_threshold=80,
@@ -145,6 +165,47 @@ def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:
         'budget_id': budget.id,
         'category_id': category_id,
         'amount': float(target),
+        'origin': 'bills',
         'start_date': desired_start.isoformat(),
         'end_date': desired_end.isoformat() if desired_end else None,
+    }
+
+
+def deactivate_bills_budget_if_orphaned(family, category_id: int) -> Optional[dict]:
+    """When no active bills remain, deactivate From-bills budgets; leave manual alone."""
+    from .models import Budget
+
+    existing = Budget.objects.filter(
+        family=family,
+        category_id=category_id,
+        period='monthly',
+        is_active=True,
+    ).first()
+    if not existing:
+        return None
+    origin = getattr(existing, 'origin', None) or 'bills'
+    if origin == 'manual':
+        return {
+            'action': 'left_manual',
+            'budget_id': existing.id,
+            'category_id': category_id,
+            'amount': float(_parse_amount(existing.amount)),
+            'origin': origin,
+        }
+    if origin == 'analysis':
+        return {
+            'action': 'left_analysis',
+            'budget_id': existing.id,
+            'category_id': category_id,
+            'amount': float(_parse_amount(existing.amount)),
+            'origin': origin,
+        }
+    existing.is_active = False
+    existing.save(update_fields=['is_active', 'updated_at'])
+    return {
+        'action': 'deactivated',
+        'budget_id': existing.id,
+        'category_id': category_id,
+        'amount': float(_parse_amount(existing.amount)),
+        'origin': 'bills',
     }

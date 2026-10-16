@@ -524,11 +524,12 @@ export default function ExpensesHubScreen() {
           <BudgetDashboard
             key={familyKey}
             refreshKey={budgetsRefreshKey}
-            onExpensePress={(exp) => {
-              void openExpenseEditor(exp);
-            }}
             onBudgetPress={(budget) => {
               setEditingBudget(budget);
+              setShowBudgetForm(true);
+            }}
+            onAddBudget={() => {
+              setEditingBudget(null);
               setShowBudgetForm(true);
             }}
             onBudgetDelete={handleDeleteBudget}

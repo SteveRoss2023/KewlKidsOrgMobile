@@ -1,21 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Switch,
-  Modal,
-  Image,
-  Linking,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { Budget, Expense } from '../../types/expenses';
+import { Budget } from '../../types/expenses';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useShowAmounts } from '../../contexts/ShowAmountsContext';
-import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 function toNumber(value: number | string | null | undefined): number {
   if (value == null || value === '') return 0;
@@ -23,84 +11,48 @@ function toNumber(value: number | string | null | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
-function formatShortDate(dateString: string): string {
-  try {
-    const [year, month, day] = dateString.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  } catch {
-    return dateString;
-  }
-}
-
 interface BudgetCategoryRowProps {
   budget: Budget;
-  items?: Expense[];
-  useItemsForSpent?: boolean;
+  paidAmount?: number;
+  unpaidAmount?: number;
   onEditBudget?: () => void;
   onDeleteBudget?: () => void;
-  onItemPress?: (expense: Expense) => void;
-  onToggleItemPaid?: (expense: Expense, nextPaid: boolean) => void;
-  paidToggleExpenseId?: number | null;
 }
 
 export default function BudgetCategoryRow({
   budget,
-  items = [],
-  useItemsForSpent,
+  paidAmount,
+  unpaidAmount,
   onEditBudget,
   onDeleteBudget,
-  onItemPress,
-  onToggleItemPaid,
-  paidToggleExpenseId,
 }: BudgetCategoryRowProps) {
   const { colors } = useTheme();
   const { displayMoney } = useShowAmounts();
-  const [expanded, setExpanded] = useState(false);
-  const [receiptExpense, setReceiptExpense] = useState<Expense | null>(null);
-  const [imageLoading, setImageLoading] = useState(true);
 
-  const receiptUrl = resolveMediaUrl(receiptExpense?.receipt_url);
-
-  useEffect(() => {
-    if (!receiptExpense || !receiptUrl) return;
-    setImageLoading(true);
-    const t = setTimeout(() => setImageLoading(false), 1500);
-    return () => clearTimeout(t);
-  }, [receiptExpense, receiptUrl]);
-
-  const openReceiptExternally = async () => {
-    if (!receiptUrl) return;
-    try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.open(receiptUrl, '_blank');
-      } else {
-        await Linking.openURL(receiptUrl);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const preferItemsSpent = useItemsForSpent ?? items.length > 0;
-  const spentFromItems = items.reduce(
-    (sum, exp) => sum + (exp.is_paid !== false ? toNumber(exp.amount) : 0),
-    0
-  );
-  const spent = preferItemsSpent ? spentFromItems : toNumber(budget.spent_amount);
   const amount = toNumber(budget.amount);
-  const remaining = amount - spent;
-  const percentageUsed = amount > 0 ? (spent / amount) * 100 : spent > 0 ? 100 : 0;
-  const barPct = Math.min(Math.max(percentageUsed, 0), 100);
-  const isExceeded = percentageUsed > 100;
-  const isOnBudget = percentageUsed >= 100 && !isExceeded;
+  const standing =
+    budget.base_amount != null && !Number.isNaN(Number(budget.base_amount))
+      ? toNumber(budget.base_amount)
+      : amount;
+  const paid =
+    paidAmount != null && !Number.isNaN(paidAmount)
+      ? paidAmount
+      : toNumber(budget.spent_amount);
+  const unpaid = unpaidAmount != null && !Number.isNaN(unpaidAmount) ? unpaidAmount : 0;
+  const committed = paid + unpaid;
+  const remaining = amount - committed;
+  const percentageUsed = amount > 0 ? (committed / amount) * 100 : committed > 0 ? 100 : 0;
+  const isExceeded = percentageUsed > 100.005;
+  const isOnBudget = Math.abs(remaining) <= 0.005 && amount > 0;
   const isWarning =
     !isExceeded && !isOnBudget && percentageUsed >= (budget.alert_threshold || 80);
   const statusColor = isExceeded
     ? '#ef4444'
-    : isOnBudget || (!isWarning && !isExceeded)
+    : isOnBudget
       ? '#10b981'
-      : '#f59e0b';
+      : isWarning
+        ? '#f59e0b'
+        : '#10b981';
   const statusLabel = isExceeded
     ? 'Over'
     : isOnBudget
@@ -108,208 +60,85 @@ export default function BudgetCategoryRow({
       : isWarning
         ? 'Near'
         : null;
-
-  const sortedItems = [...items].sort((a, b) => a.expense_date.localeCompare(b.expense_date));
+  const origin = budget.origin || 'bills';
+  const originLabel =
+    origin === 'manual' ? 'Manual' : origin === 'analysis' ? 'Analysis' : 'From bills';
+  const originColor =
+    origin === 'manual'
+      ? colors.primary || '#2563eb'
+      : origin === 'analysis'
+        ? '#7c3aed'
+        : '#0f766e';
+  const duesRaiseLimit = Math.abs(standing - amount) >= 0.005;
+  const unpaidColor = '#f59e0b';
 
   return (
     <View style={[styles.row, { borderBottomColor: colors.border }]}>
-      <View style={styles.mainRow}>
-        <TouchableOpacity
-          style={styles.mainTap}
-          onPress={() => setExpanded((v) => !v)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityState={{ expanded }}
-          accessibilityLabel={`${budget.category_name}, ${expanded ? 'collapse' : 'expand'} items`}
-        >
-          <FontAwesome
-            name={expanded ? 'chevron-down' : 'chevron-right'}
-            size={11}
-            color={colors.textSecondary}
-            style={styles.chevron}
-          />
-          <View style={styles.mainCopy}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.category, { color: colors.text }]} numberOfLines={1}>
-                {budget.category_name}
-              </Text>
-              {statusLabel ? (
-                <View style={[styles.statusChip, { backgroundColor: `${statusColor}22` }]}>
-                  <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={[styles.track, { backgroundColor: colors.border }]}>
-              <View
-                style={[styles.fill, { width: `${barPct}%`, backgroundColor: statusColor }]}
-              />
-            </View>
-            <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
-              <Text style={{ color: statusColor, fontWeight: '700' }}>{displayMoney(spent)}</Text>
-              {` / ${displayMoney(amount)} · ${Math.round(percentageUsed)}% · ${displayMoney(remaining)} left · ${sortedItems.length} item${sortedItems.length === 1 ? '' : 's'}`}
-            </Text>
+      <View style={styles.body}>
+        <View style={styles.line1}>
+          <Text style={[styles.category, { color: colors.text }]} numberOfLines={1}>
+            {budget.category_name}
+          </Text>
+          <View style={[styles.badge, { backgroundColor: `${originColor}18` }]}>
+            <Text style={[styles.badgeText, { color: originColor }]}>{originLabel}</Text>
           </View>
-        </TouchableOpacity>
-
-        <View style={styles.actions}>
-          {onEditBudget ? (
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={onEditBudget}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel={`Edit ${budget.category_name} budget`}
-            >
-              <FontAwesome name="pencil" size={13} color={colors.textSecondary} />
-            </TouchableOpacity>
+          {statusLabel ? (
+            <View style={[styles.badge, { backgroundColor: `${statusColor}18` }]}>
+              <Text style={[styles.badgeText, { color: statusColor }]}>{statusLabel}</Text>
+            </View>
           ) : null}
-          {onDeleteBudget ? (
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={onDeleteBudget}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel={`Delete ${budget.category_name} budget`}
-            >
-              <FontAwesome name="trash-o" size={14} color={colors.error || '#ef4444'} />
-            </TouchableOpacity>
-          ) : null}
+          <View style={styles.actions}>
+            {onEditBudget ? (
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={onEditBudget}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={`Edit ${budget.category_name} budget`}
+              >
+                <FontAwesome name="pencil" size={13} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
+            {onDeleteBudget ? (
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={onDeleteBudget}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={`Delete ${budget.category_name} budget`}
+              >
+                <FontAwesome name="trash-o" size={14} color={colors.error || '#ef4444'} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
+
+        <Text style={[styles.limitsMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+          Standing {displayMoney(standing)}
+          {' · This month '}
+          <Text
+            style={{
+              color: duesRaiseLimit
+                ? colors.primary || '#2563eb'
+                : colors.textSecondary,
+              fontWeight: duesRaiseLimit ? '700' : '500',
+            }}
+          >
+            {displayMoney(amount)}
+          </Text>
+        </Text>
+
+        <Text style={[styles.line3, { color: colors.textSecondary }]} numberOfLines={1}>
+          Paid <Text style={{ color: '#ef4444' }}>{displayMoney(paid)}</Text>
+          {' · Unpaid '}
+          <Text style={{ color: unpaidColor }}>{displayMoney(unpaid)}</Text>
+          {' / '}
+          <Text style={{ color: colors.text }}>{displayMoney(amount)}</Text>
+          {isExceeded
+            ? ` · Over ${displayMoney(-remaining)}`
+            : remaining > 0.005
+              ? ` · ${displayMoney(remaining)} left`
+              : ''}
+        </Text>
       </View>
-
-      {expanded ? (
-        <View style={styles.items}>
-          {sortedItems.length === 0 ? (
-            <Text style={[styles.emptyItems, { color: colors.textSecondary }]}>
-              No expenses this month
-            </Text>
-          ) : (
-            sortedItems.map((expense) => {
-              const paid = expense.is_paid !== false;
-              const isGenerated = !!(expense.is_recurring && expense.recurring_expense);
-              const itemReceiptUrl = resolveMediaUrl(expense.receipt_url);
-              return (
-                <View
-                  key={expense.id}
-                  style={[styles.itemRow, { borderTopColor: colors.border }]}
-                >
-                  <TouchableOpacity
-                    style={styles.itemMain}
-                    onPress={() => onItemPress?.(expense)}
-                    activeOpacity={onItemPress ? 0.65 : 1}
-                    disabled={!onItemPress}
-                  >
-                    <Text style={[styles.itemDesc, { color: colors.text }]} numberOfLines={1}>
-                      {expense.description}
-                    </Text>
-                    <Text style={[styles.itemMeta, { color: colors.textSecondary }]}>
-                      {formatShortDate(expense.expense_date)}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {isGenerated ? (
-                    <FontAwesome
-                      name="refresh"
-                      size={11}
-                      color="#10b981"
-                      style={styles.itemIcon}
-                      accessibilityLabel="Recurring"
-                    />
-                  ) : null}
-                  {!!itemReceiptUrl ? (
-                    <TouchableOpacity
-                      style={styles.itemIconBtn}
-                      onPress={() => {
-                        setImageLoading(true);
-                        setReceiptExpense(expense);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityLabel="View receipt"
-                    >
-                      <FontAwesome name="file-image-o" size={12} color={colors.primary} />
-                    </TouchableOpacity>
-                  ) : null}
-                  {onToggleItemPaid ? (
-                    <Switch
-                      value={paid}
-                      onValueChange={(value) => onToggleItemPaid(expense, value)}
-                      disabled={paidToggleExpenseId === expense.id}
-                      trackColor={{ false: colors.border, true: '#10b981' }}
-                      thumbColor="#fff"
-                      style={styles.paidSwitch}
-                      accessibilityLabel={paid ? 'Paid' : 'Unpaid'}
-                    />
-                  ) : null}
-                  <Text
-                    style={[
-                      styles.itemAmt,
-                      { color: paid ? colors.primary : colors.textSecondary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {displayMoney(expense.amount)}
-                  </Text>
-                </View>
-              );
-            })
-          )}
-        </View>
-      ) : null}
-
-      <Modal
-        visible={!!receiptExpense}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setReceiptExpense(null)}
-      >
-        <View style={styles.receiptOverlay}>
-          <View style={[styles.receiptSheet, { backgroundColor: colors.surface }]}>
-            <View style={[styles.receiptHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.receiptTitle, { color: colors.text }]} numberOfLines={1}>
-                Receipt — {receiptExpense?.description}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setReceiptExpense(null)}
-                accessibilityLabel="Close receipt"
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <FontAwesome name="times" size={22} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.receiptBody}>
-              {imageLoading ? (
-                <ActivityIndicator
-                  size="large"
-                  color={colors.primary}
-                  style={styles.receiptSpinner}
-                />
-              ) : null}
-              {receiptUrl ? (
-                <Image
-                  source={{ uri: receiptUrl }}
-                  style={[styles.receiptImage, imageLoading && styles.receiptImageLoading]}
-                  resizeMode="contain"
-                  onLoad={() => setImageLoading(false)}
-                  onLoadEnd={() => setImageLoading(false)}
-                  onError={() => setImageLoading(false)}
-                />
-              ) : null}
-            </View>
-            <View style={[styles.receiptFooter, { borderTopColor: colors.border }]}>
-              <TouchableOpacity
-                style={[styles.receiptFooterBtn, { borderColor: colors.border }]}
-                onPress={() => setReceiptExpense(null)}
-              >
-                <Text style={{ color: colors.text, fontWeight: '600' }}>Close</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.receiptFooterBtn, { backgroundColor: colors.primary }]}
-                onPress={() => void openReceiptExternally()}
-              >
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Open full size</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -317,108 +146,30 @@ export default function BudgetCategoryRow({
 const styles = StyleSheet.create({
   row: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10,
-  },
-  mainRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 4,
-  },
-  mainTap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    minWidth: 0,
-  },
-  chevron: { marginTop: 4, width: 12 },
-  mainCopy: { flex: 1, gap: 5, minWidth: 0 },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  category: { flex: 1, fontSize: 14, fontWeight: '700' },
-  statusChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  statusText: { fontSize: 10, fontWeight: '700' },
-  track: { height: 6, borderRadius: 3, overflow: 'hidden', width: '100%' },
-  fill: { height: '100%', borderRadius: 3 },
-  meta: { fontSize: 11, fontWeight: '500' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingTop: 2 },
-  iconBtn: { padding: 6 },
-  items: { marginTop: 4, marginLeft: 20 },
-  emptyItems: { fontSize: 12, paddingVertical: 8 },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 7,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 6,
-  },
-  itemMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minWidth: 0,
-  },
-  itemDesc: { flexShrink: 1, fontSize: 13, fontWeight: '600' },
-  itemMeta: { flexShrink: 0, fontSize: 11 },
-  itemIcon: { marginHorizontal: 2 },
-  itemIconBtn: { padding: 4 },
-  paidSwitch: { transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] },
-  itemAmt: {
-    minWidth: 56,
-    fontSize: 13,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
-  },
-  receiptOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  receiptSheet: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    maxHeight: '90%',
-  },
-  receiptHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
   },
-  receiptTitle: { flex: 1, fontSize: 15, fontWeight: '700' },
-  receiptBody: {
-    minHeight: 220,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-  },
-  receiptSpinner: { position: 'absolute' },
-  receiptImage: { width: '100%', height: 320 },
-  receiptImageLoading: { opacity: 0.3 },
-  receiptFooter: {
+  body: { gap: 4 },
+  line1: {
     flexDirection: 'row',
-    gap: 10,
-    padding: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  receiptFooterBtn: {
-    flex: 1,
     alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    minWidth: 0,
   },
+  category: { flex: 1, fontSize: 15, fontWeight: '800', minWidth: 0 },
+  badge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    flexShrink: 0,
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.2 },
+  actions: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 },
+  iconBtn: { padding: 5 },
+  limitsMeta: {
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.85,
+    fontVariant: ['tabular-nums'],
+  },
+  line3: { fontSize: 13, fontWeight: '500' },
 });

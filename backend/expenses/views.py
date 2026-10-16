@@ -785,8 +785,10 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
             if existing and existing.is_active:
                 old_amount = float(existing.amount)
+                existing_origin = getattr(existing, 'origin', None) or 'bills'
                 item['old_amount'] = old_amount
                 item['budget_id'] = existing.id
+                item['origin'] = existing_origin
                 item['start_date'] = existing.start_date.isoformat() if existing.start_date else None
                 item['end_date'] = existing.end_date.isoformat() if existing.end_date else None
                 end_needs_fix = existing.end_date != desired_end
@@ -795,6 +797,15 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     and desired_start
                     and (existing.start_date is None or existing.start_date > desired_start)
                 )
+
+                # Manual envelopes: never overwrite amount or deactivate via this path
+                if existing_origin == 'manual':
+                    item['action'] = 'skipped'
+                    item['reason'] = 'keeping manual budget (not overwritten by bills sync)'
+                    item['amount'] = old_amount
+                    skipped_count += 1
+                    by_category.append(item)
+                    continue
 
                 # Expense analysis: never overwrite amount; may set year-end if missing
                 if suggestion['sources'] == 'expenses':
@@ -883,8 +894,11 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     else:
                         update_fields = ['updated_at']
                         if not keep_higher and not amount_unchanged:
-                            existing.amount = Decimal(str(target))
+                            existing.amount = str(Decimal(str(target)))
                             update_fields.append('amount')
+                            if getattr(existing, 'origin', None) != 'manual':
+                                existing.origin = 'bills'
+                                update_fields.append('origin')
                         if start_needs_fix:
                             existing.start_date = desired_start
                             update_fields.append('start_date')
@@ -914,15 +928,24 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 ]
                 item['changes'] = changes
                 item['reason'] = '; '.join(changes)
+                new_origin = (
+                    'analysis' if suggestion['sources'] == 'expenses' else 'bills'
+                )
+                item['origin'] = new_origin
                 if dry_run:
                     item['action'] = 'would_reactivate'
                     updated_count += 1
                 else:
-                    existing.amount = Decimal(str(suggestion['amount']))
+                    existing.amount = str(Decimal(str(suggestion['amount'])))
                     existing.is_active = True
+                    existing.origin = new_origin
                     existing.start_date = desired_start
                     existing.end_date = desired_end
-                    existing.save(update_fields=['amount', 'is_active', 'start_date', 'end_date', 'updated_at'])
+                    existing.save(
+                        update_fields=[
+                            'amount', 'is_active', 'origin', 'start_date', 'end_date', 'updated_at',
+                        ]
+                    )
                     item['action'] = 'reactivated'
                     updated_count += 1
             else:
@@ -946,11 +969,15 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     item['action'] = 'would_create'
                     created_count += 1
                 else:
+                    new_origin = (
+                        'analysis' if suggestion['sources'] == 'expenses' else 'bills'
+                    )
                     budget = Budget.objects.create(
                         family=family,
                         category_id=cat_id,
-                        amount=Decimal(str(suggestion['amount'])),
+                        amount=str(Decimal(str(suggestion['amount']))),
                         period='monthly',
+                        origin=new_origin,
                         start_date=desired_start,
                         end_date=desired_end,
                         alert_threshold=80,
@@ -958,15 +985,18 @@ class BudgetViewSet(viewsets.ModelViewSet):
                     )
                     item['action'] = 'created'
                     item['budget_id'] = budget.id
+                    item['origin'] = new_origin
                     created_count += 1
 
             by_category.append(item)
 
-        # Deactivate stale budgets no longer backed by recurring/expenses
+        # Deactivate stale From-bills budgets no longer backed by recurring/expenses.
+        # Never auto-deactivate manual (or analysis) envelopes.
         stale_qs = Budget.objects.filter(
             family=family,
             period='monthly',
             is_active=True,
+            origin='bills',
         ).exclude(category_id__in=suggested_cat_ids)
         for stale in stale_qs.select_related('category'):
             stale_item = {
@@ -976,6 +1006,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 'recurring_amount': 0.0,
                 'expense_avg': 0.0,
                 'sources': 'none',
+                'origin': 'bills',
                 'period': 'monthly',
                 'budget_id': stale.id,
                 'old_amount': float(stale.amount),
@@ -1552,6 +1583,7 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
         # Capture explicit is_active from the request before reconcile side-effects
         requested_active = serializer.validated_data.get('is_active', None)
+        old_category_id = serializer.instance.category_id
 
         recurring = serializer.save()
 
@@ -1607,6 +1639,8 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         try:
             from .budget_sync import sync_category_budget_from_bills
             sync_category_budget_from_bills(recurring.family, recurring.category_id)
+            if old_category_id and old_category_id != recurring.category_id:
+                sync_category_budget_from_bills(recurring.family, old_category_id)
         except Exception as e:
             logger.error(
                 f"Error syncing budget for category {recurring.category_id} after bill update: {e}",
@@ -1618,6 +1652,22 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             f"created={result.get('generated_count')} updated={result.get('updated_count')} "
             f"next_due={recurring.next_due_date} active={recurring.is_active}"
         )
+
+    def perform_destroy(self, instance):
+        """Delete bill template, then sync (or deactivate) the category budget."""
+        import logging
+        logger = logging.getLogger(__name__)
+        family = instance.family
+        category_id = instance.category_id
+        instance.delete()
+        try:
+            from .budget_sync import sync_category_budget_from_bills
+            sync_category_budget_from_bills(family, category_id)
+        except Exception as e:
+            logger.error(
+                f"Error syncing budget for category {category_id} after bill delete: {e}",
+                exc_info=True,
+            )
 
     @action(detail=True, methods=['post'])
     def toggle_paid(self, request, pk=None):

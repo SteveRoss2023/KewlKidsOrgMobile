@@ -110,6 +110,8 @@ export interface ReceiptParseResult {
   fx_error?: string | null;
 }
 
+export type BudgetOrigin = 'bills' | 'manual' | 'analysis';
+
 export interface Budget {
   id: number;
   family: number;
@@ -119,6 +121,8 @@ export interface Budget {
   /** Standing monthly amount before yearly due-month additions */
   base_amount?: number;
   period: BudgetPeriod;
+  /** Who owns the standing amount */
+  origin?: BudgetOrigin;
   start_date: string;
   end_date: string | null;
   alert_threshold: number;
@@ -244,6 +248,7 @@ export interface CreateBudgetData {
   category: number;
   amount: number;
   period: BudgetPeriod;
+  origin?: BudgetOrigin;
   start_date: string;
   end_date?: string | null;
   alert_threshold?: number;
@@ -253,6 +258,7 @@ export interface UpdateBudgetData {
   category?: number;
   amount?: number;
   period?: BudgetPeriod;
+  origin?: BudgetOrigin;
   start_date?: string;
   end_date?: string | null;
   alert_threshold?: number;

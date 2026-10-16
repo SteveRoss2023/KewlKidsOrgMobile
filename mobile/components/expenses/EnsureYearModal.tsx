@@ -94,7 +94,8 @@ export default function EnsureYearModal({
             <Text style={[styles.lead, { color: colors.text }]}>{summary}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
               Review the list below. Cancel leaves everything unchanged. Apply performs exactly
-              these creates, updates, and removals. Paid expenses are never changed.
+              these creates, updates, and removals. Paid expenses are never changed. This does
+              not change budgets — only unpaid bill expense rows for this year.
             </Text>
 
             {created.length > 0 ? (

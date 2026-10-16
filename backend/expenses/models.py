@@ -55,11 +55,22 @@ class Budget(models.Model):
         ('monthly', 'Monthly'),
         ('yearly', 'Yearly'),
     ]
+    ORIGIN_CHOICES = [
+        ('bills', 'From bills'),
+        ('manual', 'Manual'),
+        ('analysis', 'Expense analysis'),
+    ]
 
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='budgets')
     category = models.ForeignKey(ExpenseCategory, on_delete=models.CASCADE, related_name='budgets')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = EncryptedCharField(max_length=20)  # Standing monthly limit as string
     period = models.CharField(max_length=20, choices=PERIOD_CHOICES, default='monthly')
+    origin = models.CharField(
+        max_length=20,
+        choices=ORIGIN_CHOICES,
+        default='bills',
+        help_text='Who owns the standing amount: bills sync, user (manual), or expense analysis',
+    )
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     alert_threshold = models.IntegerField(default=80, help_text="Alert when this percentage of budget is used")
@@ -72,6 +83,13 @@ class Budget(models.Model):
         indexes = [
             models.Index(fields=['family', 'is_active']),
             models.Index(fields=['category', 'start_date']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['family', 'category', 'period'],
+                condition=models.Q(is_active=True),
+                name='unique_active_budget_per_category_period',
+            ),
         ]
 
     def __str__(self):

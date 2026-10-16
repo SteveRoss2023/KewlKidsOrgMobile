@@ -17,17 +17,14 @@ import expenseService from '../../services/expenseService';
 import { Budget, Expense } from '../../types/expenses';
 import BudgetCategoryRow from './BudgetCategoryRow';
 import AlertModal from '../AlertModal';
-import DonutChart from './charts/DonutChart';
 import MonthBudgetBars from './charts/MonthBudgetBars';
 import {
   buildMonthlyBudgetSeries,
   defaultBudgetBoardMonthIndex,
   expensesForCategory,
+  isExpensePaid,
   monthKey,
-  monthRange,
-  rollupBudgetSeries,
 } from '../../utils/budgetSeries';
-import { invalidateCashflowYearCache } from './CashflowDashboard';
 import {
   applyBillExpensesForYear,
   ensureYearHasChanges,
@@ -35,6 +32,8 @@ import {
 } from '../../utils/ensureBillYear';
 import EnsureYearModal from './EnsureYearModal';
 import type { EnsureYearResult } from '../../types/expenses';
+
+const UNPAID_COLOR = '#f59e0b';
 
 const MONTH_NAMES = [
   'January',
@@ -76,17 +75,47 @@ export function invalidateBudgetYearCache(familyId?: number | null) {
   }
 }
 
+function emptyExpensesByMonth(year: number): Record<string, Expense[]> {
+  const next: Record<string, Expense[]> = {};
+  for (let i = 0; i < 12; i++) next[monthKey(year, i)] = [];
+  return next;
+}
+
+function bucketExpensesByMonth(year: number, expenses: Expense[]): Record<string, Expense[]> {
+  const next = emptyExpensesByMonth(year);
+  for (const e of expenses) {
+    const key = (e.expense_date || '').slice(0, 7);
+    if (key && next[key]) next[key].push(e);
+  }
+  return next;
+}
+
+function categoryPaidUnpaid(
+  expenses: Expense[] | undefined,
+  categoryId: number
+): { paid: number; unpaid: number } {
+  let paid = 0;
+  let unpaid = 0;
+  for (const e of expensesForCategory(expenses, categoryId)) {
+    const n = typeof e.amount === 'number' ? e.amount : parseFloat(String(e.amount ?? 0));
+    const amt = Number.isNaN(n) ? 0 : n;
+    if (isExpensePaid(e)) paid += amt;
+    else unpaid += amt;
+  }
+  return { paid, unpaid };
+}
+
 interface BudgetDashboardProps {
-  onExpensePress?: (expense: Expense) => void;
   onBudgetPress?: (budget: Budget) => void;
   onBudgetDelete?: (budget: Budget) => void | Promise<void>;
+  onAddBudget?: () => void;
   refreshKey?: number;
 }
 
 export default function BudgetDashboard({
-  onExpensePress,
   onBudgetPress,
   onBudgetDelete,
+  onAddBudget,
   refreshKey = 0,
 }: BudgetDashboardProps) {
   const { colors } = useTheme();
@@ -105,20 +134,17 @@ export default function BudgetDashboard({
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(
     () => initialCache?.selectedMonthIndex ?? now.getMonth()
   );
-  /** Donut slice filter: spent | left | over | null (all) */
-  const [donutFilter, setDonutFilter] = useState<string | null>(null);
   const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, Budget[]>>(
     () => initialCache?.budgetsByMonth ?? {}
   );
   const [expensesByMonth, setExpensesByMonth] = useState<Record<string, Expense[]>>(
-    () => initialCache?.expensesByMonth ?? {}
+    () => initialCache?.expensesByMonth ?? emptyExpensesByMonth(now.getFullYear())
   );
   const [yearLoading, setYearLoading] = useState(!initialCache);
-  const [loadingMonth, setLoadingMonth] = useState<number | null>(null);
-  const [paidToggleId, setPaidToggleId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const ensuredYearsRef = useRef<Set<string>>(new Set());
+  const dismissedEnsureRef = useRef<Set<string>>(new Set());
   const [ensurePreview, setEnsurePreview] = useState<EnsureYearResult | null>(null);
   const [ensureApplying, setEnsureApplying] = useState(false);
   const [budgetPendingDelete, setBudgetPendingDelete] = useState<Budget | null>(null);
@@ -136,11 +162,13 @@ export default function BudgetDashboard({
   selectedMonthIndexRef.current = selectedMonthIndex;
 
   const spentColor = colors.error || '#ef4444';
+  const unpaidColor = UNPAID_COLOR;
   const okColor = colors.success;
 
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
     ensuredYearsRef.current.clear();
+    dismissedEnsureRef.current.clear();
     setBudgetsByMonth({});
     setExpensesByMonth({});
     setError('');
@@ -150,6 +178,13 @@ export default function BudgetDashboard({
     monthInitYearRef.current = null;
     setYearLoading(true);
   }, []);
+
+  useEffect(() => {
+    const keep = selectedFamily != null ? `${selectedFamily.id}:${year}` : null;
+    for (const key of [...dismissedEnsureRef.current]) {
+      if (key !== keep) dismissedEnsureRef.current.delete(key);
+    }
+  }, [year, selectedFamily?.id]);
 
   const writeCache = useCallback(
     (
@@ -180,9 +215,11 @@ export default function BudgetDashboard({
       const generation = ++fetchGenerationRef.current;
       let cached = budgetYearCache.get(budgetCacheKey(familyId, y));
 
-      // Preview bill expense reconcile for this year (confirm before apply).
       const ensureKey = `${familyId}:${y}`;
-      if (!ensuredYearsRef.current.has(ensureKey)) {
+      if (
+        !ensuredYearsRef.current.has(ensureKey) &&
+        !dismissedEnsureRef.current.has(ensureKey)
+      ) {
         try {
           const preview = await previewBillExpensesForYear(familyId, y);
           if (generation !== fetchGenerationRef.current) return;
@@ -192,7 +229,6 @@ export default function BudgetDashboard({
             ensuredYearsRef.current.add(ensureKey);
           }
         } catch {
-          // Don't block the board if preview fails.
           ensuredYearsRef.current.add(ensureKey);
         }
       }
@@ -212,15 +248,11 @@ export default function BudgetDashboard({
       setError('');
       try {
         const monthIdx = cached?.selectedMonthIndex ?? selectedMonthIndexRef.current;
-        const { start, end } = monthRange(y, monthIdx);
-        const monthKeyStr = monthKey(y, monthIdx);
-
-        // One year_board call (same data as 12× monthly asOf) + month expenses.
-        const [board, monthExpenses] = await Promise.all([
+        const [board, yearExpenses] = await Promise.all([
           expenseService.getBudgetsYearBoard(familyId, y, true),
           expenseService.getExpenses(familyId, {
-            start_date: start,
-            end_date: end,
+            start_date: `${y}-01-01`,
+            end_date: `${y}-12-31`,
           }),
         ]);
         if (
@@ -234,10 +266,7 @@ export default function BudgetDashboard({
           const key = monthKey(y, monthIndex);
           next[key] = board[key] || [];
         }
-        const nextExpenses = {
-          ...(cached?.expensesByMonth ?? {}),
-          [monthKeyStr]: monthExpenses,
-        };
+        const nextExpenses = bucketExpensesByMonth(y, yearExpenses);
         setBudgetsByMonth(next);
         setExpensesByMonth(nextExpenses);
         setDataFamilyId(familyId);
@@ -253,6 +282,7 @@ export default function BudgetDashboard({
         setError(err.message || 'Failed to load budgets');
         if (!cached) {
           setBudgetsByMonth({});
+          setExpensesByMonth({});
           setDataFamilyId(null);
           setLoadedYear(null);
         }
@@ -266,53 +296,6 @@ export default function BudgetDashboard({
       }
     },
     [selectedFamily, clearState, writeCache]
-  );
-
-  const fetchMonthExpenses = useCallback(
-    async (monthIndex: number, y: number) => {
-      if (!selectedFamily) return;
-      const familyId = selectedFamily.id;
-      const key = monthKey(y, monthIndex);
-      const generation = fetchGenerationRef.current;
-      setLoadingMonth(monthIndex);
-      try {
-        const { start, end } = monthRange(y, monthIndex);
-        const data = await expenseService.getExpenses(familyId, {
-          start_date: start,
-          end_date: end,
-        });
-        if (
-          generation !== fetchGenerationRef.current ||
-          selectedFamilyIdRef.current !== familyId
-        ) {
-          return;
-        }
-        setExpensesByMonth((prev) => {
-          const next = { ...prev, [key]: data };
-          const budgets = budgetYearCache.get(budgetCacheKey(familyId, y))?.budgetsByMonth;
-          if (budgets) {
-            writeCache(familyId, y, budgets, next, monthIndex);
-          }
-          return next;
-        });
-      } catch (err: any) {
-        if (
-          generation !== fetchGenerationRef.current ||
-          selectedFamilyIdRef.current !== familyId
-        ) {
-          return;
-        }
-        setError(err.message || 'Failed to load expenses');
-      } finally {
-        if (
-          generation === fetchGenerationRef.current &&
-          selectedFamilyIdRef.current === familyId
-        ) {
-          setLoadingMonth(null);
-        }
-      }
-    },
-    [selectedFamily, writeCache]
   );
 
   useEffect(() => {
@@ -342,8 +325,6 @@ export default function BudgetDashboard({
     }, [selectedFamily?.id, year, loadYear, dataFamilyId, loadedYear])
   );
 
-  // Only react when refreshKey actually changes — not on every remount (refreshKey is
-  // often > 0). Remount + invalidate was wiping the tab cache and causing random spinners.
   const lastRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
     if (!selectedFamily) return;
@@ -358,7 +339,34 @@ export default function BudgetDashboard({
     [year, budgetsByMonth, expensesByMonth]
   );
 
-  const yearSummary = useMemo(() => rollupBudgetSeries(months), [months]);
+  const yearSummary = useMemo(() => {
+    let budgeted = 0;
+    let paid = 0;
+    let unpaid = 0;
+    let paidCount = 0;
+    let unpaidCount = 0;
+    let monthsWithBudgets = 0;
+    for (const m of months) {
+      if (m.categoryCount > 0) monthsWithBudgets += 1;
+      budgeted += m.budgeted;
+      paid += m.paidTotal;
+      unpaid += m.unpaidTotal;
+      paidCount += m.paidCount;
+      unpaidCount += m.unpaidCount;
+    }
+    const projected = paid + unpaid;
+    const variance = budgeted - projected;
+    return {
+      budgeted,
+      paid,
+      unpaid,
+      projected,
+      variance,
+      monthsWithBudgets,
+      paidCount,
+      unpaidCount,
+    };
+  }, [months]);
 
   useEffect(() => {
     if (yearLoading) return;
@@ -368,136 +376,61 @@ export default function BudgetDashboard({
     setSelectedMonthIndex(idx);
   }, [yearLoading, year, months, now]);
 
-  useEffect(() => {
-    if (yearLoading || !selectedFamily) return;
-    const key = monthKey(year, selectedMonthIndex);
-    if (!expensesByMonth[key] && loadingMonth !== selectedMonthIndex) {
-      void fetchMonthExpenses(selectedMonthIndex, year);
-    }
-  }, [
-    yearLoading,
-    selectedFamily,
-    year,
-    selectedMonthIndex,
-    expensesByMonth,
-    loadingMonth,
-    fetchMonthExpenses,
-  ]);
-
   const selectedMonth = months[selectedMonthIndex] || months[0];
   const selectedKey = selectedMonth?.key;
   const selectedExpenses = selectedKey ? expensesByMonth[selectedKey] : undefined;
   const expensesReady = selectedKey != null && expensesByMonth[selectedKey] != null;
 
   const handleSelectMonth = (monthIndex: number) => {
-    setDonutFilter(null);
     setSelectedMonthIndex(monthIndex);
     if (selectedFamily && loadedYear === year) {
       writeCache(selectedFamily.id, year, budgetsByMonth, expensesByMonth, monthIndex);
-    }
-    const key = monthKey(year, monthIndex);
-    if (!expensesByMonth[key]) {
-      void fetchMonthExpenses(monthIndex, year);
-    }
-  };
-
-  const handleTogglePaid = async (expense: Expense, nextPaid: boolean) => {
-    setPaidToggleId(expense.id);
-    try {
-      const updated = await expenseService.updateExpense(expense.id, { is_paid: nextPaid });
-      setExpensesByMonth((prev) => {
-        const next: Record<string, Expense[]> = {};
-        for (const [key, list] of Object.entries(prev)) {
-          next[key] = list.map((e) => (e.id === updated.id ? updated : e));
-        }
-        // Persist into tab cache so Overview → Budgets return keeps the toggle.
-        if (selectedFamily) {
-          writeCache(
-            selectedFamily.id,
-            year,
-            budgetsByMonth,
-            next,
-            selectedMonthIndexRef.current
-          );
-          invalidateCashflowYearCache(selectedFamily.id);
-        }
-        return next;
-      });
-    } catch (err: any) {
-      setError(err.message || 'Failed to update paid status');
-    } finally {
-      setPaidToggleId(null);
     }
   };
 
   const barPoints = useMemo(
     () =>
-      months.map((m) => ({
-        monthIndex: m.monthIndex,
-        label: m.label,
-        budgeted: m.budgeted,
-        spent: m.spent,
-        percentageUsed: m.percentageUsed,
-      })),
+      months.map((m) => {
+        const budgeted = m.budgeted;
+        const paid = m.paidTotal;
+        const unpaid = m.unpaidTotal;
+        const projected = paid + unpaid;
+        return {
+          monthIndex: m.monthIndex,
+          label: m.label,
+          budgeted,
+          spent: paid,
+          unpaid,
+          percentageUsed:
+            budgeted > 0 ? (projected / budgeted) * 100 : projected > 0 ? 100 : 0,
+        };
+      }),
     [months]
   );
 
-  const donutSlices = useMemo(() => {
-    if (!selectedMonth) return [];
-    const spent = selectedMonth.spent;
-    const remaining = Math.max(0, selectedMonth.remaining);
-    const over = Math.max(0, -selectedMonth.remaining);
-    if (over > 0) {
-      return [
-        { key: 'spent', label: 'Spent', amount: selectedMonth.budgeted, color: spentColor },
-        { key: 'over', label: 'Over', amount: over, color: colors.warning || '#f59e0b' },
-      ];
-    }
-    return [
-      { key: 'spent', label: 'Spent', amount: spent, color: spentColor },
-      { key: 'left', label: 'Left', amount: remaining, color: okColor },
-    ];
-  }, [selectedMonth, spentColor, okColor, colors.warning]);
-
   const sortedBudgets = useMemo(() => {
     if (!selectedMonth) return [];
-    let list = [...selectedMonth.budgets].sort((a, b) =>
+    return [...selectedMonth.budgets].sort((a, b) =>
       (a.category_name || '').localeCompare(b.category_name || '')
     );
-    if (!donutFilter) return list;
+  }, [selectedMonth]);
 
-    const spentFor = (b: Budget) => {
-      if (expensesReady) {
-        return expensesForCategory(selectedExpenses, b.category).reduce(
-          (sum, exp) => sum + (exp.is_paid !== false ? Number(exp.amount) || 0 : 0),
-          0
-        );
-      }
-      return Number(b.spent_amount) || 0;
-    };
-
-    if (donutFilter === 'spent') {
-      list = list.filter((b) => spentFor(b) > 0);
-    } else if (donutFilter === 'left') {
-      list = list.filter((b) => {
-        const amount = Number(b.amount) || 0;
-        return amount - spentFor(b) > 0;
-      });
-    } else if (donutFilter === 'over') {
-      list = list.filter((b) => {
-        const amount = Number(b.amount) || 0;
-        return spentFor(b) > amount;
-      });
-    }
-    return list;
-  }, [selectedMonth, donutFilter, expensesReady, selectedExpenses]);
-
-  useEffect(() => {
-    setDonutFilter(null);
-  }, [year]);
-
-  const toneRemaining = (n: number) =>
+  const toneVariance = (n: number) =>
     n > 0 ? okColor : n < 0 ? spentColor : colors.text;
+
+  const monthPaid = selectedMonth?.paidTotal ?? 0;
+  const monthUnpaid = selectedMonth?.unpaidTotal ?? 0;
+  const monthBudget = selectedMonth?.budgeted ?? 0;
+  const monthProjected = monthPaid + monthUnpaid;
+  const monthVariance = monthBudget - monthProjected;
+  const monthVarianceLabel =
+    monthVariance > 0.005 ? 'Under' : monthVariance < -0.005 ? 'Over' : 'On budget';
+  const yearVarianceLabel =
+    yearSummary.variance > 0.005
+      ? 'Under'
+      : yearSummary.variance < -0.005
+        ? 'Over'
+        : 'On budget';
 
   if (!selectedFamily) {
     return (
@@ -519,9 +452,7 @@ export default function BudgetDashboard({
       </Text>
       <View style={styles.heroGrid}>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
-            Budgeted
-          </Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Budget</Text>
           <Text style={[styles.heroValue, { color: colors.primary }]}>
             {displayMoney(yearSummary.budgeted)}
           </Text>
@@ -530,23 +461,50 @@ export default function BudgetDashboard({
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Spent</Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Projected</Text>
           <Text style={[styles.heroValue, { color: spentColor }]}>
-            {displayMoney(yearSummary.spent)}
+            {displayMoney(yearSummary.projected)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            {Math.round(yearSummary.percentageUsed)}% of limits
+            Paid + Unpaid
           </Text>
         </View>
         <View style={styles.heroCell}>
-          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Left</Text>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>
+            {yearVarianceLabel}
+          </Text>
           <Text
             style={[
               styles.heroValue,
-              { color: toneRemaining(yearSummary.remaining) },
+              { color: toneVariance(yearSummary.variance) },
             ]}
           >
-            {displayMoney(yearSummary.remaining)}
+            {Math.abs(yearSummary.variance) > 0.005
+              ? displayMoney(Math.abs(yearSummary.variance))
+              : displayMoney(0)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            Budget − Projected
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.heroGrid, { marginTop: 4 }]}>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Paid</Text>
+          <Text style={[styles.heroValue, { color: spentColor }]}>
+            {displayMoney(yearSummary.paid)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.paidCount} items
+          </Text>
+        </View>
+        <View style={styles.heroCell}>
+          <Text style={[styles.heroCaption, { color: colors.textSecondary }]}>Unpaid</Text>
+          <Text style={[styles.heroValue, { color: unpaidColor }]}>
+            {displayMoney(yearSummary.unpaid)}
+          </Text>
+          <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
+            {yearSummary.unpaidCount} items
           </Text>
         </View>
       </View>
@@ -562,7 +520,7 @@ export default function BudgetDashboard({
     >
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly budgets</Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Hover or tap a month · dots highlight near / over limit
+        Tap a month · Budget · Paid + Unpaid (stacked)
       </Text>
       <MonthBudgetBars
         points={barPoints}
@@ -570,6 +528,7 @@ export default function BudgetDashboard({
         onSelectMonth={handleSelectMonth}
         budgetColor={colors.primary}
         spentColor={spentColor}
+        unpaidColor={unpaidColor}
         overColor={colors.warning || '#f59e0b'}
         trackColor={colors.border}
         textColor={colors.text}
@@ -592,129 +551,85 @@ export default function BudgetDashboard({
       </Text>
 
       <View style={styles.monthKpis}>
-        <Kpi
-          label="Budgeted"
-          value={displayMoney(selectedMonth.budgeted)}
-          color={colors.primary}
-          muted={colors.textSecondary}
-        />
-        <Kpi
-          label="Spent"
-          value={displayMoney(selectedMonth.spent)}
-          color={spentColor}
-          muted={colors.textSecondary}
-        />
-        <Kpi
-          label="Left"
-          value={displayMoney(selectedMonth.remaining)}
-          color={toneRemaining(selectedMonth.remaining)}
-          muted={colors.textSecondary}
-        />
-        <Kpi
-          label="Used"
-          value={`${Math.round(selectedMonth.percentageUsed)}%`}
-          color={
-            selectedMonth.percentageUsed > 100
-              ? spentColor
-              : selectedMonth.percentageUsed >= 80
-                ? colors.warning || '#f59e0b'
-                : okColor
-          }
-          muted={colors.textSecondary}
-        />
-      </View>
-
-      <View style={styles.donutBlock}>
-        <DonutChart
-          slices={donutSlices}
-          textColor={colors.text}
-          mutedColor={colors.textSecondary}
-          trackColor={colors.border}
-          selectedKey={donutFilter}
-          onSelectSlice={setDonutFilter}
-          centerLabel={
-            selectedMonth.budgeted > 0
-              ? `${Math.round(selectedMonth.percentageUsed)}%`
-              : displayMoney(selectedMonth.spent)
-          }
-          centerSubLabel={
-            donutFilter
-              ? donutSlices.find((s) => s.key === donutFilter)?.label || 'Filtered'
-              : selectedMonth.remaining < 0
-                ? 'Over budget'
-                : 'Of limit'
-          }
-        />
-        <View style={styles.donutLegend}>
-          {donutSlices.map((s) => {
-            const active = donutFilter === s.key;
-            const dimmed = donutFilter != null && !active;
-            return (
-              <TouchableOpacity
-                key={s.key}
-                style={[styles.donutLegendRow, dimmed && { opacity: 0.4 }]}
-                onPress={() => setDonutFilter(active ? null : s.key)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <View style={[styles.legendSwatch, { backgroundColor: s.color }]} />
-                <Text style={[styles.donutLegendLabel, { color: colors.text }]}>
-                  {s.label}
-                </Text>
-                <Text
-                  style={[styles.donutLegendAmt, { color: colors.textSecondary }]}
-                >
-                  {displayMoney(s.amount)}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={styles.kpi}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Budget</Text>
+          <Text style={[styles.kpiValue, { color: colors.primary }]}>
+            {displayMoney(monthBudget)}
+          </Text>
+          <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
+            Includes bill dues this month
+          </Text>
+        </View>
+        <View style={styles.kpi}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Projected</Text>
+          <Text style={[styles.kpiValue, { color: spentColor }]}>
+            {expensesReady ? displayMoney(monthProjected) : '…'}
+          </Text>
+          <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
+            Paid + Unpaid
+          </Text>
+        </View>
+        <View style={styles.kpi}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
+            {monthVarianceLabel}
+          </Text>
+          <Text style={[styles.kpiValue, { color: toneVariance(monthVariance) }]}>
+            {expensesReady
+              ? Math.abs(monthVariance) > 0.005
+                ? displayMoney(Math.abs(monthVariance))
+                : displayMoney(0)
+              : '…'}
+          </Text>
+          <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
+            Budget − Projected
+          </Text>
         </View>
       </View>
-      <Text style={[styles.donutHint, { color: colors.textSecondary }]}>
-        Tap a legend item to filter · tap the chart to show all
-      </Text>
 
-      <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-        Categories
-        {donutFilter
-          ? ` · ${donutSlices.find((s) => s.key === donutFilter)?.label || 'filtered'}`
-          : ''}
-      </Text>
-      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Tap a category to see items · pencil / trash to edit
-      </Text>
+      <View style={styles.monthKpis}>
+        <View style={styles.kpi}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Paid</Text>
+          <Text style={[styles.kpiValue, { color: spentColor }]}>
+            {expensesReady ? displayMoney(monthPaid) : '…'}
+          </Text>
+          <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
+            {expensesReady ? `${selectedMonth.paidCount} items` : 'Loading…'}
+          </Text>
+        </View>
+        <View style={styles.kpi}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Unpaid</Text>
+          <Text style={[styles.kpiValue, { color: unpaidColor }]}>
+            {expensesReady ? displayMoney(monthUnpaid) : '…'}
+          </Text>
+          <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
+            {expensesReady ? `${selectedMonth.unpaidCount} items` : 'Loading…'}
+          </Text>
+        </View>
+      </View>
 
-      {loadingMonth === selectedMonthIndex && !expensesReady ? (
-        <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
-      ) : sortedBudgets.length === 0 ? (
+      <View style={[styles.categoriesDivider, { backgroundColor: colors.border }]} />
+      <Text style={[styles.subSectionTitle, { color: colors.text }]}>Categories</Text>
+
+      {sortedBudgets.length === 0 ? (
         <Text style={[styles.empty, { color: colors.textSecondary }]}>
           No budgets for this month
         </Text>
       ) : (
         <View style={styles.categoryList}>
           {sortedBudgets.map((budget) => {
-            const catExpenses = expensesForCategory(
-              selectedExpenses,
-              budget.category
-            );
+            const split = expensesReady
+              ? categoryPaidUnpaid(selectedExpenses, budget.category)
+              : undefined;
             return (
               <BudgetCategoryRow
                 key={budget.id}
                 budget={budget}
-                items={catExpenses}
-                useItemsForSpent={expensesReady}
-                onEditBudget={
-                  onBudgetPress ? () => onBudgetPress(budget) : undefined
-                }
+                paidAmount={split?.paid}
+                unpaidAmount={split?.unpaid}
+                onEditBudget={onBudgetPress ? () => onBudgetPress(budget) : undefined}
                 onDeleteBudget={
-                  onBudgetDelete
-                    ? () => setBudgetPendingDelete(budget)
-                    : undefined
+                  onBudgetDelete ? () => setBudgetPendingDelete(budget) : undefined
                 }
-                onItemPress={onExpensePress}
-                onToggleItemPaid={(exp, next) => void handleTogglePaid(exp, next)}
-                paidToggleExpenseId={paidToggleId}
               />
             );
           })}
@@ -748,23 +663,9 @@ export default function BudgetDashboard({
           ]}
         >
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            1. These are monthly category limits for the year/month you select. Spent
-            only counts paid expenses.
-          </Text>
-          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            2. Limits come from active bills on the Bills tab. This tab does not
-            create budgets — use pencil to edit a limit or trash to delete one.
-          </Text>
-          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            3. When you add or change a bill, the app already generates that bill’s
-            unpaid expenses and refreshes that category’s budget for you.
-          </Text>
-          <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            4. Use Update plan on Bills for a full refresh across all bills (first
-            setup, lots of changes) or to preview what will be created/updated before
-            applying. Yearly or irregular dues only affect the months they fall due.
-            Edits you make here can be overwritten the next time that category is
-            synced from bills.
+            Projected = Paid + Unpaid. Under/Over is Budget − Projected. Standing =
+            saved limit · This month may rise for bill dues · Manual is not overwritten
+            by bills. Income and nets live on Overview.
           </Text>
         </View>
       ) : null}
@@ -798,10 +699,22 @@ export default function BudgetDashboard({
               <Text style={[styles.todayBtnText, { color: colors.primary }]}>This year</Text>
             </TouchableOpacity>
           ) : null}
+          {onAddBudget ? (
+            <TouchableOpacity
+              style={[styles.addBudgetBtn, { backgroundColor: colors.primary }]}
+              onPress={onAddBudget}
+              accessibilityLabel="Add budget"
+            >
+              <FontAwesome name="plus" size={12} color="#fff" />
+              <Text style={styles.addBudgetBtnText}>Add budget</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {error ? (
-          <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
+          <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>
+            {error}
+          </Text>
         ) : null}
 
         {yearLoading &&
@@ -841,7 +754,11 @@ export default function BudgetDashboard({
         title="Delete budget?"
         message={
           budgetPendingDelete
-            ? `Delete the ${budgetPendingDelete.category_name || 'category'} budget (${displayMoney(budgetPendingDelete.amount)})? This cannot be undone.`
+            ? `Delete the ${budgetPendingDelete.category_name || 'category'} budget (Standing ${displayMoney(
+                budgetPendingDelete.base_amount != null
+                  ? budgetPendingDelete.base_amount
+                  : budgetPendingDelete.amount
+              )}, This month ${displayMoney(budgetPendingDelete.amount)})? This cannot be undone.`
             : ''
         }
         type="warning"
@@ -862,7 +779,9 @@ export default function BudgetDashboard({
         applying={ensureApplying}
         onCancel={() => {
           if (ensurePreview && selectedFamily) {
-            ensuredYearsRef.current.add(`${selectedFamily.id}:${ensurePreview.through_year}`);
+            dismissedEnsureRef.current.add(
+              `${selectedFamily.id}:${ensurePreview.through_year}`
+            );
           }
           setEnsurePreview(null);
         }}
@@ -875,6 +794,7 @@ export default function BudgetDashboard({
             try {
               await applyBillExpensesForYear(familyId, y);
               ensuredYearsRef.current.add(`${familyId}:${y}`);
+              dismissedEnsureRef.current.delete(`${familyId}:${y}`);
               setEnsurePreview(null);
               budgetYearCache.delete(budgetCacheKey(familyId, y));
               await loadYear(y, { soft: false });
@@ -887,27 +807,6 @@ export default function BudgetDashboard({
         }}
       />
     </>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  color,
-  muted,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  muted: string;
-}) {
-  return (
-    <View style={styles.kpi}>
-      <Text style={[styles.kpiLabel, { color: muted }]}>{label}</Text>
-      <Text style={[styles.kpiValue, { color }]} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
   );
 }
 
@@ -937,6 +836,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   todayBtnText: { fontSize: 12, fontWeight: '700' },
+  addBudgetBtn: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addBudgetBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   errorBanner: { paddingHorizontal: 12, paddingVertical: 6, fontSize: 13 },
   content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40, gap: 14 },
   wideRow: {
@@ -986,21 +895,13 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   kpiLabel: { fontSize: 11, fontWeight: '600' },
-  kpiValue: { fontSize: 14, fontWeight: '800' },
-  donutHint: { fontSize: 11, fontWeight: '500', opacity: 0.75, marginTop: -2 },
-  donutBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    paddingVertical: 8,
+  kpiValue: { fontSize: 15, fontWeight: '800' },
+  kpiMeta: { fontSize: 10, fontWeight: '500', lineHeight: 13 },
+  categoriesDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginTop: 6,
+    marginBottom: 2,
   },
-  donutLegend: { flex: 1, minWidth: 140, gap: 8 },
-  donutLegendRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  legendSwatch: { width: 10, height: 10, borderRadius: 2 },
-  donutLegendLabel: { flex: 1, fontSize: 13, fontWeight: '600' },
-  donutLegendAmt: { fontSize: 12, fontWeight: '700' },
   subSectionTitle: { fontSize: 14, fontWeight: '800', marginTop: 4 },
   empty: { fontSize: 13, paddingVertical: 12 },
   categoryList: { marginTop: 2 },

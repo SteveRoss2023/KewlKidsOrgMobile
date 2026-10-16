@@ -22,7 +22,10 @@ export type MonthBudgetBarPoint = {
   monthIndex: number;
   label: string;
   budgeted: number;
+  /** Paid expenses */
   spent: number;
+  /** Unpaid expenses */
+  unpaid: number;
   percentageUsed: number;
 };
 
@@ -32,6 +35,7 @@ type MonthBudgetBarsProps = {
   onSelectMonth: (monthIndex: number) => void;
   budgetColor: string;
   spentColor: string;
+  unpaidColor: string;
   overColor: string;
   trackColor: string;
   textColor: string;
@@ -50,6 +54,7 @@ export default function MonthBudgetBars({
   onSelectMonth,
   budgetColor,
   spentColor,
+  unpaidColor,
   overColor,
   trackColor,
   textColor,
@@ -65,7 +70,7 @@ export default function MonthBudgetBars({
   const rawMax = useMemo(() => {
     let m = 1;
     for (const p of points) {
-      m = Math.max(m, p.budgeted, p.spent);
+      m = Math.max(m, p.budgeted, p.spent + p.unpaid);
     }
     return m;
   }, [points]);
@@ -74,8 +79,9 @@ export default function MonthBudgetBars({
   const ticks = useMemo(() => chartAxisTicks(rawMax, 3), [rawMax]);
 
   const slotW = plotWidth / 12;
-  const barW = Math.max(4, Math.min(10, slotW * 0.28));
-  const gap = 2;
+  const barGap = 2;
+  const barW = Math.max(4, Math.min(10, (slotW * 0.7 - barGap) / 2));
+  const groupW = barW * 2 + barGap;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = Math.floor(e.nativeEvent.layout.width);
@@ -83,6 +89,19 @@ export default function MonthBudgetBars({
   };
 
   const hoverPoint = hoverIndex != null ? points[hoverIndex] : null;
+
+  const renderEmptyStub = (x: number, key: string) => (
+    <Rect
+      key={key}
+      x={x}
+      y={CHART_H - 2}
+      width={barW}
+      height={2}
+      rx={1}
+      fill={trackColor}
+      opacity={0.4}
+    />
+  );
 
   return (
     <View style={styles.wrap} onLayout={onLayout}>
@@ -93,7 +112,11 @@ export default function MonthBudgetBars({
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: spentColor }]} />
-          <Text style={[styles.legendText, { color: mutedColor }]}>Spent</Text>
+          <Text style={[styles.legendText, { color: mutedColor }]}>Paid</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: unpaidColor }]} />
+          <Text style={[styles.legendText, { color: mutedColor }]}>Unpaid</Text>
         </View>
       </View>
 
@@ -135,32 +158,71 @@ export default function MonthBudgetBars({
                   );
                 })}
                 {points.map((p) => {
-                  const xCenter = p.monthIndex * slotW + slotW / 2;
-                  const budgetH = Math.max(0, (p.budgeted / chartMax) * (CHART_H - 4));
-                  const spentH = Math.max(0, (p.spent / chartMax) * (CHART_H - 4));
-                  const budgetX = xCenter - barW - gap / 2;
-                  const spentX = xCenter + gap / 2;
-                  const over = p.budgeted > 0 && p.spent > p.budgeted;
+                  const groupX = p.monthIndex * slotW + slotW / 2 - groupW / 2;
+                  const budgetX = groupX;
+                  const outflowX = groupX + barW + barGap;
+                  const budget = Math.max(0, p.budgeted);
+                  const spent = Math.max(0, p.spent);
+                  const unpaid = Math.max(0, p.unpaid);
+                  const scale = (CHART_H - 4) / chartMax;
+                  const empty = budget <= 0 && spent <= 0 && unpaid <= 0;
+
+                  if (empty) {
+                    return (
+                      <Rect
+                        key={p.monthIndex}
+                        x={groupX}
+                        y={CHART_H - 2}
+                        width={groupW}
+                        height={2}
+                        rx={1}
+                        fill={trackColor}
+                        opacity={0.5}
+                      />
+                    );
+                  }
+
+                  const budgetH = budget * scale;
+                  // Same stack order as Overview: paid (bottom) then unpaid (top).
+                  const outflowLayers = [
+                    { h: spent * scale, fill: spentColor },
+                    { h: unpaid * scale, fill: unpaidColor },
+                  ].filter((l) => l.h > 0);
+
+                  let outflowY = CHART_H;
                   return (
                     <React.Fragment key={p.monthIndex}>
-                      <Rect
-                        x={budgetX}
-                        y={CHART_H - budgetH}
-                        width={barW}
-                        height={budgetH || 1}
-                        rx={2}
-                        fill={budgetColor}
-                        opacity={p.budgeted > 0 ? 1 : 0.25}
-                      />
-                      <Rect
-                        x={spentX}
-                        y={CHART_H - spentH}
-                        width={barW}
-                        height={spentH || 1}
-                        rx={2}
-                        fill={over ? overColor : spentColor}
-                        opacity={p.spent > 0 ? 1 : 0.25}
-                      />
+                      {budgetH > 0 ? (
+                        <Rect
+                          x={budgetX}
+                          y={CHART_H - Math.max(budgetH, 0.5)}
+                          width={barW}
+                          height={Math.max(budgetH, 0.5)}
+                          rx={2}
+                          fill={budgetColor}
+                          opacity={0.9}
+                        />
+                      ) : (
+                        renderEmptyStub(budgetX, `${p.monthIndex}-bud`)
+                      )}
+                      {outflowLayers.length === 0 ? (
+                        renderEmptyStub(outflowX, `${p.monthIndex}-out`)
+                      ) : (
+                        outflowLayers.map((layer, i) => {
+                          outflowY -= layer.h;
+                          return (
+                            <Rect
+                              key={`${p.monthIndex}-out-${i}`}
+                              x={outflowX}
+                              y={outflowY}
+                              width={barW}
+                              height={Math.max(layer.h, 0.5)}
+                              rx={i === outflowLayers.length - 1 ? 2 : 0}
+                              fill={layer.fill}
+                            />
+                          );
+                        })
+                      )}
                     </React.Fragment>
                   );
                 })}
@@ -176,12 +238,14 @@ export default function MonthBudgetBars({
                       color: budgetColor,
                     },
                     {
-                      label: 'Spent',
+                      label: 'Paid',
                       value: formatAmount(hoverPoint.spent),
-                      color:
-                        hoverPoint.budgeted > 0 && hoverPoint.spent > hoverPoint.budgeted
-                          ? overColor
-                          : spentColor,
+                      color: spentColor,
+                    },
+                    {
+                      label: 'Unpaid',
+                      value: formatAmount(hoverPoint.unpaid),
+                      color: unpaidColor,
                     },
                   ]}
                   x={hoverPoint.monthIndex * slotW + slotW / 2}
@@ -217,8 +281,9 @@ export default function MonthBudgetBars({
 
           <View style={[styles.statusRow, { height: STATUS_H, marginLeft: Y_AXIS_W }]}>
             {points.map((p) => {
-              const over = p.budgeted > 0 && p.spent > p.budgeted;
-              const empty = p.budgeted <= 0 && p.spent <= 0;
+              const projected = p.spent + p.unpaid;
+              const over = p.budgeted > 0 && projected > p.budgeted;
+              const empty = p.budgeted <= 0 && projected <= 0;
               return (
                 <View key={`st-${p.monthIndex}`} style={[styles.statusSlot, { width: slotW }]}>
                   <View
@@ -282,32 +347,21 @@ export default function MonthBudgetBars({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 8, alignItems: 'center', alignSelf: 'stretch', width: '100%' },
-  legend: { flexDirection: 'row', gap: 14, alignItems: 'center', alignSelf: 'stretch' },
+  wrap: { width: '100%', gap: 8 },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 2 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 2 },
   legendText: { fontSize: 11, fontWeight: '600' },
-  plotRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  plotRow: { flexDirection: 'row', alignItems: 'flex-end' },
   yAxis: { position: 'relative' },
   yLabel: {
     position: 'absolute',
+    left: 0,
     right: 4,
     fontSize: 9,
     fontWeight: '600',
     textAlign: 'right',
-    width: Y_AXIS_W - 6,
   },
-  statusRow: { flexDirection: 'row', marginTop: 4 },
-  statusSlot: { alignItems: 'center', justifyContent: 'center' },
-  statusDot: { width: 5, height: 5, borderRadius: 2.5 },
-  labelRow: { flexDirection: 'row', marginTop: 2 },
-  labelSlot: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 2,
-  },
-  labelText: { fontSize: 10, fontWeight: '600' },
-  labelTextSelected: { fontWeight: '800' },
   hitOverlay: {
     position: 'absolute',
     left: 0,
@@ -316,10 +370,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   hitSlot: { height: '100%' },
-  trackHint: {
-    height: StyleSheet.hairlineWidth,
-    marginTop: 4,
-    opacity: 0.6,
-    alignSelf: 'stretch',
+  statusRow: { flexDirection: 'row', alignItems: 'center' },
+  statusSlot: { alignItems: 'center', justifyContent: 'center' },
+  statusDot: { width: 5, height: 5, borderRadius: 2.5 },
+  labelRow: { flexDirection: 'row' },
+  labelSlot: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 2,
   },
+  labelText: { fontSize: 10, fontWeight: '600' },
+  labelTextSelected: { fontWeight: '800' },
+  trackHint: { height: StyleSheet.hairlineWidth, opacity: 0.35, marginTop: 2 },
 });

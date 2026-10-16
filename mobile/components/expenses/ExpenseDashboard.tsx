@@ -153,7 +153,10 @@ export default function ExpenseDashboard({
   );
   const [loading, setLoading] = useState(!initialCache);
   const [error, setError] = useState('');
+  /** Years where ensure-year was applied or had nothing to do. */
   const ensuredYearsRef = useRef<Set<string>>(new Set());
+  /** Years where the user cancelled — suppress only while still viewing that year. */
+  const dismissedEnsureRef = useRef<Set<string>>(new Set());
   const [ensurePreview, setEnsurePreview] = useState<EnsureYearResult | null>(null);
   const [ensureApplying, setEnsureApplying] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>(() => initialCache?.expenses ?? []);
@@ -215,6 +218,7 @@ export default function ExpenseDashboard({
   const clearState = useCallback(() => {
     fetchGenerationRef.current += 1;
     ensuredYearsRef.current.clear();
+    dismissedEnsureRef.current.clear();
     setExpenses([]);
     setBudgets([]);
     setCategories([]);
@@ -225,6 +229,17 @@ export default function ExpenseDashboard({
     setDataFamilyId(null);
     setLoading(true);
   }, []);
+
+  // Leaving a year clears a Cancel dismiss so returning can prompt again.
+  useEffect(() => {
+    if (periodMode === 'all') return;
+    const y = viewDate.getFullYear();
+    const keep =
+      selectedFamily != null ? `${selectedFamily.id}:${y}` : null;
+    for (const key of [...dismissedEnsureRef.current]) {
+      if (key !== keep) dismissedEnsureRef.current.delete(key);
+    }
+  }, [periodMode, viewDate, selectedFamily?.id]);
 
   const writeCache = useCallback(
     (
@@ -267,7 +282,10 @@ export default function ExpenseDashboard({
       if (periodMode !== 'all') {
         const y = viewDate.getFullYear();
         const ensureKey = `${familyId}:${y}`;
-        if (!ensuredYearsRef.current.has(ensureKey)) {
+        if (
+          !ensuredYearsRef.current.has(ensureKey) &&
+          !dismissedEnsureRef.current.has(ensureKey)
+        ) {
           try {
             const preview = await previewBillExpensesForYear(familyId, y);
             if (generation !== fetchGenerationRef.current) return;
@@ -1209,7 +1227,10 @@ export default function ExpenseDashboard({
         applying={ensureApplying}
         onCancel={() => {
           if (ensurePreview && selectedFamily) {
-            ensuredYearsRef.current.add(`${selectedFamily.id}:${ensurePreview.through_year}`);
+            // Dismiss for this visit only — leave and return to that year prompts again.
+            dismissedEnsureRef.current.add(
+              `${selectedFamily.id}:${ensurePreview.through_year}`
+            );
           }
           setEnsurePreview(null);
         }}
@@ -1222,6 +1243,7 @@ export default function ExpenseDashboard({
             try {
               await applyBillExpensesForYear(familyId, y);
               ensuredYearsRef.current.add(`${familyId}:${y}`);
+              dismissedEnsureRef.current.delete(`${familyId}:${y}`);
               setEnsurePreview(null);
               invalidateBudgetYearCache(familyId);
               await load({ soft: false });

@@ -24,7 +24,6 @@ import {
 import { forFamily } from '../../utils/familyScope';
 import RecurringExpenseRow from './RecurringExpenseRow';
 import RecurringExpenseForm from './RecurringExpenseForm';
-import UpdatePlanWizard from './UpdatePlanWizard';
 import DonutChart from './charts/DonutChart';
 import AlertModal from '../AlertModal';
 
@@ -81,11 +80,15 @@ export default function BillsDashboard({
     initialCache && selectedFamily ? selectedFamily.id : null
   );
 
-  const [showWizard, setShowWizard] = useState(false);
   const [showBillForm, setShowBillForm] = useState(false);
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [saving, setSaving] = useState(false);
   const [billPendingDelete, setBillPendingDelete] = useState<RecurringExpense | null>(null);
+  const [keepBudgetPrompt, setKeepBudgetPrompt] = useState<{
+    budgetId: number;
+    categoryName: string;
+    amount: number;
+  } | null>(null);
   const [activeOpen, setActiveOpen] = useState(false);
   const [inactiveOpen, setInactiveOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -106,8 +109,8 @@ export default function BillsDashboard({
     setDataFamilyId(null);
     setShowBillForm(false);
     setEditingBill(null);
-    setShowWizard(false);
     setBillPendingDelete(null);
+    setKeepBudgetPrompt(null);
     setLoading(true);
   }, []);
 
@@ -331,13 +334,51 @@ export default function BillsDashboard({
     setBillPendingDelete(null);
     if (!bill) return;
     setError('');
+    const activeSameCat = bills.filter(
+      (b) => b.is_active && b.category === bill.category && b.id !== bill.id
+    );
+    const isLastInCategory = activeSameCat.length === 0;
+    const catBudget = budgets.find(
+      (b) => b.is_active && b.category === bill.category
+    );
+    const isBillsOrigin = !catBudget?.origin || catBudget.origin === 'bills';
+    const standing =
+      catBudget?.base_amount != null
+        ? Number(catBudget.base_amount)
+        : Number(catBudget?.amount || 0);
+
     try {
       await expenseService.deleteRecurringExpense(bill.id);
       if (selectedFamily) invalidateBillsBoardCache(selectedFamily.id);
       await load({ soft: true });
       onPlanApplied?.();
+      if (isLastInCategory && catBudget && isBillsOrigin) {
+        setKeepBudgetPrompt({
+          budgetId: catBudget.id,
+          categoryName: catBudget.category_name || 'this category',
+          amount: standing,
+        });
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to delete bill');
+    }
+  };
+
+  const keepBudgetAsManual = async () => {
+    const prompt = keepBudgetPrompt;
+    setKeepBudgetPrompt(null);
+    if (!prompt) return;
+    try {
+      await expenseService.updateBudget(prompt.budgetId, {
+        origin: 'manual',
+        is_active: true,
+        amount: prompt.amount > 0 ? prompt.amount : undefined,
+      });
+      if (selectedFamily) invalidateBillsBoardCache(selectedFamily.id);
+      await load({ soft: true });
+      onPlanApplied?.();
+    } catch (err: any) {
+      setError(err.message || 'Failed to keep budget as Manual');
     }
   };
 
@@ -438,27 +479,14 @@ export default function BillsDashboard({
     <View style={styles.actionRow}>
       <TouchableOpacity
         style={[styles.primaryAction, { backgroundColor: colors.primary }]}
-        onPress={() => setShowWizard(true)}
-        accessibilityLabel="Update plan"
-      >
-        <FontAwesome name="magic" size={14} color="#fff" />
-        <Text style={styles.primaryActionText}>Update plan</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.secondaryAction,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
         onPress={() => {
           setEditingBill(null);
           setShowBillForm(true);
         }}
         accessibilityLabel="Add bill"
       >
-        <FontAwesome name="plus" size={14} color={colors.primary} />
-        <Text style={[styles.secondaryActionText, { color: colors.primary }]}>
-          Add bill
-        </Text>
+        <FontAwesome name="plus" size={14} color="#fff" />
+        <Text style={styles.primaryActionText}>Add bill</Text>
       </TouchableOpacity>
     </View>
   );
@@ -495,7 +523,7 @@ export default function BillsDashboard({
           <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
         ) : activeBills.length === 0 && inactiveBills.length === 0 ? (
           <Text style={[styles.empty, { color: colors.textSecondary }]}>
-            No bills yet. Add rent, utilities, and subscriptions, then run Update plan.
+            No bills yet. Add rent, utilities, and subscriptions.
           </Text>
         ) : activeBills.length === 0 ? (
           <Text style={[styles.empty, { color: colors.textSecondary }]}>
@@ -588,20 +616,20 @@ export default function BillsDashboard({
           ]}
         >
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            1. Active bills keep unpaid expenses and category budgets in sync. Paid
-            expenses stay as-is.
+            1. Saving a bill updates that bill’s unpaid expenses and refreshes a
+            From-bills category limit. Paid expenses stay as-is.
           </Text>
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            2. When you add or change a bill, the app syncs that bill’s unpaid expenses
-            and refreshes that category’s budget for you.
+            2. Manual envelopes on Budgets are never overwritten by bill sync. Use Add
+            budget there for limits without a bill (for example Food).
           </Text>
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            3. Use Update plan for a full refresh across all bills (first setup, lots of
-            changes) or to preview what will be created/updated before applying.
+            3. Deleting the last bill in a category turns off its From-bills limit unless
+            you choose to keep it as Manual.
           </Text>
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            4. Manual budget edits on Budgets can be overwritten the next time that
-            category is synced from bills.
+            4. Opening another year may offer to add missing unpaid bill rows for that
+            year. That does not change budgets.
           </Text>
         </View>
       ) : null}
@@ -652,17 +680,6 @@ export default function BillsDashboard({
         )}
       </View>
 
-      <UpdatePlanWizard
-        visible={showWizard}
-        familyId={selectedFamily.id}
-        bills={bills}
-        onClose={() => setShowWizard(false)}
-        onApplied={() => {
-          void load({ soft: true });
-          onPlanApplied?.();
-        }}
-      />
-
       <RecurringExpenseForm
         visible={showBillForm}
         recurringExpense={editingBill}
@@ -691,6 +708,26 @@ export default function BillsDashboard({
         onClose={() => setBillPendingDelete(null)}
         onConfirm={() => {
           void confirmDelete();
+        }}
+      />
+
+      <AlertModal
+        visible={!!keepBudgetPrompt}
+        title="Keep category budget?"
+        message={
+          keepBudgetPrompt
+            ? `That was the last bill in ${keepBudgetPrompt.categoryName}. Keep Standing ${displayMoney(
+                keepBudgetPrompt.amount
+              )} as a Manual budget? Otherwise the From-bills limit stays off.`
+            : ''
+        }
+        type="info"
+        showCancel
+        cancelText="Leave off"
+        confirmText="Keep as Manual"
+        onClose={() => setKeepBudgetPrompt(null)}
+        onConfirm={() => {
+          void keepBudgetAsManual();
         }}
       />
     </>

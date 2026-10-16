@@ -325,6 +325,55 @@ class BudgetSerializer(serializers.ModelSerializer):
     category_name = serializers.SerializerMethodField()
     base_amount = serializers.SerializerMethodField()
 
+    def validate(self, attrs):
+        """One active monthly budget per family+category; create defaults to manual."""
+        from .models import Budget
+
+        instance = self.instance
+        family = attrs.get('family') or (instance.family if instance else None)
+        category = attrs.get('category') or (instance.category if instance else None)
+        period = attrs.get('period') or (instance.period if instance else 'monthly')
+        is_active = attrs.get('is_active', instance.is_active if instance else True)
+
+        if family and category and is_active and period == 'monthly':
+            qs = Budget.objects.filter(
+                family=family,
+                category=category,
+                period='monthly',
+                is_active=True,
+            )
+            if instance:
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'category': 'An active monthly budget already exists for this category.'}
+                )
+
+        # New budgets from the Budgets UI are manual unless origin is set explicitly.
+        if instance is None and 'origin' not in attrs:
+            attrs['origin'] = 'manual'
+
+        return attrs
+
+    def to_internal_value(self, data):
+        """Store standing amount as string for EncryptedCharField."""
+        if hasattr(data, 'copy'):
+            data = data.copy()
+        else:
+            data = dict(data)
+        if 'amount' in data and data['amount'] is not None:
+            data['amount'] = str(data['amount'])
+        return super().to_internal_value(data)
+
+    def update(self, instance, validated_data):
+        """Pencil-edit of a From-bills budget takes ownership (manual)."""
+        amount_changing = 'amount' in validated_data and (
+            Decimal(str(validated_data['amount'])) != Decimal(str(instance.amount or '0'))
+        )
+        if amount_changing and getattr(instance, 'origin', None) == 'bills':
+            validated_data['origin'] = 'manual'
+        return super().update(instance, validated_data)
+
     def _reference_date(self):
         """Use as_of from context when provided (for month navigation)."""
         from django.utils import timezone
@@ -479,7 +528,8 @@ class BudgetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Budget
         fields = [
-            'id', 'family', 'category', 'category_name', 'amount', 'base_amount', 'period', 'start_date', 'end_date',
+            'id', 'family', 'category', 'category_name', 'amount', 'base_amount', 'period', 'origin',
+            'start_date', 'end_date',
             'alert_threshold', 'is_active', 'spent_amount', 'remaining_amount', 'percentage_used',
             'created_at', 'updated_at'
         ]

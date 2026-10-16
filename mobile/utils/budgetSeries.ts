@@ -44,12 +44,21 @@ export type BudgetMonthPoint = {
   key: string;
   budgets: Budget[];
   budgeted: number;
+  /** Paid amount in budgeted categories (envelope progress / bars). */
   spent: number;
   remaining: number;
   percentageUsed: number;
   categoryCount: number;
   /** True when spent came from loaded month expenses (paid only). */
   spentFromExpenses: boolean;
+  /** All paid expenses in the month (matches Overview paid). */
+  paidTotal: number;
+  /** All unpaid expenses in the month (matches Overview unpaid). */
+  unpaidTotal: number;
+  paidCount: number;
+  unpaidCount: number;
+  /** paidTotal + unpaidTotal — matches Overview Actual. */
+  actualTotal: number;
 };
 
 function spentForBudgets(
@@ -71,6 +80,38 @@ function spentForBudgets(
   return { spent, fromExpenses: false };
 }
 
+function monthExpenseTotals(expenses: Expense[] | undefined): {
+  paidTotal: number;
+  unpaidTotal: number;
+  paidCount: number;
+  unpaidCount: number;
+  actualTotal: number;
+} {
+  let paidTotal = 0;
+  let unpaidTotal = 0;
+  let paidCount = 0;
+  let unpaidCount = 0;
+  if (expenses) {
+    for (const e of expenses) {
+      const amount = toAmt(e.amount);
+      if (isExpensePaid(e)) {
+        paidTotal += amount;
+        paidCount += 1;
+      } else {
+        unpaidTotal += amount;
+        unpaidCount += 1;
+      }
+    }
+  }
+  return {
+    paidTotal,
+    unpaidTotal,
+    paidCount,
+    unpaidCount,
+    actualTotal: paidTotal + unpaidTotal,
+  };
+}
+
 export function buildMonthlyBudgetSeries(
   year: number,
   budgetsByMonth: Record<string, Budget[]>,
@@ -79,8 +120,10 @@ export function buildMonthlyBudgetSeries(
   return Array.from({ length: 12 }, (_, monthIndex) => {
     const key = monthKey(year, monthIndex);
     const budgets = budgetsByMonth[key] || [];
+    const monthExpenses = expensesByMonth[key];
     const budgeted = budgets.reduce((s, b) => s + toAmt(b.amount), 0);
-    const { spent, fromExpenses } = spentForBudgets(budgets, expensesByMonth[key]);
+    const { spent, fromExpenses } = spentForBudgets(budgets, monthExpenses);
+    const totals = monthExpenseTotals(monthExpenses);
     const remaining = budgeted - spent;
     const percentageUsed = budgeted > 0 ? (spent / budgeted) * 100 : spent > 0 ? 100 : 0;
     return {
@@ -95,6 +138,7 @@ export function buildMonthlyBudgetSeries(
       percentageUsed,
       categoryCount: budgets.length,
       spentFromExpenses: fromExpenses,
+      ...totals,
     };
   });
 }
