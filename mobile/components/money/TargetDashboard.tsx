@@ -18,6 +18,12 @@ import { MoneyAccount } from '../../types/money';
 import { forFamily } from '../../utils/familyScope';
 import AuthService from '../../services/authService';
 import { STORAGE_KEYS, storage } from '../../utils/storage';
+import {
+  DEFAULT_FORECAST_GOAL,
+  FORECAST_GOAL_RATES,
+  readForecastGoal,
+  writeForecastGoal,
+} from '../../utils/forecastGoal';
 import { canUseMoneyDemoPortfolio } from '../../utils/moneyDemoPortfolio';
 import {
   projectAccountsAtYearsAhead,
@@ -34,8 +40,6 @@ import {
   phoneMoneyValueStyle,
 } from '../expenses/phoneMoneyLayout';
 
-const TARGET_RATES = [1, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
-const DEFAULT_FORECAST_RATE = 2.5;
 const FORECAST_YEARS = 10;
 
 interface TargetDashboardProps {
@@ -70,7 +74,8 @@ export default function TargetDashboard({
   const [dataFamilyId, setDataFamilyId] = useState<number | null>(() =>
     seeded && selectedFamily ? selectedFamily.id : null
   );
-  const [forecastRate, setForecastRate] = useState(DEFAULT_FORECAST_RATE);
+  const [forecastRate, setForecastRate] = useState(DEFAULT_FORECAST_GOAL);
+  const [goalRate, setGoalRate] = useState(DEFAULT_FORECAST_GOAL);
   const [horizonYearsAhead, setHorizonYearsAhead] = useState(1);
   const [expandedForecastYears, setExpandedForecastYears] = useState<number[]>([]);
   const currentCalendarYear = new Date().getFullYear();
@@ -90,7 +95,7 @@ export default function TargetDashboard({
     setError('');
     setDataFamilyId(null);
     setExpandedForecastYears([]);
-    setForecastRate(DEFAULT_FORECAST_RATE);
+    setForecastRate(DEFAULT_FORECAST_GOAL);
     setHorizonYearsAhead(1);
     setLoading(true);
     skipNextSoftFetchRef.current = false;
@@ -169,6 +174,17 @@ export default function TargetDashboard({
     setDataFamilyId(selectedFamily.id);
     setLoading(false);
   }, [initialAccounts, selectedFamily?.id]);
+
+  useEffect(() => {
+    if (!selectedFamily) return;
+    let cancelled = false;
+    void readForecastGoal(selectedFamily.id).then((rate) => {
+      if (!cancelled) setGoalRate(rate);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFamily?.id]);
 
   useEffect(() => {
     if (!seeded) return;
@@ -274,7 +290,7 @@ export default function TargetDashboard({
         Investment return
       </Text>
       <View style={styles.chipWrap}>
-        {TARGET_RATES.map((rate) => {
+        {FORECAST_GOAL_RATES.map((rate) => {
           const active = rate === forecastRate;
           return (
             <TouchableOpacity
@@ -298,6 +314,43 @@ export default function TargetDashboard({
           );
         })}
       </View>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        This rate only changes the forecast on this screen.
+      </Text>
+      <Text style={[styles.chipLabel, { color: colors.textSecondary, marginTop: 8 }]}>
+        Investment goal
+      </Text>
+      <View style={styles.chipWrap}>
+        {FORECAST_GOAL_RATES.map((rate) => {
+          const active = rate === goalRate;
+          return (
+            <TouchableOpacity
+              key={`goal-${rate}`}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.success : colors.card || colors.surface,
+                  borderColor: active ? colors.success : colors.border,
+                },
+              ]}
+              onPress={() => {
+                setGoalRate(rate);
+                if (selectedFamily) void writeForecastGoal(selectedFamily.id, rate);
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${rate} percent investment goal`}
+            >
+              <Text style={[styles.chipText, { color: active ? '#fff' : colors.text }]}>
+                {rate}%
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Saved goal. History charts compare each account and the portfolio to this rate.
+      </Text>
     </>
   );
 

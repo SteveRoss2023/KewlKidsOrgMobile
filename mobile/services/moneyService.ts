@@ -190,7 +190,7 @@ class MoneyService {
 
   async updateSnapshot(
     id: number,
-    data: { balance: number | string; notes?: string | null }
+    data: { balance: number | string; as_of_date?: string; notes?: string | null }
   ): Promise<AccountSnapshot> {
     try {
       const res = await apiClient.patch<AccountSnapshot>(`/account-snapshots/${id}/`, data);

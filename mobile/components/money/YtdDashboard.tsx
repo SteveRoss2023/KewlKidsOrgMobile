@@ -527,12 +527,12 @@ export default function YtdDashboard({
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
-              phoneMoney && phoneMoneyCaption,
+              phoneMoney && { fontSize: 10 },
               phoneCaptionText,
             ]}
-            numberOfLines={1}
+            numberOfLines={2}
           >
-            Invest now
+            {phoneMoney ? 'Current Value' : 'Current Invest. Value'}
           </Text>
           <Text
             style={[
@@ -561,12 +561,12 @@ export default function YtdDashboard({
             style={[
               styles.heroCaption,
               { color: colors.textSecondary },
-              phoneMoney && phoneMoneyCaption,
+              phoneMoney && { fontSize: 10 },
               phoneCaptionText,
             ]}
-            numberOfLines={1}
+            numberOfLines={2}
           >
-            Invest now
+            {phoneMoney ? 'Current Value' : 'Current Invest. Value'}
           </Text>
           <Text
             style={[

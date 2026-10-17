@@ -28,14 +28,13 @@ import {
 import ThemeAwarePicker from '../../components/lists/ThemeAwarePicker';
 import ThemeAwareDatePicker from '../../components/ThemeAwareDatePicker';
 import AlertModal from '../../components/AlertModal';
-import UpdateBalancesWizard, {
-  firstOfMonthYmd,
-} from '../../components/money/UpdateBalancesWizard';
+import UpdateBalancesWizard from '../../components/money/UpdateBalancesWizard';
 import YtdDashboard from '../../components/money/YtdDashboard';
 import IncomeDashboard, {
   invalidateIncomeBoardCache,
 } from '../../components/money/IncomeDashboard';
 import AccountsDashboard from '../../components/money/AccountsDashboard';
+import HistoryDashboard from '../../components/money/HistoryDashboard';
 import TargetDashboard from '../../components/money/TargetDashboard';
 import TooltipButton from '../../components/TooltipButton';
 import { formatMoneyDisplay, onMoneyChange, parseMoneyDisplay } from '../../utils/moneyInput';
@@ -45,7 +44,7 @@ import {
   canUseMoneyDemoPortfolio,
   withDemoIncome,
 } from '../../utils/moneyDemoPortfolio';
-type MoneyTab = 'income' | 'accounts' | 'ytd' | 'forecast';
+type MoneyTab = 'income' | 'accounts' | 'history' | 'ytd' | 'forecast';
 
 const STREAM_TYPES: { label: string; value: IncomeStreamType }[] = [
   { label: 'Employment', value: 'employment' },
@@ -134,6 +133,7 @@ export default function MoneyScreen() {
   const [ytdBoardRefreshKey, setYtdBoardRefreshKey] = useState(0);
   const [incomeBoardRefreshKey, setIncomeBoardRefreshKey] = useState(0);
   const [accountsBoardRefreshKey, setAccountsBoardRefreshKey] = useState(0);
+  const [historyBoardRefreshKey, setHistoryBoardRefreshKey] = useState(0);
   const [targetBoardRefreshKey, setTargetBoardRefreshKey] = useState(0);
 
   const loadDemoPortfolioPref = useCallback(async () => {
@@ -168,7 +168,8 @@ export default function MoneyScreen() {
       t === 'target' ||
       t === 'target-board' ||
       t === 'returns' ||
-      t === 'forecast'
+      t === 'forecast' ||
+      t === 'history'
     ) {
       if (t === 'returns') {
         setTab('ytd');
@@ -268,6 +269,7 @@ export default function MoneyScreen() {
           setYtdBoardRefreshKey((k) => k + 1);
           setIncomeBoardRefreshKey((k) => k + 1);
           setAccountsBoardRefreshKey((k) => k + 1);
+          setHistoryBoardRefreshKey((k) => k + 1);
           setTargetBoardRefreshKey((k) => k + 1);
         }
         void moneyService.getStreams(familyId).then((s) => {
@@ -331,6 +333,7 @@ export default function MoneyScreen() {
       setYtdBoardRefreshKey((k) => k + 1);
       setIncomeBoardRefreshKey((k) => k + 1);
       setAccountsBoardRefreshKey((k) => k + 1);
+      setHistoryBoardRefreshKey((k) => k + 1);
       setTargetBoardRefreshKey((k) => k + 1);
       await load({ soft: true, refreshBoards: false });
     } finally {
@@ -484,7 +487,7 @@ export default function MoneyScreen() {
     if (snap) {
       setSnapDate(snap.as_of_date);
       setSnapBalance(formatMoneyDisplay(Number(snap.balance)));
-      setSnapDateLocked(true);
+      setSnapDateLocked(false);
       setEditingSnapshotId(snap.id);
     } else {
       setSnapDate(toYmd(new Date()));
@@ -507,7 +510,10 @@ export default function MoneyScreen() {
     setSaving(true);
     try {
       if (editingSnapshotId != null) {
-        await moneyService.updateSnapshot(editingSnapshotId, { balance: bal });
+        await moneyService.updateSnapshot(editingSnapshotId, {
+          balance: bal,
+          as_of_date: snapDate,
+        });
       } else {
         await moneyService.upsertSnapshot({
           account: selectedAccountId,
@@ -603,6 +609,7 @@ export default function MoneyScreen() {
               { id: 'ytd' as const, label: 'YTD', icon: 'pie-chart' as const },
               { id: 'income' as const, label: 'Income', icon: 'usd' as const },
               { id: 'accounts' as const, label: 'Accounts', icon: 'university' as const },
+              { id: 'history' as const, label: 'History', icon: 'history' as const },
               { id: 'forecast' as const, label: 'Forecast', icon: 'line-chart' as const },
             ] as const
           ).map((t) => {
@@ -661,6 +668,13 @@ export default function MoneyScreen() {
           onDeleteAccount={setPendingDeleteAccount}
           onEditSnapshot={openSnapForm}
           onDeleteSnapshot={setPendingDeleteSnapshot}
+        />
+      ) : tab === 'history' ? (
+        <HistoryDashboard
+          key={selectedFamily?.id ?? 'none'}
+          refreshKey={historyBoardRefreshKey}
+          initialAccounts={accounts}
+          initialSnapshots={snapshots}
         />
       ) : tab === 'ytd' ? (
         <YtdDashboard
@@ -822,7 +836,7 @@ export default function MoneyScreen() {
       )}
 
       {formModal(
-        snapDateLocked ? 'Edit history balance' : 'Update balance',
+        editingSnapshotId != null ? 'Edit history balance' : 'Update balance',
         showSnapForm,
         () => {
           setShowSnapForm(false);
@@ -846,13 +860,7 @@ export default function MoneyScreen() {
               placeholderTextColor={colors.textSecondary}
               autoFocus
             />
-            {snapDateLocked ? (
-              <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                As of {formatShortDate(snapDate)} (history entry)
-              </Text>
-            ) : (
-              <ThemeAwareDatePicker value={snapDate} onChange={setSnapDate} label="As of" />
-            )}
+            <ThemeAwareDatePicker value={snapDate} onChange={setSnapDate} label="As of" />
           </>
         )
       )}
@@ -860,11 +868,9 @@ export default function MoneyScreen() {
       <UpdateBalancesWizard
         visible={showBalancesWizard}
         accounts={accounts}
-        defaultAsOf={firstOfMonthYmd()}
+        defaultAsOf={toYmd(new Date())}
         onClose={() => setShowBalancesWizard(false)}
-        onSaved={() => {
-          void load({ refreshBoards: true });
-        }}
+        onSaved={() => load({ refreshBoards: true })}
       />
 
       <AlertModal

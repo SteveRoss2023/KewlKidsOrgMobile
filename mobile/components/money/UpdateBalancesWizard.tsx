@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,17 +22,17 @@ type Phase = 'edit' | 'done';
 interface UpdateBalancesWizardProps {
   visible: boolean;
   accounts: MoneyAccount[];
-  /** YYYY-MM-DD default as-of (usually the 1st of the month). */
+  /** YYYY-MM-DD. The form opens on this date; callers should pass today. */
   defaultAsOf: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>;
 }
 
-function firstOfMonthYmd(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+function todayYmd(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export { firstOfMonthYmd };
+export { todayYmd };
 
 export default function UpdateBalancesWizard({
   visible,
@@ -43,11 +43,14 @@ export default function UpdateBalancesWizard({
 }: UpdateBalancesWizardProps) {
   const { colors } = useTheme();
   const [phase, setPhase] = useState<Phase>('edit');
-  const [asOf, setAsOf] = useState(defaultAsOf || firstOfMonthYmd());
+  const [asOf, setAsOf] = useState(defaultAsOf || todayYmd());
   const [balances, setBalances] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
+  const openedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const draftsRef = useRef<Record<number, string>>({});
 
   const activeAccounts = useMemo(
     () => sortAccountsByInstitution(accounts.filter((a) => a.is_active !== false)),
@@ -61,18 +64,23 @@ export default function UpdateBalancesWizard({
 
   useEffect(() => {
     if (!visible) {
+      openedRef.current = false;
+      dirtyRef.current = false;
       setPhase('edit');
       setError('');
       setSaving(false);
       setSavedCount(0);
       return;
     }
-    setAsOf(defaultAsOf || firstOfMonthYmd());
+    // Reloading accounts while this form is open must not replace what was typed.
+    if (openedRef.current || dirtyRef.current) return;
+    openedRef.current = true;
+    setAsOf(defaultAsOf || todayYmd());
     const next: Record<number, string> = {};
     for (const a of accounts.filter((x) => x.is_active !== false)) {
-      next[a.id] =
-        a.latest_balance != null ? formatMoneyDisplay(a.latest_balance) : '';
+      next[a.id] = formatMoneyDisplay(0);
     }
+    draftsRef.current = next;
     setBalances(next);
     setPhase('edit');
   }, [visible, defaultAsOf, accounts]);
@@ -93,8 +101,9 @@ export default function UpdateBalancesWizard({
   const saveAll = async () => {
     setError('');
     const rows: { account: number; balance: number }[] = [];
+    const drafts = draftsRef.current;
     for (const a of activeAccounts) {
-      const parsed = parseMoneyDisplay(balances[a.id] || '');
+      const parsed = parseMoneyDisplay(drafts[a.id] ?? balances[a.id] ?? '');
       if (parsed == null) {
         setError(`Enter a balance for ${a.name}`);
         return;
@@ -115,8 +124,8 @@ export default function UpdateBalancesWizard({
         });
       }
       setSavedCount(rows.length);
-      setPhase('done');
-      onSaved();
+      await onSaved();
+      onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to save balances');
     } finally {
@@ -132,7 +141,7 @@ export default function UpdateBalancesWizard({
             <View style={styles.flex}>
               <Text style={[styles.title, { color: colors.text }]}>Update balances</Text>
               <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                Monthly check-in · as of the 1st
+                Monthly check-in
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -160,8 +169,7 @@ export default function UpdateBalancesWizard({
             <>
               <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
                 <Text style={[styles.hint, { color: colors.textSecondary }]}>
-                  Enter each balance after month-end deposits have cleared. Defaults to the 1st of
-                  the month.
+                  Enter each new balance. The last amount is shown under the account name.
                 </Text>
                 <ThemeAwareDatePicker value={asOf} onChange={setAsOf} label="As of date" />
 
@@ -200,10 +208,14 @@ export default function UpdateBalancesWizard({
                                 backgroundColor: colors.surface,
                               },
                             ]}
-                            value={balances[a.id] || ''}
-                            onChangeText={(t) =>
-                              setBalances((prev) => ({ ...prev, [a.id]: onMoneyChange(t) }))
-                            }
+                            value={balances[a.id] ?? ''}
+                            onChangeText={(t) => {
+                              const formatted = onMoneyChange(t);
+                              dirtyRef.current = true;
+                              const next = { ...draftsRef.current, [a.id]: formatted };
+                              draftsRef.current = next;
+                              setBalances(next);
+                            }}
                             keyboardType="decimal-pad"
                             placeholder="$0.00"
                             placeholderTextColor={colors.textSecondary}

@@ -42,6 +42,7 @@ import MonthCashflowBars from './charts/MonthCashflowBars';
 
 const UNPAID_COLOR = '#f59e0b';
 const OVER_BUDGET_RED = '#ef4444';
+const PAID_SECTION_COLOR = '#14b8a6';
 
 function groupTint(hex: string) {
   return {
@@ -859,12 +860,6 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
 
       {showVariance ? (
         <View style={styles.varianceBlock}>
-          <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-            Over budget
-          </Text>
-          <Text style={[styles.varianceCaption, { color: colors.textSecondary }]}>
-            Explains month Under/Over: category gaps use paid + unpaid vs budget
-          </Text>
           {selectedMonth.overBudget.length > 0 ? (
             <View style={groupTint(OVER_BUDGET_RED)}>
               <Text style={[styles.varianceCaption, { color: OVER_BUDGET_RED, marginTop: 6 }]}>
@@ -1389,6 +1384,7 @@ function ExpenseDrillBreakdown({
   );
 
   const primaryTitle = mode === 'paid' ? 'Paid this month' : 'Left to pay';
+  const primaryColor = mode === 'paid' ? PAID_SECTION_COLOR : amountColor;
 
   const primaryLines = useMemo(() => {
     return [...primaryItems].sort(
@@ -1430,7 +1426,8 @@ function ExpenseDrillBreakdown({
       <CollapsibleBlock
         title={primaryTitle}
         amount={primaryTotal}
-        amountColor={amountColor}
+        amountColor={primaryColor}
+        accentColor={primaryColor}
         textColor={textColor}
         mutedColor={mutedColor}
         borderColor={borderColor}
@@ -1444,7 +1441,7 @@ function ExpenseDrillBreakdown({
             <CompactExpenseLine
               key={e.id}
               expense={e}
-              amountColor={over ? OVER_BUDGET_RED : textColor}
+              amountColor={over ? OVER_BUDGET_RED : primaryColor}
               textColor={textColor}
               mutedColor={mutedColor}
               borderColor={borderColor}

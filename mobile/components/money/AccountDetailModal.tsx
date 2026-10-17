@@ -152,7 +152,7 @@ export default function AccountDetailModal({
               Balance history ({history.length})
             </Text>
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Tap a row to edit that date’s amount. Used for YTD and year-end targets.
+              Tap a row to change the amount or the as-of date. Used for YTD and year-end targets.
             </Text>
             {history.length === 0 ? (
               <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>

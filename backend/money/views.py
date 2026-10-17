@@ -217,8 +217,14 @@ class AccountSnapshotViewSet(viewsets.ModelViewSet):
             # Update path so UniqueTogetherValidator excludes this instance.
             serializer = self.get_serializer(existing, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
-            serializer.save(family=account.family, account=account)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            instance = serializer.save(family=account.family, account=account)
+            # EncryptedCharField can keep the previous ciphertext unless the
+            # attribute is assigned again and the row is saved in full.
+            balance = serializer.validated_data.get('balance')
+            if balance is not None and str(instance.balance) != str(balance):
+                instance.balance = balance
+                instance.save()
+            return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
