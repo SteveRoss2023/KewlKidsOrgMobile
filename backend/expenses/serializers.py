@@ -356,13 +356,19 @@ class BudgetSerializer(serializers.ModelSerializer):
         return attrs
 
     def to_internal_value(self, data):
-        """Store standing amount as string for EncryptedCharField."""
+        """Store standing amount as string for EncryptedCharField.
+
+        Partial edits from the Budgets form omit is_active. The conditional
+        unique constraint validator still looks it up and 500s if it is missing.
+        """
         if hasattr(data, 'copy'):
             data = data.copy()
         else:
             data = dict(data)
         if 'amount' in data and data['amount'] is not None:
             data['amount'] = str(data['amount'])
+        if self.instance is not None and 'is_active' not in data:
+            data['is_active'] = self.instance.is_active
         return super().to_internal_value(data)
 
     def update(self, instance, validated_data):
