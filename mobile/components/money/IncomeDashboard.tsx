@@ -29,6 +29,7 @@ import {
 } from '../../utils/moneyDemoPortfolio';
 import DonutChart from '../expenses/charts/DonutChart';
 import MonthIncomeBars from './charts/MonthIncomeBars';
+import RetirementEstimatePanel from './RetirementEstimatePanel';
 import TooltipButton from '../TooltipButton';
 import { useIsWideLayout } from '../../hooks/useIsWideLayout';
 import {
@@ -214,6 +215,7 @@ export default function IncomeDashboard({
   const [boardTab, setBoardTab] = useState<'overview' | 'streams'>(
     () => initialCache?.boardTab ?? 'overview'
   );
+  const [showEstimate, setShowEstimate] = useState(false);
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(
     () => initialCache?.selectedMonthIndex ?? now.getMonth()
   );
@@ -1340,12 +1342,15 @@ export default function IncomeDashboard({
             { id: 'streams' as const, label: 'Streams', icon: 'list' as const },
           ] as const
         ).map((t) => {
-          const selected = boardTab === t.id;
+          const selected = !showEstimate && boardTab === t.id;
           return (
             <TouchableOpacity
               key={t.id}
               style={[styles.boardTab, selected && { borderBottomColor: colors.primary }]}
-              onPress={() => setBoardTab(t.id)}
+              onPress={() => {
+                setShowEstimate(false);
+                setBoardTab(t.id);
+              }}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
             >
@@ -1365,16 +1370,38 @@ export default function IncomeDashboard({
             </TouchableOpacity>
           );
         })}
+        <TouchableOpacity
+          style={[styles.boardTab, showEstimate && { borderBottomColor: colors.primary }]}
+          onPress={() => setShowEstimate(true)}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: showEstimate }}
+        >
+          <FontAwesome
+            name="calculator"
+            size={13}
+            color={showEstimate ? colors.primary : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.boardTabText,
+              { color: showEstimate ? colors.primary : colors.textSecondary },
+            ]}
+          >
+            Estimate
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {error ? (
         <Text style={[styles.errorBanner, { color: colors.error || '#c0392b' }]}>{error}</Text>
       ) : null}
 
-      {loading && dataFamilyId !== selectedFamily.id ? (
+      {loading && dataFamilyId !== selectedFamily.id && !showEstimate ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
+      ) : showEstimate ? (
+        <RetirementEstimatePanel />
       ) : boardTab === 'streams' ? (
         renderStreams()
       ) : (

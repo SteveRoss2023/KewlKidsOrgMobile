@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Account, AccountSnapshot, IncomeOccurrence, IncomeStream
+from .models import Account, AccountSnapshot, IncomeOccurrence, IncomeStream, RetirementEstimate
 
 
 @admin.register(IncomeStream)
@@ -18,6 +18,12 @@ class IncomeOccurrenceAdmin(admin.ModelAdmin):
 class AccountAdmin(admin.ModelAdmin):
     list_display = ('id', 'family', 'account_type', 'is_active')
     list_filter = ('account_type', 'is_active')
+
+
+@admin.register(RetirementEstimate)
+class RetirementEstimateAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'updated_at')
+    list_filter = ('user',)
 
 
 @admin.register(AccountSnapshot)

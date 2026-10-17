@@ -109,6 +109,29 @@ class Account(models.Model):
         return f"{self.name} ({self.family_id})"
 
 
+class RetirementEstimate(models.Model):
+    """Calculator scenario owned by one user. Not shared with the family."""
+
+    user = models.ForeignKey(
+        'api.User',
+        on_delete=models.CASCADE,
+        related_name='retirement_estimates',
+    )
+    name = EncryptedCharField(max_length=200)
+    inputs = EncryptedTextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at', '-id']
+        indexes = [
+            models.Index(fields=['user', 'updated_at']),
+        ]
+
+    def __str__(self):
+        return f"RetirementEstimate {self.pk} ({self.user_id})"
+
+
 class AccountSnapshot(models.Model):
     """Manual balance as of a date (monthly actuals)."""
 

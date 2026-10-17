@@ -8,6 +8,11 @@ router.register(r'income-streams', views.IncomeStreamViewSet, basename='incomest
 router.register(r'income-occurrences', views.IncomeOccurrenceViewSet, basename='incomeoccurrence')
 router.register(r'money-accounts', views.AccountViewSet, basename='moneyaccount')
 router.register(r'account-snapshots', views.AccountSnapshotViewSet, basename='accountsnapshot')
+router.register(
+    r'retirement-estimates',
+    views.RetirementEstimateViewSet,
+    basename='retirementestimate',
+)
 
 urlpatterns = [
     path('', include(router.urls)),

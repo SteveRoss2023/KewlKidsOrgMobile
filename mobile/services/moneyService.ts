@@ -7,10 +7,12 @@ import {
   IncomeOccurrence,
   IncomeStream,
   MoneyAccount,
+  RetirementEstimateRecord,
   UpdateIncomeOccurrenceData,
   UpdateIncomeStreamData,
   UpdateMoneyAccountData,
 } from '../types/money';
+import { RetirementInputs } from '../utils/retirementEstimate';
 import { forFamily } from '../utils/familyScope';
 
 async function fetchAllPages<T>(
@@ -203,6 +205,53 @@ class MoneyService {
   async deleteSnapshot(id: number): Promise<void> {
     try {
       await apiClient.delete(`/account-snapshots/${id}/`);
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async getRetirementEstimates(): Promise<RetirementEstimateRecord[]> {
+    try {
+      return await fetchAllPages<RetirementEstimateRecord>('/retirement-estimates/');
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async createRetirementEstimate(
+    name: string,
+    inputs: RetirementInputs
+  ): Promise<RetirementEstimateRecord> {
+    try {
+      const res = await apiClient.post<RetirementEstimateRecord>('/retirement-estimates/', {
+        name,
+        inputs,
+      });
+      return res.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async updateRetirementEstimate(
+    id: number,
+    name: string,
+    inputs: RetirementInputs
+  ): Promise<RetirementEstimateRecord> {
+    try {
+      const res = await apiClient.patch<RetirementEstimateRecord>(`/retirement-estimates/${id}/`, {
+        name,
+        inputs,
+      });
+      return res.data;
+    } catch (error) {
+      throw handleAPIError(error as any);
+    }
+  }
+
+  async deleteRetirementEstimate(id: number): Promise<void> {
+    try {
+      await apiClient.delete(`/retirement-estimates/${id}/`);
     } catch (error) {
       throw handleAPIError(error as any);
     }

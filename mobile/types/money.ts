@@ -1,3 +1,15 @@
+import type { RetirementInputs } from '../utils/retirementEstimate';
+
+export type { RetirementInputs };
+
+export interface RetirementEstimateRecord {
+  id: number;
+  name: string;
+  inputs: RetirementInputs;
+  created_at: string;
+  updated_at: string;
+}
+
 export type IncomeStreamType = 'employment' | 'pension' | 'other';
 export type IncomeFrequency =
   | 'biweekly'

@@ -1,7 +1,14 @@
 """Serializers for money app."""
+import json
 from decimal import Decimal, InvalidOperation
 from rest_framework import serializers
-from .models import IncomeStream, IncomeOccurrence, Account, AccountSnapshot
+from .models import (
+    Account,
+    AccountSnapshot,
+    IncomeOccurrence,
+    IncomeStream,
+    RetirementEstimate,
+)
 
 
 def _enc_money_str(value) -> str | None:
@@ -104,6 +111,44 @@ class AccountSerializer(serializers.ModelSerializer):
     def get_latest_as_of(self, obj):
         snap = self._latest_snap(obj)
         return snap.as_of_date.isoformat() if snap else None
+
+
+class RetirementEstimateSerializer(serializers.ModelSerializer):
+    inputs = serializers.JSONField()
+
+    class Meta:
+        model = RetirementEstimate
+        fields = ['id', 'name', 'inputs', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_name(self, value):
+        name = str(value or '').strip()
+        if not name:
+            raise serializers.ValidationError('Name is required')
+        return name
+
+    def validate_inputs(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Inputs must be an object')
+        return value
+
+    def create(self, validated_data):
+        validated_data['inputs'] = json.dumps(validated_data['inputs'])
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'inputs' in validated_data:
+            validated_data['inputs'] = json.dumps(validated_data['inputs'])
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        raw = instance.inputs
+        try:
+            data['inputs'] = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, json.JSONDecodeError):
+            data['inputs'] = {}
+        return data
 
 
 class AccountSnapshotSerializer(serializers.ModelSerializer):

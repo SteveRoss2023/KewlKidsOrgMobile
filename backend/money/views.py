@@ -10,13 +10,14 @@ from rest_framework.response import Response
 
 from families.models import Family, Member
 
-from .models import Account, AccountSnapshot, IncomeOccurrence, IncomeStream
+from .models import Account, AccountSnapshot, IncomeOccurrence, IncomeStream, RetirementEstimate
 from .occurrence_gen import iter_due_dates
 from .serializers import (
     AccountSerializer,
     AccountSnapshotSerializer,
     IncomeOccurrenceSerializer,
     IncomeStreamSerializer,
+    RetirementEstimateSerializer,
 )
 
 
@@ -70,6 +71,19 @@ def _sync_estimated_occurrences(stream: IncomeStream) -> int:
         occ.save()
         updated += 1
     return updated
+
+
+class RetirementEstimateViewSet(viewsets.ModelViewSet):
+    """CPP / OAS / LAPP calculator scenarios for the logged-in user only."""
+
+    serializer_class = RetirementEstimateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return RetirementEstimate.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 class IncomeStreamViewSet(viewsets.ModelViewSet):
