@@ -151,9 +151,13 @@ def iter_occurrence_dates(
 
 
 def iter_recurring_occurrence_dates(recurring, end_bound: date):
-    """Yield occurrence dates for a RecurringExpense template through end_bound."""
+    """Yield occurrence dates for a RecurringExpense template through end_bound.
+
+    A year-round monthly bill yields nothing in a month a repeating budget covers.
+    The repeating budget's own seasonal bill still yields those months.
+    """
     seasonal, s_start, s_end = seasonal_params(recurring)
-    yield from iter_occurrence_dates(
+    dates = iter_occurrence_dates(
         recurring.start_date,
         recurring.frequency,
         end_bound,
@@ -162,6 +166,28 @@ def iter_recurring_occurrence_dates(recurring, end_bound: date):
         season_start_month=s_start,
         season_end_month=s_end,
     )
+    if seasonal or getattr(recurring, 'frequency', None) != 'monthly':
+        yield from dates
+        return
+    from .budget_windows import budget_covers_month
+    from .models import Budget
+
+    covers = list(
+        Budget.objects.filter(
+            family_id=recurring.family_id,
+            category_id=recurring.category_id,
+            is_active=True,
+            is_seasonal=True,
+            period='monthly',
+        )
+    )
+    if not covers:
+        yield from dates
+        return
+    for occ in dates:
+        if any(budget_covers_month(budget, occ.year, occ.month) for budget in covers):
+            continue
+        yield occ
 
 
 def _parse_amount(raw) -> Decimal:

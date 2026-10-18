@@ -70,6 +70,12 @@ export default function BudgetCategoryRow({
         ? '#7c3aed'
         : '#0f766e';
   const duesRaiseLimit = Math.abs(standing - amount) >= 0.005;
+  const monthName = (m: number) =>
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1] || '';
+  const seasonLabel =
+    budget.is_seasonal && budget.season_start_month && budget.season_end_month
+      ? `${monthName(budget.season_start_month)}–${monthName(budget.season_end_month)} each year`
+      : null;
   const unpaidColor = '#f59e0b';
 
   return (
@@ -82,6 +88,11 @@ export default function BudgetCategoryRow({
           <View style={[styles.badge, { backgroundColor: `${originColor}18` }]}>
             <Text style={[styles.badgeText, { color: originColor }]}>{originLabel}</Text>
           </View>
+          {seasonLabel ? (
+            <View style={[styles.badge, { backgroundColor: `${colors.primary || '#2563eb'}18` }]}>
+              <Text style={[styles.badgeText, { color: colors.primary || '#2563eb' }]}>{seasonLabel}</Text>
+            </View>
+          ) : null}
           {statusLabel ? (
             <View style={[styles.badge, { backgroundColor: `${statusColor}18` }]}>
               <Text style={[styles.badgeText, { color: statusColor }]}>{statusLabel}</Text>
@@ -131,7 +142,7 @@ export default function BudgetCategoryRow({
           {' · Unpaid '}
           <Text style={{ color: unpaidColor }}>{displayMoney(unpaid)}</Text>
           {' / '}
-          <Text style={{ color: colors.text }}>{displayMoney(amount)}</Text>
+          <Text style={{ color: colors.primary }}>{displayMoney(amount)}</Text>
           {isExceeded
             ? ` · Over ${displayMoney(-remaining)}`
             : remaining > 0.005

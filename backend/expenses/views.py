@@ -467,34 +467,58 @@ class BudgetViewSet(viewsets.ModelViewSet):
             end = (as_of.replace(month=as_of.month + 1, day=1) - timedelta(days=1))
         return start, end
 
-    def list(self, request, *args, **kwargs):
-        """Hide empty placeholder budgets; batch spent/limit calcs for month or year."""
+    def _rows_for_month(self, budgets, as_of: date):
+        """One row per category for the month, with that month's limit."""
+        from .budget_windows import pick_budgets_for_month
         from .recurring_sync import build_budget_period_caches
 
-        queryset = self.filter_queryset(self.get_queryset())
+        picked = pick_budgets_for_month(budgets, as_of.year, as_of.month)
+        start, end = self._monthly_window_for_as_of(as_of)
+        context = dict(self.get_serializer_context())
+        context['as_of'] = as_of
+        context['period_window'] = (start, end)
+        family_ids = {b.family_id for b in picked}
+        if len(family_ids) == 1:
+            context.update(build_budget_period_caches(next(iter(family_ids)), start, end))
+        serializer = self.get_serializer(picked, many=True, context=context)
+        return [
+            row for row in serializer.data
+            if float(row.get('amount') or 0) > 0 or float(row.get('spent_amount') or 0) > 0
+        ]
+
+    def _rows_for_year(self, budgets, year: int):
+        """One row per category whose amount and spent are the sum of the months."""
+        combined: dict[int, dict] = {}
+        for month in range(1, 13):
+            for row in self._rows_for_month(budgets, date(year, month, 1)):
+                key = row['category']
+                if key not in combined:
+                    base = dict(row)
+                    base['amount'] = 0.0
+                    base['spent_amount'] = 0.0
+                    combined[key] = base
+                combined[key]['amount'] += float(row.get('amount') or 0)
+                combined[key]['spent_amount'] += float(row.get('spent_amount') or 0)
+        rows = []
+        for row in combined.values():
+            limit = float(row['amount'] or 0)
+            spent = float(row['spent_amount'] or 0)
+            row['remaining_amount'] = limit - spent
+            row['percentage_used'] = round((spent / limit) * 100, 2) if limit > 0 else 0.0
+            if limit > 0 or spent > 0:
+                rows.append(row)
+        return rows
+
+    def list(self, request, *args, **kwargs):
+        """Hide empty placeholder budgets; one row per category for the viewed month."""
+        queryset = list(self.filter_queryset(self.get_queryset()))
         context = self.get_serializer_context()
         as_of = context.get('as_of') or timezone.now().date()
         budget_period = (request.query_params.get('budget_period') or 'month').lower()
 
         if budget_period == 'year':
-            start = date(as_of.year, 1, 1)
-            end = date(as_of.year, 12, 31)
-        else:
-            start, end = self._monthly_window_for_as_of(as_of)
-        context['period_window'] = (start, end)
-
-        family_ids = set(queryset.values_list('family_id', flat=True))
-        if len(family_ids) == 1:
-            family_id = next(iter(family_ids))
-            caches = build_budget_period_caches(family_id, start, end)
-            context.update(caches)
-
-        serializer = self.get_serializer(queryset, many=True, context=context)
-        data = [
-            row for row in serializer.data
-            if float(row.get('amount') or 0) > 0 or float(row.get('spent_amount') or 0) > 0
-        ]
-        return Response(data)
+            return Response(self._rows_for_year(queryset, as_of.year))
+        return Response(self._rows_for_month(queryset, as_of))
 
     @action(detail=False, methods=['get'], url_path='year_board')
     def year_board(self, request):
@@ -503,8 +527,6 @@ class BudgetViewSet(viewsets.ModelViewSet):
         Returns { "YYYY-01": [...], ..., "YYYY-12": [...] } — identical filtering and
         effective amounts/spent as the existing monthly list calls (no behavior change).
         """
-        from .recurring_sync import build_budget_period_caches
-
         year_raw = request.query_params.get('year')
         try:
             year = int(year_raw)
@@ -517,30 +539,32 @@ class BudgetViewSet(viewsets.ModelViewSet):
             return Response({'error': 'year out of range'}, status=status.HTTP_400_BAD_REQUEST)
 
         queryset = list(self.filter_queryset(self.get_queryset()))
-        family_ids = {b.family_id for b in queryset}
-        family_id = next(iter(family_ids)) if len(family_ids) == 1 else None
-
         board: dict[str, list] = {}
         for month in range(1, 13):
-            as_of = date(year, month, 1)
-            start, end = self._monthly_window_for_as_of(as_of)
-            context = dict(self.get_serializer_context())
-            context['as_of'] = as_of
-            context['period_window'] = (start, end)
-            if family_id is not None:
-                context.update(build_budget_period_caches(family_id, start, end))
-            serializer = self.get_serializer(queryset, many=True, context=context)
-            board[f'{year}-{month:02d}'] = [
-                row for row in serializer.data
-                if float(row.get('amount') or 0) > 0 or float(row.get('spent_amount') or 0) > 0
-            ]
+            board[f'{year}-{month:02d}'] = self._rows_for_month(queryset, date(year, month, 1))
         return Response(board)
+
+    def _reconcile_budget_bills(self, family, category):
+        member = Member.objects.filter(family=family, user=self.request.user).first()
+        from .budget_bill_sync import reconcile_category
+        reconcile_category(family, category, member)
 
     def perform_create(self, serializer):
         """Create budget with family validation."""
         family_id = self.request.data.get('family')
         family = get_object_or_404(Family, id=family_id, members__user=self.request.user)
-        serializer.save(family=family)
+        budget = serializer.save(family=family)
+        self._reconcile_budget_bills(budget.family, budget.category)
+
+    def perform_update(self, serializer):
+        budget = serializer.save()
+        self._reconcile_budget_bills(budget.family, budget.category)
+
+    def perform_destroy(self, instance):
+        family = instance.family
+        category = instance.category
+        instance.delete()
+        self._reconcile_budget_bills(family, category)
 
     @staticmethod
     def _normalize_recurring_to_monthly(
@@ -756,13 +780,15 @@ class BudgetViewSet(viewsets.ModelViewSet):
                 category_id=cat_id,
                 period='monthly',
                 is_active=True,
-            ).first()
-            # Also revive inactive budget for this category if present
+                is_seasonal=False,
+            ).order_by('-start_date').first()
+            # Also revive an inactive open-ended budget. Repeating rows stay put.
             if not existing:
                 existing = Budget.objects.filter(
                     family=family,
                     category_id=cat_id,
                     period='monthly',
+                    is_seasonal=False,
                 ).order_by('-updated_at').first()
 
             item = {
@@ -1265,10 +1291,16 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
         # Generate expenses for each period from start_date to end_date
         # Works for all frequencies: daily, weekly, monthly, yearly
         while current_date <= end_date:
-            # Seasonal monthly: skip months outside the season window
+            # Seasonal monthly: skip months outside the season window.
+            # Year-round monthly: skip months a repeating budget has taken over.
             if is_seasonal and not month_in_season(current_date.month, season_start_m, season_end_m):
                 current_date = self._get_next_date(current_date, recurring.frequency)
                 continue
+            if not is_seasonal and recurring.frequency == 'monthly':
+                from .budget_bill_sync import year_round_month_is_replaced
+                if year_round_month_is_replaced(recurring, current_date):
+                    current_date = self._get_next_date(current_date, recurring.frequency)
+                    continue
 
             # Check if expense already exists for this recurring expense and date
             existing = Expense.objects.filter(
@@ -1587,6 +1619,9 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
 
         recurring = serializer.save()
 
+        from .budget_bill_sync import push_linked_bill_onto_budgets
+        push_linked_bill_onto_budgets(recurring)
+
         # Always recalculate next_due_date from start_date + frequency
         recurring.next_due_date = self._get_next_date(recurring.start_date, recurring.frequency)
         recurring.save(update_fields=['next_due_date', 'updated_at'])
@@ -1652,6 +1687,9 @@ class RecurringExpenseViewSet(viewsets.ModelViewSet):
             f"created={result.get('generated_count')} updated={result.get('updated_count')} "
             f"next_due={recurring.next_due_date} active={recurring.is_active}"
         )
+        if member is not None:
+            from .budget_bill_sync import reconcile_category
+            reconcile_category(recurring.family, recurring.category, member)
 
     def perform_destroy(self, instance):
         """Delete bill template, then sync (or deactivate) the category budget."""

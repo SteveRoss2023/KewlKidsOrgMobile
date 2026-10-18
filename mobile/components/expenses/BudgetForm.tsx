@@ -8,6 +8,7 @@ import {
   ScrollView,
   Modal,
   Alert,
+  Switch,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { Budget, ExpenseCategory, BudgetPeriod, CreateBudgetData, UpdateBudgetData } from '../../types/expenses';
@@ -40,6 +41,21 @@ const PERIODS: { label: string; value: BudgetPeriod }[] = [
   { label: 'Yearly', value: 'yearly' },
 ];
 
+const MONTHS = [
+  { label: 'January', value: '1' },
+  { label: 'February', value: '2' },
+  { label: 'March', value: '3' },
+  { label: 'April', value: '4' },
+  { label: 'May', value: '5' },
+  { label: 'June', value: '6' },
+  { label: 'July', value: '7' },
+  { label: 'August', value: '8' },
+  { label: 'September', value: '9' },
+  { label: 'October', value: '10' },
+  { label: 'November', value: '11' },
+  { label: 'December', value: '12' },
+];
+
 export default function BudgetForm({
   visible,
   budget,
@@ -57,6 +73,9 @@ export default function BudgetForm({
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
+  const [repeats, setRepeats] = useState(false);
+  const [seasonStartMonth, setSeasonStartMonth] = useState<number | null>(null);
+  const [seasonEndMonth, setSeasonEndMonth] = useState<number | null>(null);
   const [fetchedOccupied, setFetchedOccupied] = useState<number[]>([]);
   /** Only seed create fields once per open — do not wipe amount while typing. */
   const createInitializedRef = useRef(false);
@@ -74,6 +93,9 @@ export default function BudgetForm({
       setStartDate(new Date().toISOString().split('T')[0]);
       setEndDate('');
       setAlertThreshold('80');
+      setRepeats(false);
+      setSeasonStartMonth(null);
+      setSeasonEndMonth(null);
       setFetchedOccupied([]);
       return;
     }
@@ -91,6 +113,9 @@ export default function BudgetForm({
       setStartDate(budget.start_date);
       setEndDate(budget.end_date || '');
       setAlertThreshold(budget.alert_threshold.toString());
+      setRepeats(!!budget.is_seasonal);
+      setSeasonStartMonth(budget.season_start_month ?? null);
+      setSeasonEndMonth(budget.season_end_month ?? null);
       return;
     }
 
@@ -102,6 +127,9 @@ export default function BudgetForm({
     setStartDate(new Date().toISOString().split('T')[0]);
     setEndDate('');
     setAlertThreshold('80');
+    setRepeats(false);
+    setSeasonStartMonth(null);
+    setSeasonEndMonth(null);
 
     let cancelled = false;
     (async () => {
@@ -128,9 +156,6 @@ export default function BudgetForm({
     };
   }, [budget, familyId, visible]);
 
-  const blockedCategoryIds =
-    fetchedOccupied.length > 0 ? fetchedOccupied : occupiedCategoryIds;
-
   const standing =
     budget && budget.base_amount != null && !Number.isNaN(Number(budget.base_amount))
       ? Number(budget.base_amount)
@@ -147,9 +172,7 @@ export default function BudgetForm({
     thisMonth != null &&
     Math.abs(standing - thisMonth) >= 0.005;
 
-  const categoryOptions = budget
-    ? categories
-    : categories.filter((c) => !blockedCategoryIds.includes(c.id));
+  const categoryOptions = categories;
 
   const handleSubmit = () => {
     // Validate required fields
@@ -163,6 +186,10 @@ export default function BudgetForm({
     }
     if (!startDate) {
       Alert.alert('Validation Error', 'Please select a start date');
+      return;
+    }
+    if (repeats && (seasonStartMonth == null || seasonEndMonth == null)) {
+      Alert.alert('Validation Error', 'Choose the first and last month that repeat');
       return;
     }
 
@@ -185,6 +212,9 @@ export default function BudgetForm({
         period,
         start_date: startDate,
         end_date: endDate.trim() || null,
+        is_seasonal: repeats,
+        season_start_month: repeats ? seasonStartMonth : null,
+        season_end_month: repeats ? seasonEndMonth : null,
         alert_threshold: thresholdNum,
       });
     } else {
@@ -196,6 +226,9 @@ export default function BudgetForm({
         origin: 'manual',
         start_date: startDate,
         end_date: endDate.trim() || null,
+        is_seasonal: repeats,
+        season_start_month: repeats ? seasonStartMonth : null,
+        season_end_month: repeats ? seasonEndMonth : null,
         alert_threshold: thresholdNum,
       });
     }
@@ -228,11 +261,7 @@ export default function BudgetForm({
                       }))
                     : []
                 }
-                placeholder={
-                  !budget && categoryOptions.length === 0
-                    ? 'All categories already have a budget'
-                    : 'Select category'
-                }
+                placeholder="Select category"
               />
             </View>
 
@@ -271,7 +300,11 @@ export default function BudgetForm({
               <Text style={[styles.label, { color: colors.text }]}>Period *</Text>
               <ThemeAwarePicker
                 selectedValue={period}
-                onValueChange={(value) => setPeriod(value as BudgetPeriod)}
+                onValueChange={(value) => {
+                  const next = value as BudgetPeriod;
+                  setPeriod(next);
+                  if (next !== 'monthly') setRepeats(false);
+                }}
                 options={PERIODS.map((p) => ({
                   label: p.label,
                   value: p.value,
@@ -280,10 +313,53 @@ export default function BudgetForm({
             </View>
 
             <View style={styles.formGroup}>
+              <View style={styles.repeatRow}>
+                <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>
+                  Repeats every year
+                </Text>
+                <Switch
+                  value={repeats}
+                  onValueChange={(on) => {
+                    setRepeats(on);
+                    if (on) setPeriod('monthly');
+                  }}
+                  disabled={loading}
+                />
+              </View>
+              <Text style={[styles.helpText, { color: colors.textSecondary }]}>
+                After the start date, these months use this amount every year. Other months
+                keep the existing budget.
+              </Text>
+            </View>
+
+            {repeats ? (
+              <>
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: colors.text }]}>From month *</Text>
+                  <ThemeAwarePicker
+                    selectedValue={seasonStartMonth?.toString() || ''}
+                    onValueChange={(value) => setSeasonStartMonth(value ? parseInt(value, 10) : null)}
+                    options={MONTHS}
+                    placeholder="First month"
+                  />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: colors.text }]}>Through month *</Text>
+                  <ThemeAwarePicker
+                    selectedValue={seasonEndMonth?.toString() || ''}
+                    onValueChange={(value) => setSeasonEndMonth(value ? parseInt(value, 10) : null)}
+                    options={MONTHS}
+                    placeholder="Last month"
+                  />
+                </View>
+              </>
+            ) : null}
+
+            <View style={styles.formGroup}>
               <ThemeAwareDatePicker
                 value={startDate}
                 onChange={setStartDate}
-                label="Start Date *"
+                label={repeats ? 'Starts *' : 'Start Date *'}
                 placeholder="Select start date"
                 disabled={loading}
               />
@@ -377,6 +453,12 @@ const styles = StyleSheet.create({
   },
   formGroup: {
     marginBottom: 16,
+  },
+  repeatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   label: {
     fontSize: 14,

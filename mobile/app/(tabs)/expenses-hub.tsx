@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -301,7 +302,9 @@ export default function ExpensesHubScreen() {
       bumpExpenseBoards();
       await load({ soft: true });
     } catch (err: any) {
-      setError(err.message || 'Failed to save budget');
+      const message = err.message || 'Failed to save budget';
+      setError(message);
+      Alert.alert('Could not save budget', message);
     } finally {
       setSaving(false);
     }

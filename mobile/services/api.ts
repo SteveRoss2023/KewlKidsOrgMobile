@@ -339,6 +339,14 @@ export const handleAPIError = (error: AxiosError): APIError => {
         } else {
           message = displayNameError;
         }
+      } else if (Array.isArray((data as any)?.non_field_errors)) {
+        message = (data as any).non_field_errors.join(', ');
+      } else if (Array.isArray((data as any)?.category)) {
+        message = (data as any).category.join(', ');
+      } else if (Array.isArray((data as any)?.is_seasonal)) {
+        message = (data as any).is_seasonal.join(', ');
+      } else if (Array.isArray((data as any)?.season_start_month)) {
+        message = (data as any).season_start_month.join(', ');
       } else {
         // Try to stringify the whole error object
         message = JSON.stringify(data);

@@ -861,8 +861,9 @@ export default function BudgetDashboard({
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
             Projected = Paid + Unpaid. Under/Over is Budget − Projected once the month
             has started. Unused budget in a future month counts as Unpaid. Standing =
-            saved limit · This month may rise for bill dues · Manual is not overwritten
-            by bills. Income and nets live on Overview.
+            saved limit · This month may rise for bill dues · A repeating budget uses its
+            own amount in those months. Manual is not overwritten by bills. Income and
+            nets live on Overview.
           </Text>
         </View>
       ) : null}

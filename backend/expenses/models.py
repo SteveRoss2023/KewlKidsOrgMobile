@@ -73,8 +73,20 @@ class Budget(models.Model):
     )
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
+    # Repeating month range. After start_date, these months use this amount every year.
+    is_seasonal = models.BooleanField(default=False)
+    season_start_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    season_end_month = models.PositiveSmallIntegerField(null=True, blank=True)
     alert_threshold = models.IntegerField(default=80, help_text="Alert when this percentage of budget is used")
     is_active = models.BooleanField(default=True)
+    # Seasonal bill created for this repeating budget. Other bills in the category stay separate.
+    seasonal_bill = models.ForeignKey(
+        'RecurringExpense',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='repeating_budgets',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -84,13 +96,7 @@ class Budget(models.Model):
             models.Index(fields=['family', 'is_active']),
             models.Index(fields=['category', 'start_date']),
         ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=['family', 'category', 'period'],
-                condition=models.Q(is_active=True),
-                name='unique_active_budget_per_category_period',
-            ),
-        ]
+        constraints = []
 
     def __str__(self):
         return f"{self.category.name} - {self.get_period_display()} - ${self.amount}"

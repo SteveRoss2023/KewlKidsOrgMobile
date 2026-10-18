@@ -326,7 +326,13 @@ class BudgetSerializer(serializers.ModelSerializer):
     base_amount = serializers.SerializerMethodField()
 
     def validate(self, attrs):
-        """One active monthly budget per family+category; create defaults to manual."""
+        """Repeating rows may share a category when their months do not overlap.
+
+        An open-ended budget may sit under a repeating row. The repeating row
+        wins in its months. Two repeating rows, or two dated rows, may not
+        cover the same month.
+        """
+        from .budget_windows import budgets_overlap, prospective_budget
         from .models import Budget
 
         instance = self.instance
@@ -334,20 +340,55 @@ class BudgetSerializer(serializers.ModelSerializer):
         category = attrs.get('category') or (instance.category if instance else None)
         period = attrs.get('period') or (instance.period if instance else 'monthly')
         is_active = attrs.get('is_active', instance.is_active if instance else True)
+        is_seasonal = attrs.get('is_seasonal', instance.is_seasonal if instance else False)
+        season_start = attrs.get(
+            'season_start_month',
+            instance.season_start_month if instance else None,
+        )
+        season_end = attrs.get(
+            'season_end_month',
+            instance.season_end_month if instance else None,
+        )
+
+        if is_seasonal:
+            if period != 'monthly':
+                raise serializers.ValidationError(
+                    {'is_seasonal': 'Repeating budgets must be monthly.'}
+                )
+            if not season_start or not season_end:
+                raise serializers.ValidationError(
+                    {'season_start_month': 'Choose the first and last month of the repeating range.'}
+                )
+            if not (1 <= int(season_start) <= 12 and 1 <= int(season_end) <= 12):
+                raise serializers.ValidationError(
+                    {'season_start_month': 'Months must be between 1 and 12.'}
+                )
+        else:
+            attrs['season_start_month'] = None
+            attrs['season_end_month'] = None
 
         if family and category and is_active and period == 'monthly':
-            qs = Budget.objects.filter(
+            incoming = prospective_budget(
+                is_seasonal=bool(is_seasonal),
+                season_start_month=season_start,
+                season_end_month=season_end,
+                start_date=attrs.get('start_date', instance.start_date if instance else None),
+                end_date=attrs.get('end_date', instance.end_date if instance else None),
+                is_active=True,
+            )
+            others = Budget.objects.filter(
                 family=family,
                 category=category,
                 period='monthly',
                 is_active=True,
             )
             if instance:
-                qs = qs.exclude(pk=instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError(
-                    {'category': 'An active monthly budget already exists for this category.'}
-                )
+                others = others.exclude(pk=instance.pk)
+            for other in others:
+                if budgets_overlap(incoming, other):
+                    raise serializers.ValidationError(
+                        'Another budget for this category already covers those months.'
+                    )
 
         # New budgets from the Budgets UI are manual unless origin is set explicitly.
         if instance is None and 'origin' not in attrs:
@@ -424,6 +465,15 @@ class BudgetSerializer(serializers.ModelSerializer):
             end = obj.end_date
         if start > end:
             return None
+        if (
+            getattr(obj, 'is_seasonal', False)
+            and obj.period == 'monthly'
+            and start.year == end.year
+            and start.month == end.month
+        ):
+            from .budget_windows import budget_covers_month
+            if not budget_covers_month(obj, start.year, start.month):
+                return None
         return start, end
 
     @staticmethod
@@ -459,6 +509,24 @@ class BudgetSerializer(serializers.ModelSerializer):
         base = self._base_amount(obj)
         months = self._months_spanned(start, end)
         standing = base * Decimal(months)
+
+        # A repeating row's own amount is not replaced by the year-round bill.
+        # Other bills still due that month (Rogers, propane, a yearly premium) are added.
+        if getattr(obj, 'is_seasonal', False) and obj.period == 'monthly':
+            from .budget_bill_sync import other_bills_due_amount
+            from .budget_windows import budget_covers_month
+            if start.year == end.year and start.month == end.month:
+                return base + other_bills_due_amount(obj, start.year, start.month)
+            total = Decimal('0')
+            year, month = start.year, start.month
+            while (year, month) <= (end.year, end.month):
+                if budget_covers_month(obj, year, month):
+                    total += base + other_bills_due_amount(obj, year, month)
+                month += 1
+                if month == 13:
+                    month = 1
+                    year += 1
+            return total
 
         if obj.period != 'monthly':
             return base
@@ -535,7 +603,7 @@ class BudgetSerializer(serializers.ModelSerializer):
         model = Budget
         fields = [
             'id', 'family', 'category', 'category_name', 'amount', 'base_amount', 'period', 'origin',
-            'start_date', 'end_date',
+            'start_date', 'end_date', 'is_seasonal', 'season_start_month', 'season_end_month',
             'alert_threshold', 'is_active', 'spent_amount', 'remaining_amount', 'percentage_used',
             'created_at', 'updated_at'
         ]

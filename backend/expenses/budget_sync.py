@@ -64,25 +64,19 @@ def bills_desired_end(bills) -> Optional[date]:
 
 
 def _active_monthly_budget(family, category_id: int):
+    """The open-ended from-bills row. Repeating budget rows are left alone."""
     from .models import Budget
 
-    existing = Budget.objects.filter(
+    base = Budget.objects.filter(
         family=family,
         category_id=category_id,
         period='monthly',
-        is_active=True,
-    ).first()
+        is_seasonal=False,
+    )
+    existing = base.filter(is_active=True).order_by('-start_date').first()
     if existing:
         return existing
-    return (
-        Budget.objects.filter(
-            family=family,
-            category_id=category_id,
-            period='monthly',
-        )
-        .order_by('-updated_at')
-        .first()
-    )
+    return base.order_by('-updated_at').first()
 
 
 def sync_category_budget_from_bills(family, category_id: int) -> Optional[dict]:

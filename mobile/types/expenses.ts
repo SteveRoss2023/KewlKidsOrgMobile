@@ -125,6 +125,10 @@ export interface Budget {
   origin?: BudgetOrigin;
   start_date: string;
   end_date: string | null;
+  /** Repeats season_start_month–season_end_month every year after start_date. */
+  is_seasonal?: boolean;
+  season_start_month?: number | null;
+  season_end_month?: number | null;
   alert_threshold: number;
   is_active: boolean;
   spent_amount: number;
@@ -251,6 +255,9 @@ export interface CreateBudgetData {
   origin?: BudgetOrigin;
   start_date: string;
   end_date?: string | null;
+  is_seasonal?: boolean;
+  season_start_month?: number | null;
+  season_end_month?: number | null;
   alert_threshold?: number;
 }
 
@@ -261,6 +268,9 @@ export interface UpdateBudgetData {
   origin?: BudgetOrigin;
   start_date?: string;
   end_date?: string | null;
+  is_seasonal?: boolean;
+  season_start_month?: number | null;
+  season_end_month?: number | null;
   alert_threshold?: number;
   is_active?: boolean;
 }
