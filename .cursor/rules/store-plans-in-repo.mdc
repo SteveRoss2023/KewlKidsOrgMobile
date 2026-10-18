@@ -1,0 +1,19 @@
+---
+description: Store this project's Cursor plans in the repo, not the user plans folder
+alwaysApply: true
+---
+
+# Plans live in this repo
+
+Plans for this project belong in `.cursor/plans/` at the repo root (`c:\dev\kewlkids\.cursor\plans`).
+
+When you create or update a plan:
+
+- Write the plan file in `.cursor/plans/`. Use a descriptive filename ending in `.plan.md`.
+- If a plan is written to the user plans folder (`%USERPROFILE%\.cursor\plans`), copy it into `.cursor/plans/` in this repo in the same turn. Keep the repo file as the source of truth.
+- Do not leave a plan for this project only in the user plans folder.
+- Do not copy plans that belong to other projects (Booty Cup, Ryder Cup, golf, Coyote Creek, CCP3, app-admin, Tee-onBot) into this repo.
+
+```text
+.cursor/plans/seasonal_bills_match.plan.md
+```
