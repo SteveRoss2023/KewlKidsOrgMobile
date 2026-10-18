@@ -19,6 +19,19 @@ export function monthKey(year: number, monthIndex: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
 }
 
+/** True when the calendar month has not started yet. Current and past months are false. */
+export function isFutureMonth(year: number, monthIndex: number, now = new Date()): boolean {
+  const todayYear = now.getFullYear();
+  if (year !== todayYear) return year > todayYear;
+  return monthIndex > now.getMonth();
+}
+
+/** Budget left after paid and unpaid expenses. Zero when the category is already at or over the limit. */
+export function budgetHeadroom(limit: number, paid: number, unpaid: number): number {
+  const gap = limit - paid - unpaid;
+  return gap > 0.005 ? gap : 0;
+}
+
 export function monthRange(year: number, monthIndex: number): { start: string; end: string } {
   const key = monthKey(year, monthIndex);
   const start = `${key}-01`;
@@ -53,10 +66,12 @@ export type BudgetMonthPoint = {
   spentFromExpenses: boolean;
   /** All paid expenses in the month (matches Overview paid). */
   paidTotal: number;
-  /** All unpaid expenses in the month (matches Overview unpaid). */
+  /** Unpaid expenses, plus unused budget when the month has not started. */
   unpaidTotal: number;
   paidCount: number;
   unpaidCount: number;
+  /** Categories whose unused limit was folded into unpaidTotal (future months only). */
+  plannedCategoryCount: number;
   /** paidTotal + unpaidTotal — matches Overview Actual. */
   actualTotal: number;
 };
@@ -112,10 +127,25 @@ function monthExpenseTotals(expenses: Expense[] | undefined): {
   };
 }
 
+function categoryPaidUnpaidMaps(expenses: Expense[]): {
+  paid: Map<number, number>;
+  unpaid: Map<number, number>;
+} {
+  const paid = new Map<number, number>();
+  const unpaid = new Map<number, number>();
+  for (const e of expenses) {
+    const amount = toAmt(e.amount);
+    const bucket = isExpensePaid(e) ? paid : unpaid;
+    bucket.set(e.category, (bucket.get(e.category) || 0) + amount);
+  }
+  return { paid, unpaid };
+}
+
 export function buildMonthlyBudgetSeries(
   year: number,
   budgetsByMonth: Record<string, Budget[]>,
-  expensesByMonth: Record<string, Expense[]>
+  expensesByMonth: Record<string, Expense[]>,
+  now = new Date()
 ): BudgetMonthPoint[] {
   return Array.from({ length: 12 }, (_, monthIndex) => {
     const key = monthKey(year, monthIndex);
@@ -124,6 +154,25 @@ export function buildMonthlyBudgetSeries(
     const budgeted = budgets.reduce((s, b) => s + toAmt(b.amount), 0);
     const { spent, fromExpenses } = spentForBudgets(budgets, monthExpenses);
     const totals = monthExpenseTotals(monthExpenses);
+    let envelopeUnpaid = 0;
+    let plannedCategoryCount = 0;
+    // Only after that month's expenses are loaded, so a missing fetch does not
+    // turn the whole limit into unpaid.
+    if (isFutureMonth(year, monthIndex, now) && monthExpenses) {
+      const byCat = categoryPaidUnpaidMaps(monthExpenses);
+      for (const b of budgets) {
+        const gap = budgetHeadroom(
+          toAmt(b.amount),
+          byCat.paid.get(b.category) || 0,
+          byCat.unpaid.get(b.category) || 0
+        );
+        if (gap > 0) {
+          envelopeUnpaid += gap;
+          plannedCategoryCount += 1;
+        }
+      }
+    }
+    const unpaidTotal = totals.unpaidTotal + envelopeUnpaid;
     const remaining = budgeted - spent;
     const percentageUsed = budgeted > 0 ? (spent / budgeted) * 100 : spent > 0 ? 100 : 0;
     return {
@@ -138,7 +187,12 @@ export function buildMonthlyBudgetSeries(
       percentageUsed,
       categoryCount: budgets.length,
       spentFromExpenses: fromExpenses,
-      ...totals,
+      paidTotal: totals.paidTotal,
+      unpaidTotal,
+      paidCount: totals.paidCount,
+      unpaidCount: totals.unpaidCount,
+      plannedCategoryCount,
+      actualTotal: totals.paidTotal + unpaidTotal,
     };
   });
 }

@@ -27,10 +27,12 @@ import BudgetCategoryRow from './BudgetCategoryRow';
 import AlertModal from '../AlertModal';
 import MonthBudgetBars from './charts/MonthBudgetBars';
 import {
+  budgetHeadroom,
   buildMonthlyBudgetSeries,
   defaultBudgetBoardMonthIndex,
   expensesForCategory,
   isExpensePaid,
+  isFutureMonth,
   monthKey,
 } from '../../utils/budgetSeries';
 import {
@@ -359,6 +361,7 @@ export default function BudgetDashboard({
     let unpaid = 0;
     let paidCount = 0;
     let unpaidCount = 0;
+    let plannedCategoryCount = 0;
     let monthsWithBudgets = 0;
     for (const m of months) {
       if (m.categoryCount > 0) monthsWithBudgets += 1;
@@ -367,6 +370,7 @@ export default function BudgetDashboard({
       unpaid += m.unpaidTotal;
       paidCount += m.paidCount;
       unpaidCount += m.unpaidCount;
+      plannedCategoryCount += m.plannedCategoryCount;
     }
     const projected = paid + unpaid;
     const variance = budgeted - projected;
@@ -379,6 +383,7 @@ export default function BudgetDashboard({
       monthsWithBudgets,
       paidCount,
       unpaidCount,
+      plannedCategoryCount,
     };
   }, [months]);
 
@@ -589,7 +594,9 @@ export default function BudgetDashboard({
             {displayMoney(yearSummary.unpaid)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            {yearSummary.unpaidCount} items
+            {yearSummary.plannedCategoryCount > 0
+              ? `${yearSummary.unpaidCount} entered · ${yearSummary.plannedCategoryCount} not started`
+              : `${yearSummary.unpaidCount} items`}
           </Text>
         </View>
       </View>
@@ -781,7 +788,11 @@ export default function BudgetDashboard({
             {expensesReady ? displayMoney(monthUnpaid) : '…'}
           </Text>
           <Text style={[styles.kpiMeta, { color: colors.textSecondary }]}>
-            {expensesReady ? `${selectedMonth.unpaidCount} items` : 'Loading…'}
+            {expensesReady
+              ? selectedMonth.plannedCategoryCount > 0
+                ? `${selectedMonth.unpaidCount} entered · ${selectedMonth.plannedCategoryCount} not started`
+                : `${selectedMonth.unpaidCount} items`
+              : 'Loading…'}
           </Text>
         </View>
       </View>
@@ -799,12 +810,18 @@ export default function BudgetDashboard({
             const split = expensesReady
               ? categoryPaidUnpaid(selectedExpenses, budget.category)
               : undefined;
+            const future = isFutureMonth(year, selectedMonth.monthIndex, now);
+            const unpaidAmount =
+              split && future
+                ? split.unpaid +
+                  budgetHeadroom(Number(budget.amount) || 0, split.paid, split.unpaid)
+                : split?.unpaid;
             return (
               <BudgetCategoryRow
                 key={budget.id}
                 budget={budget}
                 paidAmount={split?.paid}
-                unpaidAmount={split?.unpaid}
+                unpaidAmount={unpaidAmount}
                 onEditBudget={onBudgetPress ? () => onBudgetPress(budget) : undefined}
                 onDeleteBudget={
                   onBudgetDelete ? () => setBudgetPendingDelete(budget) : undefined
@@ -842,7 +859,8 @@ export default function BudgetDashboard({
           ]}
         >
           <Text style={[styles.helpText, { color: colors.textSecondary }]}>
-            Projected = Paid + Unpaid. Under/Over is Budget − Projected. Standing =
+            Projected = Paid + Unpaid. Under/Over is Budget − Projected once the month
+            has started. Unused budget in a future month counts as Unpaid. Standing =
             saved limit · This month may rise for bill dues · Manual is not overwritten
             by bills. Income and nets live on Overview.
           </Text>

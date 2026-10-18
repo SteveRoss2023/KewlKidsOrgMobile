@@ -632,7 +632,9 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
             {displayMoney(yearSummary.unpaidTotal)}
           </Text>
           <Text style={[styles.heroMeta, { color: colors.textSecondary }]}>
-            {yearSummary.unpaidCount} items
+            {yearSummary.plannedUnpaid.length > 0
+              ? `${yearSummary.unpaidCount} entered · includes budgets not started`
+              : `${yearSummary.unpaidCount} items`}
           </Text>
         </View>
       </View>
@@ -771,7 +773,11 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
           value={displayMoney(selectedMonth.unpaidTotal)}
           color={UNPAID_COLOR}
           muted={colors.textSecondary}
-          meta={`${selectedMonth.unpaidCount} items`}
+          meta={
+            selectedMonth.plannedUnpaid.length > 0
+              ? `${selectedMonth.unpaidCount} entered · ${selectedMonth.plannedUnpaid.length} not started`
+              : `${selectedMonth.unpaidCount} items`
+          }
           onPress={() => toggleDrill('unpaid')}
           selected={drillFilter === 'unpaid'}
           selectedBorder={colors.primary}
@@ -1432,7 +1438,9 @@ function ExpenseDrillBreakdown({
         mutedColor={mutedColor}
         borderColor={borderColor}
         formatAmount={formatAmount}
-        hasContent={primaryLines.length > 0}
+        hasContent={
+          primaryLines.length > 0 || (mode === 'unpaid' && month.plannedUnpaid.length > 0)
+        }
         emptyText={mode === 'paid' ? 'No paid expenses this month' : 'No unpaid expenses this month'}
       >
         {primaryLines.map((e) => {
@@ -1449,6 +1457,21 @@ function ExpenseDrillBreakdown({
             />
           );
         })}
+        {mode === 'unpaid'
+          ? month.plannedUnpaid.map((row) => (
+              <CompactCategoryLine
+                key={`planned-${row.key}`}
+                title={row.label}
+                meta="Budget not started"
+                amount={row.amount}
+                amountColor={primaryColor}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                borderColor={borderColor}
+                formatAmount={formatAmount}
+              />
+            ))
+          : null}
       </CollapsibleBlock>
 
       <CollapsibleBlock
