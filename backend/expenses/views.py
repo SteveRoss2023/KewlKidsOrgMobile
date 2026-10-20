@@ -24,6 +24,27 @@ from decimal import Decimal
 import os
 
 
+def _bound_view(view_cls, user, path, params, action_name, source_request=None):
+    """Run an existing viewset method with the same query params the tabs send."""
+    from django.test import RequestFactory
+    from rest_framework.request import Request
+
+    raw = RequestFactory().get(path, params)
+    if source_request is not None:
+        source_meta = source_request._request.META
+        raw.META['HTTP_HOST'] = source_meta.get('HTTP_HOST', raw.META.get('HTTP_HOST'))
+        raw.META['wsgi.url_scheme'] = source_meta.get('wsgi.url_scheme', raw.META.get('wsgi.url_scheme'))
+    request = Request(raw)
+    request.user = user
+    view = view_cls()
+    view.request = request
+    view.action = action_name
+    view.format_kwarg = None
+    view.kwargs = {}
+    view.args = ()
+    return view, request
+
+
 class ExpenseCategoryViewSet(viewsets.ModelViewSet):
     """ExpenseCategory viewset."""
     serializer_class = ExpenseCategorySerializer
@@ -187,6 +208,88 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+    @action(detail=False, methods=['get'], url_path='overview_year')
+    def overview_year(self, request):
+        """Streams, occurrences, year expenses, and the budget board in one response.
+
+        Each key is the same payload the tabs already load separately.
+        """
+        from money.serializers import IncomeOccurrenceSerializer, IncomeStreamSerializer
+        from money.views import IncomeOccurrenceViewSet, IncomeStreamViewSet
+
+        family_raw = request.query_params.get('family')
+        year_raw = request.query_params.get('year')
+        try:
+            family_id = int(family_raw)
+            year = int(year_raw)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'family and year are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if year < 1970 or year > 2100:
+            return Response({'error': 'year out of range'}, status=status.HTTP_400_BAD_REQUEST)
+
+        start = f'{year}-01-01'
+        end = f'{year}-12-31'
+        user = request.user
+
+        expense_view, _expense_request = _bound_view(
+            ExpenseViewSet,
+            user,
+            '/api/expenses/',
+            {'family': family_id, 'start_date': start, 'end_date': end},
+            'list',
+            request,
+        )
+        expenses = expense_view.get_serializer(
+            list(expense_view.filter_queryset(expense_view.get_queryset())),
+            many=True,
+        ).data
+
+        budget_view, budget_request = _bound_view(
+            BudgetViewSet,
+            user,
+            '/api/budgets/year_board/',
+            {'family': family_id, 'year': year, 'is_active': 'true'},
+            'year_board',
+            request,
+        )
+        budgets = budget_view.year_board(budget_request).data
+
+        stream_view, _stream_request = _bound_view(
+            IncomeStreamViewSet,
+            user,
+            '/api/income-streams/',
+            {'family': family_id},
+            'list',
+            request,
+        )
+        streams = IncomeStreamSerializer(
+            list(stream_view.filter_queryset(stream_view.get_queryset())),
+            many=True,
+        ).data
+
+        occurrence_view, _occurrence_request = _bound_view(
+            IncomeOccurrenceViewSet,
+            user,
+            '/api/income-occurrences/',
+            {'family': family_id, 'start_date': start, 'end_date': end},
+            'list',
+            request,
+        )
+        occurrences = IncomeOccurrenceSerializer(
+            list(occurrence_view.filter_queryset(occurrence_view.get_queryset())),
+            many=True,
+        ).data
+
+        return Response({
+            'streams': streams,
+            'occurrences': occurrences,
+            'expenses': expenses,
+            'budgets': budgets,
+        })
 
     def perform_create(self, serializer):
         """Create expense with creator as created_by."""

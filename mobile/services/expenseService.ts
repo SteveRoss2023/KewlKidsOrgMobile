@@ -27,7 +27,18 @@ import {
   CreateBudgetsFromRecurringResult,
   SyncPlanResult,
 } from '../types/expenses';
+import { IncomeOccurrence, IncomeStream } from '../types/money';
 import { forFamily } from '../utils/familyScope';
+
+export interface OverviewYear {
+  streams: IncomeStream[];
+  occurrences: IncomeOccurrence[];
+  expenses: Expense[];
+  budgets: Record<string, Budget[]>;
+}
+
+/** Overlapping cold loads (focus plus refresh) share one request. */
+const overviewYearInflight = new Map<string, Promise<OverviewYear>>();
 
 /** Follow DRF `next` links until all pages are loaded. */
 async function fetchAllPages<T>(
@@ -331,6 +342,37 @@ class ExpenseService {
       console.error('Error fetching budgets year board:', error);
       throw handleAPIError(error as any);
     }
+  }
+
+  /**
+   * Streams, occurrences, year expenses, and the budget board in one response.
+   * Same payloads as the separate list calls.
+   */
+  async getOverviewYear(familyId: number, year: number): Promise<OverviewYear> {
+    const key = `${familyId}:${year}`;
+    const existing = overviewYearInflight.get(key);
+    if (existing) return existing;
+    const request = (async () => {
+      try {
+        const response = await apiClient.get<OverviewYear>('/expenses/overview_year/', {
+          params: { family: familyId, year },
+        });
+        const data = response.data;
+        return {
+          streams: forFamily(data?.streams, familyId),
+          occurrences: forFamily(data?.occurrences, familyId),
+          expenses: forFamily(data?.expenses, familyId),
+          budgets: data?.budgets || {},
+        };
+      } catch (error) {
+        console.error('Error fetching overview year:', error);
+        throw handleAPIError(error as any);
+      } finally {
+        overviewYearInflight.delete(key);
+      }
+    })();
+    overviewYearInflight.set(key, request);
+    return request;
   }
 
   /**

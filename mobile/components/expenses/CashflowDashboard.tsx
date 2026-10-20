@@ -287,20 +287,12 @@ export default function CashflowDashboard({ refreshKey = 0 }: CashflowDashboardP
         const demoEnabled = await readDemoPortfolioPref();
         const start_date = `${year}-01-01`;
         const end_date = `${year}-12-31`;
-        const existingStreams = streamsRef.current;
-        const reuseStreams =
-          soft &&
-          existingStreams.length > 0 &&
-          existingStreams.every((s) => s.family === familyId);
 
-        const [streamList, occs, expList, board] = await Promise.all([
-          reuseStreams
-            ? Promise.resolve(existingStreams)
-            : moneyService.getStreams(familyId),
-          moneyService.getOccurrences(familyId, { start_date, end_date }),
-          expenseService.getExpenses(familyId, { start_date, end_date }),
-          expenseService.getBudgetsYearBoard(familyId, year, true),
-        ]);
+        const pack = await expenseService.getOverviewYear(familyId, year);
+        const streamList = pack.streams;
+        const occs = pack.occurrences;
+        const expList = pack.expenses;
+        const board = pack.budgets;
         if (
           generation !== fetchGenerationRef.current ||
           selectedFamilyIdRef.current !== familyId

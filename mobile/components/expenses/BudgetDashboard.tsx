@@ -264,13 +264,9 @@ export default function BudgetDashboard({
       setError('');
       try {
         const monthIdx = cached?.selectedMonthIndex ?? selectedMonthIndexRef.current;
-        const [board, yearExpenses] = await Promise.all([
-          expenseService.getBudgetsYearBoard(familyId, y, true),
-          expenseService.getExpenses(familyId, {
-            start_date: `${y}-01-01`,
-            end_date: `${y}-12-31`,
-          }),
-        ]);
+        const pack = await expenseService.getOverviewYear(familyId, y);
+        const board = pack.budgets;
+        const yearExpenses = pack.expenses;
         if (
           generation !== fetchGenerationRef.current ||
           selectedFamilyIdRef.current !== familyId

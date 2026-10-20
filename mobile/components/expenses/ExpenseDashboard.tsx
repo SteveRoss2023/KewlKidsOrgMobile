@@ -278,7 +278,7 @@ export default function ExpenseDashboard({
       const cacheKey = expenseBoardCacheKey(familyId, periodMode, viewDate);
       let cached = expenseBoardCache.get(cacheKey);
 
-      // Preview bill expense reconcile for the viewed year (confirm before apply).
+      // Preview bill expense reconcile in the background so it does not hold the spinner.
       if (periodMode !== 'all') {
         const y = viewDate.getFullYear();
         const ensureKey = `${familyId}:${y}`;
@@ -286,17 +286,20 @@ export default function ExpenseDashboard({
           !ensuredYearsRef.current.has(ensureKey) &&
           !dismissedEnsureRef.current.has(ensureKey)
         ) {
-          try {
-            const preview = await previewBillExpensesForYear(familyId, y);
-            if (generation !== fetchGenerationRef.current) return;
-            if (ensureYearHasChanges(preview)) {
-              setEnsurePreview(preview);
-            } else {
-              ensuredYearsRef.current.add(ensureKey);
-            }
-          } catch {
-            ensuredYearsRef.current.add(ensureKey);
-          }
+          void previewBillExpensesForYear(familyId, y)
+            .then((preview) => {
+              if (generation !== fetchGenerationRef.current) return;
+              if (ensureYearHasChanges(preview)) {
+                setEnsurePreview(preview);
+              } else {
+                ensuredYearsRef.current.add(ensureKey);
+              }
+            })
+            .catch(() => {
+              if (generation === fetchGenerationRef.current) {
+                ensuredYearsRef.current.add(ensureKey);
+              }
+            });
         }
       }
 
