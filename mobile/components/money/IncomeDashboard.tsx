@@ -338,8 +338,27 @@ export default function IncomeDashboard({
         }
         setDataFamilyId(familyId);
         setLoading(false);
-        // Tab return with warm cache: skip network (mutations clear via invalidate).
-        if (soft) return;
+        // Tab return with warm cache: skip network (mutations clear via invalidate),
+        // but re-read the demo flag so a Profile toggle shows on the next open.
+        if (soft) {
+          void readDemoPortfolioPref().then((demoEnabled) => {
+            if (
+              generation !== fetchGenerationRef.current ||
+              selectedFamilyIdRef.current !== familyId
+            ) {
+              return;
+            }
+            setDemoPortfolio(demoEnabled);
+            const prev = incomeBoardCache.get(familyId);
+            if (prev && prev.demoPortfolio !== demoEnabled) {
+              incomeBoardCache.set(familyId, {
+                ...prev,
+                demoPortfolio: demoEnabled,
+              });
+            }
+          });
+          return;
+        }
       } else if (!soft) {
         setLoading(true);
       }
