@@ -71,6 +71,20 @@ export default function HomeScreen() {
       color: '#10b981',
     },
     {
+      id: 'finance',
+      title: 'Expense Tracker',
+      description: 'Tracks daily/weekly/monthly expenses',
+      icon: '💰',
+      color: '#22c55e',
+    },
+    {
+      id: 'money',
+      title: 'Money',
+      description: 'Income, accounts, and growth forecasts',
+      icon: '📈',
+      color: '#0d9488',
+    },
+    {
       id: 'activity',
       title: 'Activity',
       description: 'View today\'s activities and events',
@@ -97,20 +111,6 @@ export default function HomeScreen() {
       description: 'Share and manage family documents',
       icon: '📄',
       color: '#06b6d4',
-    },
-    {
-      id: 'finance',
-      title: 'Expense Tracker',
-      description: 'Tracks daily/weekly/monthly expenses',
-      icon: '💰',
-      color: '#22c55e',
-    },
-    {
-      id: 'money',
-      title: 'Money',
-      description: 'Income, accounts, and growth forecasts',
-      icon: '📈',
-      color: '#0d9488',
     },
     {
       id: 'map',
