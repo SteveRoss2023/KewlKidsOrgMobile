@@ -162,7 +162,7 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
   const handleAddToList = async (recipeId: number, listId: number, recipeTitle?: string) => {
     try {
       const response = await MealsService.addRecipeToList(recipeId, listId);
-      
+
       let message = response.message || 'Ingredients added to shopping list!';
       if (recipeTitle) {
         message = `${message}${recipeTitle ? ` from "${recipeTitle}"` : ''}`;
@@ -182,6 +182,8 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         details.push({ label: 'Need categorization', items: response.uncategorized_item_names });
       }
 
+      // Close recipe detail Modal first — AlertModal behind it is not visible on web.
+      setSelectedRecipe(null);
       setNotification({
         isOpen: true,
         title,
@@ -190,6 +192,7 @@ export default function RecipesTab({ recipes, loading, selectedFamily, onRefresh
         details: details.length > 0 ? details : undefined,
       });
     } catch (err: any) {
+      setSelectedRecipe(null);
       setNotification({
         isOpen: true,
         title: 'Error',
